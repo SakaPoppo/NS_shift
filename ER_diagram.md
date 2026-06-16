@@ -8,7 +8,7 @@ Django標準のユーザー認証機能を想定したテーブルです。
 * id : bigint / ユーザーID
 * username : string / ログイン用ユーザー名
 * email : string / メールアドレス
-* password_hash : string / ハッシュ化されたパスワード
+* password: string / ハッシュ化されたパスワード
 * is_active : boolean / ユーザーが有効状態かどうか
 * date_joined : datetime / ユーザー登録日時
 
@@ -16,7 +16,6 @@ Django標準のユーザー認証機能を想定したテーブルです。
 
 * username はユニーク制約を設定します。
 * パスワードは平文では保存せず、Django標準の認証機能によりハッシュ化された値を保存します。
-* ER図上では、平文パスワードではないことを明確にするため `password_hash` と表記します。
 
 ---
 
