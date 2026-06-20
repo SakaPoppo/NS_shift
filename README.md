@@ -334,8 +334,6 @@
 - DB：PostgreSQL
 - デプロイ先：render
 - 使用予定ライブラリ：
-    - django-environ
-      - 環境変数を管理するため
     - psycopg 
       - DjangoからPostgreSQLに接続するため
     - gunicorn
