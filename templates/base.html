@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Ns Shift{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <script>
+      // アプリ全体で使う Tailwind の色、影、フォントをここで拡張する。
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                50: "#f4f8fc",
+                100: "#d9ebf9",
+                300: "#71add7",
+                500: "#005b8e",
+                600: "#004b75",
+              },
+              page: "#f7f9fc",
+              line: "#d8e1ea",
+              ink: "#1f2937",
+              muted: "#5f6b7a",
+            },
+            boxShadow: {
+              panel: "0 18px 40px rgba(15, 23, 42, 0.08)",
+            },
+            fontFamily: {
+              sans: ["Zen Kaku Gothic New", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* margin / padding 可視化用のオーバーレイ。通常の操作を邪魔しないよう pointer-events は無効。 */
+      #box-model-overlays {
+        pointer-events: none;
+        position: absolute;
+        inset: 0;
+        z-index: 9998;
+      }
+
+      .box-model-overlay {
+        position: absolute;
+        border-radius: 6px;
+      }
+
+      .box-model-overlay-margin {
+        border: 1px dashed rgba(220, 38, 38, 0.95);
+      }
+
+      .box-model-overlay-padding {
+        border: 1px dashed rgba(37, 99, 235, 0.95);
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-page font-sans text-ink">
+    <div class="flex min-h-screen flex-col">
+      <!-- 共通ヘッダー。固定配置なので main 側で上余白を調整する。 -->
+      <header class="fixed inset-x-0 top-0 z-50 h-16 border-b border-line bg-white/95 backdrop-blur-sm">
+        <div class="mx-auto flex h-full w-full max-w-[1280px] items-center justify-between px-5 sm:px-8 lg:px-10">
+          <a class="text-[1.4rem] font-extrabold tracking-tight text-brand-500 sm:text-[1.55rem]" href="{% url 'core:top_page' %}">
+            Ns Shift
+          </a>
+          <div class="flex items-center gap-3 sm:gap-5">
+            <a class="text-sm font-medium text-slate-700 transition hover:text-brand-500" href="#">
+              ログイン
+            </a>
+            <a class="inline-flex min-h-9 items-center justify-center rounded-full bg-brand-500 px-5 text-sm font-medium text-white transition hover:bg-brand-600" href="#">
+              新規登録
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <!-- 各ページ固有の内容はこの block に差し込む。 -->
+      <main class="flex-1 pt-10">
+        {% block content %}{% endblock %}
+      </main>
+
+      <!-- 共通フッター。静的リンク類の置き場。 -->
+      <footer class="border-t border-line bg-page">
+        <div class="mx-auto flex w-full max-w-[1280px] flex-col gap-5 px-5 py-8 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10">
+          <div>
+            <p class="text-[1.05rem] font-bold text-slate-900">Ns Shift</p>
+          </div>
+          <nav class="flex flex-wrap items-center gap-6 text-sm text-slate-600">
+            <a class="transition hover:text-brand-500" href="#">ヘルプ</a>
+            <a class="transition hover:text-brand-500" href="#">利用規約</a>
+            <a class="transition hover:text-brand-500" href="#">プライバシーポリシー</a>
+          </nav>
+        </div>
+      </footer>
+    </div>
+    <!-- margin / padding の可視化を切り替える固定トグル。 -->
+    <button
+      id="box-model-toggle"
+      type="button"
+      class="fixed bottom-4 right-4 z-[9999] inline-flex items-center gap-3 rounded-full border border-slate-300 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg transition hover:border-brand-300 hover:text-brand-500"
+    >
+      <span class="inline-flex items-center gap-1">
+        <span class="h-2.5 w-2.5 rounded-full bg-red-600"></span>
+        margin
+      </span>
+      <span class="inline-flex items-center gap-1">
+        <span class="h-2.5 w-2.5 rounded-full bg-blue-600"></span>
+        padding
+      </span>
+      <span id="box-model-toggle-label">OFF</span>
+    </button>
+    <div id="box-model-overlays" hidden></div>
+    <script>
+      (() => {
+        const storageKey = "ns-shift-box-model-debug";
+        const toggleButton = document.getElementById("box-model-toggle");
+        const toggleLabel = document.getElementById("box-model-toggle-label");
+        const overlayRoot = document.getElementById("box-model-overlays");
+        let rafId = null;
+
+        const ignoredIds = new Set(["box-model-toggle", "box-model-overlays"]);
+
+        function createOverlay(className, left, top, width, height) {
+          const element = document.createElement("div");
+          element.className = `box-model-overlay ${className}`;
+          element.style.left = `${left}px`;
+          element.style.top = `${top}px`;
+          element.style.width = `${width}px`;
+          element.style.height = `${height}px`;
+          return element;
+        }
+
+        function drawOverlays() {
+          // 画面上の全要素を走査して、margin と padding の境界を重ね描きする。
+          overlayRoot.innerHTML = "";
+          overlayRoot.style.width = `${Math.max(document.documentElement.scrollWidth, window.innerWidth)}px`;
+          overlayRoot.style.height = `${Math.max(document.documentElement.scrollHeight, window.innerHeight)}px`;
+
+          const allElements = document.body.querySelectorAll("*");
+          allElements.forEach((element) => {
+            if (ignoredIds.has(element.id)) {
+              return;
+            }
+            if (element.tagName === "SCRIPT" || element.tagName === "STYLE") {
+              return;
+            }
+
+            const rect = element.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) {
+              return;
+            }
+
+            const styles = window.getComputedStyle(element);
+            if (styles.display === "none" || styles.visibility === "hidden") {
+              return;
+            }
+
+            const marginTop = Number.parseFloat(styles.marginTop) || 0;
+            const marginRight = Number.parseFloat(styles.marginRight) || 0;
+            const marginBottom = Number.parseFloat(styles.marginBottom) || 0;
+            const marginLeft = Number.parseFloat(styles.marginLeft) || 0;
+            const borderTop = Number.parseFloat(styles.borderTopWidth) || 0;
+            const borderRight = Number.parseFloat(styles.borderRightWidth) || 0;
+            const borderBottom = Number.parseFloat(styles.borderBottomWidth) || 0;
+            const borderLeft = Number.parseFloat(styles.borderLeftWidth) || 0;
+
+            const scrollX = window.scrollX;
+            const scrollY = window.scrollY;
+
+            const marginOverlay = createOverlay(
+              "box-model-overlay-margin",
+              rect.left + scrollX - marginLeft,
+              rect.top + scrollY - marginTop,
+              rect.width + marginLeft + marginRight,
+              rect.height + marginTop + marginBottom,
+            );
+
+            const paddingOverlay = createOverlay(
+              "box-model-overlay-padding",
+              rect.left + scrollX + borderLeft,
+              rect.top + scrollY + borderTop,
+              Math.max(rect.width - borderLeft - borderRight, 0),
+              Math.max(rect.height - borderTop - borderBottom, 0),
+            );
+
+            overlayRoot.appendChild(marginOverlay);
+            overlayRoot.appendChild(paddingOverlay);
+          });
+        }
+
+        function scheduleDraw() {
+          // スクロールやリサイズでは requestAnimationFrame 経由で再描画する。
+          if (document.body.dataset.boxModelDebug !== "on") {
+            return;
+          }
+          if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+          }
+          rafId = requestAnimationFrame(() => {
+            drawOverlays();
+            rafId = null;
+          });
+        }
+
+        function setState(enabled) {
+          // ON/OFF 状態は localStorage に保存して次回表示にも引き継ぐ。
+          document.body.dataset.boxModelDebug = enabled ? "on" : "off";
+          toggleLabel.textContent = enabled ? "ON" : "OFF";
+          overlayRoot.hidden = !enabled;
+          localStorage.setItem(storageKey, enabled ? "on" : "off");
+
+          if (enabled) {
+            scheduleDraw();
+          } else {
+            overlayRoot.innerHTML = "";
+          }
+        }
+
+        toggleButton.addEventListener("click", () => {
+          setState(document.body.dataset.boxModelDebug !== "on");
+        });
+
+        window.addEventListener("resize", scheduleDraw);
+        window.addEventListener("scroll", scheduleDraw, { passive: true });
+
+        const initialState = localStorage.getItem(storageKey) === "on";
+        setState(initialState);
+      })();
+    </script>
+  </body>
+</html>
