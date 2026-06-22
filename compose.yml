@@ -1,0 +1,73 @@
+services:
+  db:
+    # ローカル開発用のPostgreSQL
+    image: postgres:16
+    restart: always
+    environment:
+      # DBコンテナ内のタイムゾーン
+      TZ: Asia/Tokyo
+      # PostgreSQLの初期設定
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # コンテナを作り直してもDBデータを保持する
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # ローカルから5432でDBへ接続できるようにする
+      - "5432:5432"
+    healthcheck:
+      # DBが接続可能になるまで待機する
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # ローカル開発用のDjango開発サーバーを起動
+    command: python manage.py runserver 0.0.0.0:8000
+    tty: true
+    stdin_open: true
+    volumes:
+      # ローカルのコードをコンテナへマウントして変更をすぐ反映
+      - .:/app
+    environment:
+      # webコンテナ内のタイムゾーン
+      TZ: Asia/Tokyo
+    env_file:
+      # ローカル開発用の環境変数を読み込む
+      - .env
+    ports:
+      # ローカルの8000番ポートでアクセスできるようにする
+      - "8000:8000"
+    depends_on:
+      db:
+        # DBのヘルスチェック成功後にwebを起動する
+        condition: service_healthy
+
+  tailwind:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # Tailwind CSS の開発サーバーを起動
+    command: python manage.py tailwind start
+    tty: true
+    stdin_open: true
+    volumes:
+      # ローカルのコードをコンテナへマウントして変更をすぐ反映
+      - .:/app
+    environment:
+      # tailwindコンテナ内のタイムゾーン
+      TZ: Asia/Tokyo
+    env_file:
+      # ローカル開発用の環境変数を読み込む
+      - .env
+    depends_on:
+      - web
+
+volumes:
+  # PostgreSQLデータ保持用の名前付きボリューム
+  postgres_data:

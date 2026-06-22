@@ -438,4 +438,4 @@ https://www.figma.com/design/v6oN6e6lEnEHg5jU0Uc1v5/%E5%8D%92%E6%A5%AD%E5%88%B6%
 
 - Render の `onrender.com` ドメインは `RENDER_EXTERNAL_HOSTNAME` / `RENDER_EXTERNAL_URL` から自動で許可対象に追加されるようにしています
 - Dockerイメージのビルド時に `collectstatic` を実行します
-- ローカルの `docker-compose.yml` は開発用で、Render 本番起動とは別設定です
+- ローカルの `compose.yml` は開発用で、Render 本番起動とは別設定です

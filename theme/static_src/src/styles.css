@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+@theme {
+  --color-brand-50: #f4f8fc;
+  --color-brand-100: #d9ebf9;
+  --color-brand-300: #71add7;
+  --color-brand-500: #005b8e;
+  --color-brand-600: #004b75;
+  --color-page: #f7f9fc;
+  --color-line: #d8e1ea;
+  --color-ink: #1f2937;
+  --color-muted: #5f6b7a;
+  --shadow-panel: 0 18px 40px rgba(15, 23, 42, 0.08);
+  --font-sans: "Zen Kaku Gothic New", sans-serif;
+}
+
+/**
+  * A catch-all path to Django template files, JavaScript, and Python files
+  * that contain Tailwind CSS classes and will be scanned by Tailwind to generate the final CSS file.
+  *
+  * If your final CSS file is not being updated after code changes, you may want to broaden or narrow
+  * the scope of this path.
+  */
+@source "../../../**/*.{html,py,js}";

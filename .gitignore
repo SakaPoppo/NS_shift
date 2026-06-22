@@ -21,3 +21,9 @@ staticfiles/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Node.js (django-tailwind用)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

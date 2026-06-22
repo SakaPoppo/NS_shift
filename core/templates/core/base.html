@@ -1,43 +1,20 @@
+{% load static tailwind_tags %}
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="light">
   <head>
+    <!-- 基本的なメタ情報 -->
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 各ページごとに差し替えられるタイトル -->
     <title>{% block title %}Ns Shift{% endblock %}</title>
+    <!-- 共通フォントの読み込み -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
-    <script>
-      // アプリ全体で使う Tailwind の色、影、フォントをここで拡張する。
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              brand: {
-                50: "#f4f8fc",
-                100: "#d9ebf9",
-                300: "#71add7",
-                500: "#005b8e",
-                600: "#004b75",
-              },
-              page: "#f7f9fc",
-              line: "#d8e1ea",
-              ink: "#1f2937",
-              muted: "#5f6b7a",
-            },
-            boxShadow: {
-              panel: "0 18px 40px rgba(15, 23, 42, 0.08)",
-            },
-            fontFamily: {
-              sans: ["Zen Kaku Gothic New", "sans-serif"],
-            },
-          },
-        },
-      };
-    </script>
+    <!-- django-tailwind が生成した CSS を読み込む -->
+    {% tailwind_css %}
     <style>
-      /* margin / padding 可視化用のオーバーレイ。通常の操作を邪魔しないよう pointer-events は無効。 */
+      /* margin / padding 可視化オーバーレイの土台 */
       #box-model-overlays {
         pointer-events: none;
         position: absolute;
@@ -45,46 +22,52 @@
         z-index: 9998;
       }
 
+      /* 可視化用の矩形の共通スタイル */
       .box-model-overlay {
         position: absolute;
         border-radius: 6px;
       }
 
+      /* margin の境界線 */
       .box-model-overlay-margin {
         border: 1px dashed rgba(220, 38, 38, 0.95);
       }
 
+      /* padding の境界線 */
       .box-model-overlay-padding {
         border: 1px dashed rgba(37, 99, 235, 0.95);
       }
     </style>
   </head>
-  <body class="min-h-screen bg-page font-sans text-ink">
+  <body class="min-h-screen bg-page font-sans font-medium text-ink">
+    <!-- ページ全体の縦レイアウト -->
     <div class="flex min-h-screen flex-col">
-      <!-- 共通ヘッダー。固定配置なので main 側で上余白を調整する。 -->
-      <header class="fixed inset-x-0 top-0 z-50 h-16 border-b border-line bg-white/95 backdrop-blur-sm">
-        <div class="mx-auto flex h-full w-full max-w-[1280px] items-center justify-between px-5 sm:px-8 lg:px-10">
-          <a class="text-[1.4rem] font-extrabold tracking-tight text-brand-500 sm:text-[1.55rem]" href="{% url 'core:top_page' %}">
-            Ns Shift
-          </a>
-          <div class="flex items-center gap-3 sm:gap-5">
-            <a class="text-sm font-medium text-slate-700 transition hover:text-brand-500" href="#">
+      <!-- 全ページ共通の固定ヘッダー -->
+      <header class="fixed inset-x-0 top-0 z-50 h-16 border-b border-base-200 bg-base-100/95 backdrop-blur-sm">
+        <div class="navbar mx-auto h-full w-full max-w-[1280px] px-5 sm:px-8 lg:px-10">
+          <div class="flex-1">
+            <a class="text-[1.4rem] font-extrabold tracking-tight text-brand-500 sm:text-[1.55rem]" href="{% url 'core:top_page' %}">
+              Ns Shift
+            </a>
+          </div>
+          <div class="flex-none gap-3 sm:gap-5">
+            <a class="btn btn-ghost btn-sm text-slate-700" href="#">
               ログイン
             </a>
-            <a class="inline-flex min-h-9 items-center justify-center rounded-full bg-brand-500 px-5 text-sm font-medium text-white transition hover:bg-brand-600" href="#">
+            <a class="btn btn-sm border-brand-500 bg-brand-500 text-white hover:border-brand-600 hover:bg-brand-600" href="#">
               新規登録
             </a>
           </div>
         </div>
       </header>
 
-      <!-- 各ページ固有の内容はこの block に差し込む。 -->
-      <main class="flex-1 pt-10">
+      <!-- 各ページ固有の中身を差し込む領域 -->
+      <main class="flex-1 pt-8">
         {% block content %}{% endblock %}
       </main>
 
-      <!-- 共通フッター。静的リンク類の置き場。 -->
-      <footer class="border-t border-line bg-page">
+      <!-- 全ページ共通のフッター -->
+      <footer class="border-t border-base-200 bg-page">
         <div class="mx-auto flex w-full max-w-[1280px] flex-col gap-5 px-5 py-8 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10">
           <div>
             <p class="text-[1.05rem] font-bold text-slate-900">Ns Shift</p>
@@ -97,7 +80,7 @@
         </div>
       </footer>
     </div>
-    <!-- margin / padding の可視化を切り替える固定トグル。 -->
+    <!-- margin / padding 可視化を切り替えるトグルボタン -->
     <button
       id="box-model-toggle"
       type="button"
@@ -113,17 +96,21 @@
       </span>
       <span id="box-model-toggle-label">OFF</span>
     </button>
+    <!-- 可視化用の矩形を描画するコンテナ -->
     <div id="box-model-overlays" hidden></div>
     <script>
       (() => {
+        // localStorage に保存する状態キー
         const storageKey = "ns-shift-box-model-debug";
         const toggleButton = document.getElementById("box-model-toggle");
         const toggleLabel = document.getElementById("box-model-toggle-label");
         const overlayRoot = document.getElementById("box-model-overlays");
         let rafId = null;
 
+        // オーバーレイ描画の対象外にする要素
         const ignoredIds = new Set(["box-model-toggle", "box-model-overlays"]);
 
+        // 指定位置に矩形要素を作成する
         function createOverlay(className, left, top, width, height) {
           const element = document.createElement("div");
           element.className = `box-model-overlay ${className}`;
@@ -134,8 +121,8 @@
           return element;
         }
 
+        // 画面上の要素に margin / padding の枠を重ねる
         function drawOverlays() {
-          // 画面上の全要素を走査して、margin と padding の境界を重ね描きする。
           overlayRoot.innerHTML = "";
           overlayRoot.style.width = `${Math.max(document.documentElement.scrollWidth, window.innerWidth)}px`;
           overlayRoot.style.height = `${Math.max(document.documentElement.scrollHeight, window.innerHeight)}px`;
@@ -192,8 +179,8 @@
           });
         }
 
+        // スクロールやリサイズ時の再描画を requestAnimationFrame にまとめる
         function scheduleDraw() {
-          // スクロールやリサイズでは requestAnimationFrame 経由で再描画する。
           if (document.body.dataset.boxModelDebug !== "on") {
             return;
           }
@@ -206,8 +193,8 @@
           });
         }
 
+        // 表示状態を切り替えて保存も行う
         function setState(enabled) {
-          // ON/OFF 状態は localStorage に保存して次回表示にも引き継ぐ。
           document.body.dataset.boxModelDebug = enabled ? "on" : "off";
           toggleLabel.textContent = enabled ? "ON" : "OFF";
           overlayRoot.hidden = !enabled;
@@ -220,15 +207,16 @@
           }
         }
 
+        // 前回保存した状態を初期値として反映する
+        const initialState = localStorage.getItem(storageKey) === "on";
+        setState(initialState);
+
+        // ボタン操作と画面変化時のイベント登録
         toggleButton.addEventListener("click", () => {
           setState(document.body.dataset.boxModelDebug !== "on");
         });
-
         window.addEventListener("resize", scheduleDraw);
         window.addEventListener("scroll", scheduleDraw, { passive: true });
-
-        const initialState = localStorage.getItem(storageKey) === "on";
-        setState(initialState);
       })();
     </script>
   </body>

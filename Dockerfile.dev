@@ -1,0 +1,42 @@
+FROM python:3.12-slim-bullseye
+
+# 開発コンテナ用の環境変数
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    LANG=C.UTF-8 \
+    TZ=Asia/Tokyo \
+    HOME=/home/appuser \
+    PATH=/home/appuser/.local/bin:$PATH
+
+# PythonビルドとDB接続に必要なパッケージ、Node.js 20系を導入
+RUN apt-get update -qq && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    default-libmysqlclient-dev \
+    pkg-config \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# 開発用の実行ユーザーを作成
+RUN groupadd -g 1000 appuser && \
+    useradd -r -u 1000 -g appuser -d /home/appuser appuser && \
+    mkdir -p /home/appuser && chown -R appuser:appuser /home/appuser
+
+# アプリ配置ディレクトリを準備
+RUN mkdir /app && chown appuser:appuser /app
+WORKDIR /app
+
+# Python依存を先にインストールしてビルドキャッシュを効かせる
+COPY requirements.txt /app/
+RUN python -m pip install --upgrade pip && \
+    python -m pip install -r requirements.txt && \
+    python -m pip install --no-cache-dir cookiecutter==2.6.0
+
+# アプリコードをコピーして実行ユーザーへ権限付与
+COPY . /app/
+RUN chown -R appuser:appuser /app
+
+# 以降は非rootで動かす
+USER appuser
