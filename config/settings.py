@@ -21,6 +21,13 @@ def env_list(name, default):
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def env_int(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return int(value)
+
+
 def database_config_from_url(url):
     parsed = urlparse(url)
     engine_map = {
@@ -42,6 +49,15 @@ SECRET_KEY = os.getenv(
 )
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["localhost", "127.0.0.1"])
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", [])
+
+render_external_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+if render_external_hostname and render_external_hostname not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_external_hostname)
+
+render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+if render_external_url and render_external_url not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(render_external_url)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -110,5 +126,11 @@ STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_HSTS_SECONDS = 0 if DEBUG else env_int("DJANGO_SECURE_HSTS_SECONDS", 3600)
+SECURE_SSL_REDIRECT = not DEBUG and env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
