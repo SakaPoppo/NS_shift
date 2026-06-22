@@ -1,0 +1,26 @@
+services:
+  - type: web
+    # Render上で表示されるWebサービス名
+    name: ns-shift-web
+    # このリポジトリのDockerfileを使ってビルド・起動する
+    runtime: docker
+    # Renderがアプリの正常性確認に使うパス
+    healthCheckPath: /healthz/
+    # デプロイ切り替え前にマイグレーションを実行する
+    preDeployCommand: python manage.py migrate --noinput
+    envVars:
+      # 初回デプロイ時に本番用の秘密鍵を自動生成する
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      # 本番ではDEBUGを無効化する
+      - key: DJANGO_DEBUG
+        value: "false"
+      # RenderのPostgreSQL接続URLを自動で注入する
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ns-shift-db
+          property: connectionString
+
+databases:
+  # Render管理の本番用PostgreSQL
+  - name: ns-shift-db

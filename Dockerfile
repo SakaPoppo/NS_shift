@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
@@ -14,6 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+RUN python manage.py collectstatic --no-input \
+    && chmod +x /app/start.sh
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+EXPOSE 10000
+
+CMD ["./start.sh"]

@@ -1,0 +1,21 @@
+# macOSの管理ファイル
+.DS_Store
+
+# Gitの管理情報はイメージビルドに不要
+.git
+.gitignore
+
+# ローカルのPython仮想環境
+.venv
+
+# Pythonのキャッシュ
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ローカルの秘密情報はイメージに含めない
+.env
+
+# staticfilesはDockerビルド時に再生成する
+staticfiles/

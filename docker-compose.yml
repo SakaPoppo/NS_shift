@@ -1,26 +1,37 @@
 services:
   web:
+    # Dockerfileからアプリ用イメージをビルド
     build: .
+    # ローカル開発用のDjango開発サーバーを起動
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
+      # ローカルのコードをコンテナへマウントして変更をすぐ反映
       - .:/app
     ports:
+      # ローカルの8000番ポートでアクセスできるようにする
       - "8000:8000"
-    environment:
-      DJANGO_DEBUG: "true"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
-      DATABASE_URL: "postgres://ns_shift:ns_shift_password@db:5432/ns_shift"
+    env_file:
+      # ローカル開発用の環境変数を読み込む
+      - .env
     depends_on:
+      # DBコンテナ起動後にwebを起動する
       - db
 
   db:
+    # ローカル開発用のPostgreSQL
     image: postgres:16-alpine
+    env_file:
+      # webと同じ環境変数ファイルを使う
+      - .env
     environment:
-      POSTGRES_DB: ns_shift
-      POSTGRES_USER: ns_shift
-      POSTGRES_PASSWORD: ns_shift_password
+      # PostgreSQLコンテナの初期化に使う値
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
+      # コンテナを作り直してもDBデータを保持する
       - db_data:/var/lib/postgresql/data
 
 volumes:
+  # PostgreSQLデータ保持用の名前付きボリューム
   db_data:
