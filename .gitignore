@@ -3,19 +3,29 @@
 
 # ローカル専用の環境変数ファイル
 .env
+note.md
 
-# Pythonの仮想環境
-.venv/
-
-# Pythonのキャッシュ
+# Python
 __pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
 
 # ローカルで一時的に作られるSQLiteファイル
 *.sqlite3
+db.sqlite3-journal
 
 # Djangoのcollectstatic生成物
 staticfiles/
+*.log
+media/
 
 # 各種ツールのキャッシュ
 .pytest_cache/
@@ -27,3 +37,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo

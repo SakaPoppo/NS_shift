@@ -1,14 +1,8 @@
-# Django 5.2系を使用
 Django>=5.2,<5.2.7
-
-# PostgreSQL接続用ドライバ
 psycopg[binary]>=3.1.0
-
-# Tailwind CSS 統合パッケージ
 django-tailwind[reload]>=3.8
-
-# Render本番起動用のWSGIサーバー
-gunicorn==23.0.0
-
-# 本番用の静的ファイル配信
-whitenoise==6.9.0
+dj-database-url>=2.1.0
+whitenoise[brotli]>=6.6.0
+gunicorn>=21.2.0
+uvicorn[standard]>=0.27.0
+psycopg2-binary>=2.9.9
