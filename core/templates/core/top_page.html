@@ -1,0 +1,43 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Ns Shift | top{% endblock %}
+
+{% block content %}
+  <section class="mx-auto w-full max-w-[1280px] px-5 sm:px-8 lg:px-10">
+      <div class="grid w-full items-center gap-10 px-6 md:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] md:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(400px,500px)] lg:gap-14 lg:px-10">
+        <div class="max-w-[560px]">
+          <h1 class="text-[2.45rem] font-bold leading-[1.22] tracking-tight text-slate-900 sm:text-[3.25rem] lg:text-[3.6rem]">
+            看護師のための
+            <span class="mt-1 block text-brand-500">迷わないシフト管理</span>
+          </h1>
+
+          <p class="mt-8 w-full text-base font-semibold leading-9 text-slate-600 sm:text-lg sm:leading-10">
+            希望休と必要な人員数を入力するだけで<br>
+            最適なシフトを自動生成
+          </p>
+
+          <div class="mt-12 flex flex-col gap-4 sm:flex-row">
+            <a class="btn btn-lg border-brand-500 bg-brand-500 text-white shadow-panel hover:border-brand-600 hover:bg-brand-600" href="{% url 'accounts:signup' %}">
+              無料で今すぐ始める
+              <span class="ml-1 text-2xl leading-none">→</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="mx-auto w-full max-w-[500px]">
+          <div class="mockup-browser border border-base-300 bg-white shadow-2xl">
+            <div class="bg-page p-4 sm:p-6">
+              <div class="overflow-hidden rounded-2xl border border-base-200 bg-white">
+                <img
+                  class="h-auto w-auto object-cover"
+                  src="{% static 'core/images/top_image.png' %}"
+                  alt="Ns Shift のシフト画面イメージ"
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+  </section>
+{% endblock %}

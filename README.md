@@ -415,27 +415,4 @@ https://www.figma.com/design/v6oN6e6lEnEHg5jU0Uc1v5/%E5%8D%92%E6%A5%AD%E5%88%B6%
 
 ---
 
-## 11. Renderデプロイ
 
-このリポジトリには、RenderのDockerデプロイ用に `render.yaml` を用意しています。
-
-### 11-1. デプロイ手順
-
-1. このリポジトリをGitHubへpushする
-2. Renderで `Blueprint` を作成し、このリポジトリを接続する
-3. `render.yaml` を読み込ませて `Apply` する
-4. 初回デプロイ完了後、必要に応じて `DJANGO_ALLOWED_HOSTS` と `DJANGO_CSRF_TRUSTED_ORIGINS` を追加する
-
-### 11-2. Render側で使う設定
-
-- Webサービスは `runtime: docker`
-- DBは Render PostgreSQL を利用
-- DB接続文字列は `DATABASE_URL` として自動でWebサービスへ注入
-- `DJANGO_SECRET_KEY` は Render 側で自動生成
-- マイグレーションは `preDeployCommand` で `python manage.py migrate --noinput` を実行
-
-### 11-3. 補足
-
-- Render の `onrender.com` ドメインは `RENDER_EXTERNAL_HOSTNAME` / `RENDER_EXTERNAL_URL` から自動で許可対象に追加されるようにしています
-- Dockerイメージのビルド時に `collectstatic` を実行します
-- ローカルの `docker-compose.yml` は開発用で、Render 本番起動とは別設定です
