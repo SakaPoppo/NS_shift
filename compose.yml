@@ -62,6 +62,8 @@ services:
     environment:
       # tailwindコンテナ内のタイムゾーン
       TZ: Asia/Tokyo
+      # Tailwind/PostCSS の監視プロセスがメモリ不足で落ちないようにする
+      NODE_OPTIONS: --max-old-space-size=4096
     env_file:
       # ローカル開発用の環境変数を読み込む
       - .env

@@ -50,14 +50,20 @@
               Ns Shift
             </a>
           </div>
-          <div class="flex-none gap-3 sm:gap-5">
+          <div class="flex flex-none items-center gap-3 sm:gap-5">
             {% if request.user.is_authenticated %}
-              <a class="btn btn-ghost btn-sm text-slate-700" href="{% url 'core:main_page' %}">
-                メインページ
+              <span class="text-sm font-semibold text-slate-700">
+                ようこそ  {{ request.user.get_username }}さん
+              </span>
+              <a class="btn btn-ghost btn-sm text-slate-700" href="#">
+                シフト管理
+              </a>
+              <a class="btn btn-ghost btn-sm text-slate-700" href="#">
+                スタッフ管理
               </a>
               <form method="post" action="{% url 'accounts:logout' %}">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-sm border-brand-500 bg-brand-500 text-white hover:border-brand-600 hover:bg-brand-600">
+                <button type="submit" class="btn btn-ghost btn-sm text-slate-700">
                   ログアウト
                 </button>
               </form>
