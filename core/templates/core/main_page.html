@@ -3,10 +3,163 @@
 {% block title %}メインページ | Ns Shift{% endblock %}
 
 {% block content %}
-  <section class="mx-auto flex w-full max-w-[1280px] items-center justify-center px-5 sm:px-8 lg:px-10">
-    <div class="card border border-base-200 bg-white shadow-sm">
-      <div class="card-body">
-        <p class="text-2xl font-bold text-slate-900">メインページ</p>
+  <section class="mx-auto w-full max-w-[900px] px-5 py-10 sm:px-8 lg:px-10">
+    <div class="flex flex-col items-center">
+      <!-- 見出し -->
+      <div class="mb-9 text-center">
+        <h1 class="text-[1.6rem] font-black leading-tight tracking-tight text-slate-900">
+          管理メインページ
+        </h1>
+
+        <p class="mt-2 text-sm font-medium text-slate-600">
+          管理する項目を選択してください
+        </p>
+      </div>
+
+      <!-- カード一覧 -->
+      <div class="grid w-full grid-cols-1 gap-6 md:grid-cols-2">
+        <!-- シフト管理 -->
+        <a
+          href="#"
+          class="group overflow-hidden rounded-lg bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-md"
+        >
+          <!-- 画像風エリア -->
+          <div class="relative h-[170px] overflow-hidden bg-gradient-to-br from-sky-100 via-sky-50 to-white">
+            <div class="absolute left-8 top-5 w-[330px] -rotate-6 rounded-xl border border-sky-100 bg-white/85 p-4 shadow-sm">
+              <div class="mb-3 flex items-center justify-between">
+                <div class="text-xs font-bold text-slate-500">October 2024 - Ward A shift schedule</div>
+                <div class="h-5 w-16 rounded-md bg-slate-100"></div>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center gap-2">
+                  <div class="h-6 w-6 rounded-full bg-amber-100"></div>
+                  <div class="h-2.5 w-16 rounded-full bg-slate-200"></div>
+                  <div class="ml-auto h-7 w-7 rounded bg-yellow-100"></div>
+                  <div class="h-7 w-7 rounded bg-indigo-100"></div>
+                  <div class="h-7 w-7 rounded bg-slate-100"></div>
+                  <div class="h-7 w-7 rounded bg-yellow-100"></div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <div class="h-6 w-6 rounded-full bg-rose-100"></div>
+                  <div class="h-2.5 w-20 rounded-full bg-slate-200"></div>
+                  <div class="ml-auto h-7 w-7 rounded bg-yellow-100"></div>
+                  <div class="h-7 w-7 rounded bg-indigo-100"></div>
+                  <div class="h-7 w-7 rounded bg-slate-100"></div>
+                  <div class="h-7 w-7 rounded bg-indigo-100"></div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <div class="h-6 w-6 rounded-full bg-emerald-100"></div>
+                  <div class="h-2.5 w-14 rounded-full bg-slate-200"></div>
+                  <div class="ml-auto h-7 w-7 rounded bg-yellow-100"></div>
+                  <div class="h-7 w-7 rounded bg-indigo-100"></div>
+                  <div class="h-7 w-7 rounded bg-yellow-100"></div>
+                  <div class="h-7 w-7 rounded bg-slate-100"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- テキストエリア -->
+          <div class="px-8 py-8 text-center">
+            <h2 class="text-[1.6rem] font-black text-slate-900">
+              シフト管理
+            </h2>
+
+            <p class="mx-auto mt-4 max-w-[280px] text-sm leading-6 text-slate-700">
+              勤務表の作成・編集・確認を直感的なインターフェースで行います
+            </p>
+
+            <div class="mt-6 inline-flex items-center gap-2 text-sm font-bold text-brand-500">
+              <span>管理画面へ移動</span>
+              <span class="transition group-hover:translate-x-1">→</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- スタッフ管理 -->
+        <a
+          href="#"
+          class="group overflow-hidden rounded-lg bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-md"
+        >
+          <!-- 画像風エリア -->
+          <div class="relative h-[170px] overflow-hidden bg-gradient-to-br from-cyan-100 via-sky-50 to-white">
+            <div class="absolute left-14 top-0 flex h-[180px] w-[280px] overflow-hidden rounded-xl border border-sky-100 bg-white/80 shadow-sm">
+              <!-- サイドバー -->
+              <div class="w-14 bg-sky-400 p-3">
+                <div class="mb-4 h-6 w-6 rounded-full bg-white/70"></div>
+                <div class="space-y-3">
+                  <div class="h-2 w-8 rounded-full bg-white/70"></div>
+                  <div class="h-2 w-8 rounded-full bg-white/50"></div>
+                  <div class="h-2 w-8 rounded-full bg-white/50"></div>
+                </div>
+              </div>
+
+              <!-- メイン -->
+              <div class="flex-1 p-4">
+                <div class="mb-3 text-sm font-black text-slate-800">Staff</div>
+
+                <div class="grid grid-cols-[1fr_90px] gap-3">
+                  <div class="space-y-2">
+                    <div class="flex items-center gap-2 rounded-lg bg-white p-2 shadow-sm">
+                      <div class="h-8 w-8 rounded-full bg-amber-100"></div>
+                      <div>
+                        <div class="h-2 w-20 rounded-full bg-slate-300"></div>
+                        <div class="mt-2 h-2 w-14 rounded-full bg-slate-100"></div>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 rounded-lg bg-white p-2 shadow-sm">
+                      <div class="h-8 w-8 rounded-full bg-rose-100"></div>
+                      <div>
+                        <div class="h-2 w-24 rounded-full bg-slate-300"></div>
+                        <div class="mt-2 h-2 w-16 rounded-full bg-slate-100"></div>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 rounded-lg bg-white p-2 shadow-sm">
+                      <div class="h-8 w-8 rounded-full bg-emerald-100"></div>
+                      <div>
+                        <div class="h-2 w-20 rounded-full bg-slate-300"></div>
+                        <div class="mt-2 h-2 w-14 rounded-full bg-slate-100"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="h-24 rounded-lg bg-white p-3 shadow-sm">
+                    <div class="mb-3 h-2 w-16 rounded-full bg-slate-300"></div>
+                    <div class="flex h-14 items-end gap-1">
+                      <div class="h-4 w-2 rounded-full bg-sky-200"></div>
+                      <div class="h-8 w-2 rounded-full bg-sky-300"></div>
+                      <div class="h-12 w-2 rounded-full bg-sky-400"></div>
+                      <div class="h-6 w-2 rounded-full bg-sky-300"></div>
+                      <div class="h-9 w-2 rounded-full bg-sky-300"></div>
+                      <div class="h-7 w-2 rounded-full bg-sky-200"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- テキストエリア -->
+          <div class="px-8 py-8 text-center">
+            <h2 class="text-[1.6rem] font-black text-slate-900">
+              スタッフ管理
+            </h2>
+
+            <p class="mx-auto mt-4 max-w-[290px] text-sm leading-6 text-slate-700">
+              スタッフ情報の登録・スキル管理・配置の最適化をサポートします
+            </p>
+
+            <div class="mt-6 inline-flex items-center gap-2 text-sm font-bold text-brand-500">
+              <span>管理画面へ移動</span>
+              <span class="transition group-hover:translate-x-1">→</span>
+            </div>
+          </div>
+        </a>
       </div>
     </div>
   </section>
