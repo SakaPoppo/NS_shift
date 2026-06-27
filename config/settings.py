@@ -49,6 +49,7 @@ if render_external_url and render_external_url not in CSRF_TRUSTED_ORIGINS:
 
 INSTALLED_APPS = [
     "accounts",
+    "staff",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
