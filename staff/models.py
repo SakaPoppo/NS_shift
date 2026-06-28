@@ -40,3 +40,39 @@ class StaffMember(models.Model): #テーブル作成宣言
 
     def __str__(self): #管理画面とかで名前をobject(1)みたいなのじゃなくて、ちゃんと名前を表示する
         return self.name
+    
+class StaffRegularDayOff(models.Model):
+    class DayOfWeekChoices(models.IntegerChoices): #StaffRegularDayOff.DayOfWeekChoices.XXXで呼べる
+        MONDAY = 0, "月"
+        TUESDAY = 1, "火"
+        WEDNESDAY = 2, "水"
+        THURSDAY = 3, "木"
+        FRIDAY = 4, "金"
+        SATURDAY = 5, "土"
+        SUNDAY = 6, "日"
+
+    staff_member = models.ForeignKey(
+        StaffMember,
+        on_delete=models.CASCADE,
+        related_name="regular_days_off",
+        verbose_name="スタッフ",  # 管理画面での表示名
+    )
+    day_of_week = models.IntegerField(
+        "曜日",
+        choices=DayOfWeekChoices.choices,
+    )
+    created_at = models.DateTimeField("作成日時", auto_now_add=True)
+    updated_at = models.DateTimeField("更新日時", auto_now=True)
+
+    class Meta:
+        db_table = "staff_regular_days_off"
+        ordering = ["staff_member_id", "day_of_week"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["staff_member", "day_of_week"],
+                name="unique_staff_regular_day_off",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.staff_member.name} - {self.get_day_of_week_display()}"
