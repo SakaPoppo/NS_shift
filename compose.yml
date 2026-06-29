@@ -27,6 +27,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    restart: unless-stopped
     # ローカル開発用のDjango開発サーバーを起動
     command: python manage.py runserver 0.0.0.0:8000
     tty: true
@@ -52,6 +53,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    restart: unless-stopped
     # Tailwind CSS の開発サーバーを起動
     command: python manage.py tailwind start
     tty: true

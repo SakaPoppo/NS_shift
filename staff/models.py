@@ -7,6 +7,10 @@ class StaffMember(models.Model): #テーブル作成宣言
         NURSE = "nurse", "看護師"
         CARE_WORKER = "care_worker", "介護士"
 
+    class GenderChoices(models.TextChoices):
+        MALE = "male", "男性"
+        FEMALE = "female", "女性"
+
     class RoleChoices(models.TextChoices):
         LEADER = "leader", "リーダー"
         MEMBER = "member", "メンバー"
@@ -17,6 +21,12 @@ class StaffMember(models.Model): #テーブル作成宣言
         related_name="staff_members",  #user.staff_members.all()でユーザー情報からスタッフ情報を取得
     )
     name = models.CharField("氏名", max_length=100)
+    gender = models.CharField(
+        "性別",
+        max_length=10,
+        choices=GenderChoices.choices,
+        blank=True,
+    )
     job = models.CharField(
         "職種",
         max_length=20,
