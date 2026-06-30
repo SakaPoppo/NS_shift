@@ -18,13 +18,18 @@
           </p>
         </div>
 
-        <a
-          href="#"
-          class="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-sky-700 px-8 text-sm font-bold text-white shadow-sm transition hover:bg-sky-800"
-        >
-          <span class="text-2xl leading-none">＋</span>
-          新規スタッフ登録
-        </a>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <p class="inline-flex items-center justify-center rounded-full bg-sky-50 px-4 py-2 text-sm font-bold text-sky-700">
+            登録スタッフ数：{{ staff_members|length }}人
+          </p>
+          <a
+            href="{% url 'staff:create' %}"
+            class="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-sky-700 px-8 text-sm font-bold text-white shadow-sm transition hover:bg-sky-800"
+          >
+            <span class="text-2xl leading-none">＋</span>
+            新規スタッフ登録
+          </a>
+        </div>
       </div>
 
       <!-- Staff Cards -->
@@ -114,7 +119,7 @@
                   <dd class="flex flex-wrap justify-end gap-1 text-sm font-bold text-slate-900">
                     {% for day_off in staff_member.regular_days_off.all %}
                       <span>
-                        {{ day_off.get_day_of_week_display }}{% if not forloop.last %}・{% endif %}
+                        {{ day_off.get_day_of_week_display }}{% if not forloop.last %}{% endif %}
                       </span>
                     {% empty %}
                       <span class="font-medium text-slate-400">なし</span>
@@ -128,7 +133,7 @@
 
         <!-- Add Staff Card -->
         <a
-          href="#"
+          href="{% url 'staff:create' %}"
           class="flex min-h-[210px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/70 p-8 text-center transition hover:border-sky-700 hover:bg-sky-50"
         >
           <svg class="h-12 w-12 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
