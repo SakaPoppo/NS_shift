@@ -3,7 +3,7 @@ from django import forms
 from .models import StaffMember, StaffRegularDayOff
 
 
-class StaffMemberCreateForm(forms.ModelForm):
+class StaffMemberForm(forms.ModelForm):
     gender = forms.ChoiceField(
         label="性別",
         choices=StaffMember.GenderChoices.choices,
@@ -53,3 +53,10 @@ class StaffMemberCreateForm(forms.ModelForm):
                 "class": "mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20",
             }
         )
+        if self.instance and self.instance.pk:
+            self.fields["regular_days_off"].initial = list(
+                self.instance.regular_days_off.values_list("day_of_week", flat=True)
+            )
+
+
+StaffMemberCreateForm = StaffMemberForm

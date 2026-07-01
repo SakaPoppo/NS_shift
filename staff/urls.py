@@ -1,10 +1,17 @@
 from django.urls import path
 
-from .views import StaffMemberCreateView, StaffMemberListView
+from .views import (
+    StaffMemberCreateView,
+    StaffMemberDeleteView,
+    StaffMemberListView,
+    StaffMemberUpdateView,
+)
 
 app_name = "staff"
 
 urlpatterns = [
     path("", StaffMemberListView.as_view(), name="list"),
     path("create/", StaffMemberCreateView.as_view(), name="create"),
+    path("<int:pk>/edit/", StaffMemberUpdateView.as_view(), name="edit"),
+    path("<int:pk>/delete/", StaffMemberDeleteView.as_view(), name="delete"),
 ]
