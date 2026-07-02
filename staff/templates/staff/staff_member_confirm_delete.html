@@ -1,0 +1,38 @@
+{% extends "core/base.html" %}
+
+{% block title %}スタッフ削除 | Ns Shift{% endblock %}
+
+{% block content %}
+  <section class="mx-auto w-full max-w-[720px] px-5 py-10 sm:px-8 lg:px-10">
+    <div class="mb-8">
+      <p class="text-sm font-semibold text-slate-500">スタッフ管理 &gt; スタッフ削除</p>
+      <h1 class="mt-2 text-[2rem] font-black tracking-tight text-slate-900">スタッフ削除</h1>
+      <p class="mt-2 text-sm font-medium text-slate-600">
+        このスタッフを一覧から削除します。よろしいですか？
+      </p>
+    </div>
+
+    <div class="rounded-2xl border border-red-100 bg-white p-6 shadow-sm sm:p-8">
+      <div class="rounded-2xl bg-red-50 px-5 py-5">
+        <p class="text-sm font-medium text-slate-500">削除対象スタッフ</p>
+        <p class="mt-2 text-xl font-black tracking-tight text-slate-900">{{ object.name }}</p>
+      </div>
+
+      <form method="post" class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {% csrf_token %}
+        <a
+          href="{% url 'staff:list' %}"
+          class="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+        >
+          キャンセル
+        </a>
+        <button
+          type="submit"
+          class="inline-flex h-12 items-center justify-center rounded-xl bg-red-600 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-red-700"
+        >
+          削除する
+        </button>
+      </form>
+    </div>
+  </section>
+{% endblock %}
