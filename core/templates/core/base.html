@@ -55,7 +55,7 @@
               <span class="text-sm font-semibold text-slate-700">
                 ようこそ {{ request.user.get_username }}さん
               </span>
-              <a class="btn btn-ghost btn-sm text-slate-700" href="#">
+              <a class="btn btn-ghost btn-sm text-slate-700" href="{% url 'shifts:list' %}">
                 シフト管理
               </a>
               <a class="btn btn-ghost btn-sm text-slate-700" href="{% url 'staff:list' %}">
