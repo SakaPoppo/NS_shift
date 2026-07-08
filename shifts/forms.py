@@ -1,7 +1,7 @@
 from django import forms
 from django.utils import timezone
 
-from .models import ShiftPlan
+from .models import ShiftPlan, ShiftRule
 
 
 class ShiftPlanCreateForm(forms.ModelForm):
@@ -65,3 +65,74 @@ class ShiftPlanCreateForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+
+class ShiftRuleForm(forms.Form):
+    required_day_staff = forms.IntegerField(
+        label="必要日勤数",
+        min_value=0,
+    )
+    required_night_staff = forms.IntegerField(
+        label="必要夜勤数",
+        min_value=0,
+    )
+    off_days_per_staff = forms.IntegerField(
+        label="月休日数",
+        min_value=0,
+    )
+    required_leader_staff = forms.IntegerField(
+        label="各勤務に必要なリーダークラス",
+        min_value=0,
+    )
+
+    def __init__(self, *args, shift_rule=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shift_rule = shift_rule
+
+        for field in self.fields.values():
+            field.widget.attrs.update(
+                {
+                    "class": "mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20",
+                }
+            )
+
+        if shift_rule and not self.is_bound:
+            self.initial.update(
+                {
+                    "required_day_staff": shift_rule.required_day_staff,
+                    "required_night_staff": shift_rule.required_night_staff,
+                    "off_days_per_staff": shift_rule.off_days_per_staff,
+                    "required_leader_staff": shift_rule.required_leader_staff,
+                }
+            )
+        elif not self.is_bound:
+            self.initial.update(
+                {
+                    "required_day_staff": 0,
+                    "required_night_staff": 0,
+                    "off_days_per_staff": 0,
+                    "required_leader_staff": 0,
+                }
+            )
+
+    def save(self, shift_plan):
+        shift_rule = self.shift_rule
+        if shift_rule is None:
+            try:
+                shift_rule = shift_plan.shift_rule
+            except ShiftRule.DoesNotExist:
+                shift_rule = ShiftRule(
+                    shift_plan=shift_plan,
+                    max_consecutive_work_days=5,
+                    night_shift_next_day_off=True,
+                )
+        shift_rule.required_day_staff = self.cleaned_data["required_day_staff"]
+        shift_rule.required_night_staff = self.cleaned_data["required_night_staff"]
+        shift_rule.off_days_per_staff = self.cleaned_data["off_days_per_staff"]
+        shift_rule.required_leader_staff = self.cleaned_data["required_leader_staff"]
+        if not shift_rule.pk:
+            shift_rule.max_consecutive_work_days = 5
+            shift_rule.night_shift_next_day_off = True
+        shift_rule.save()
+        self.shift_rule = shift_rule
+        return shift_rule

@@ -80,8 +80,19 @@
       </header>
 
       <!-- 各ページ固有の中身を差し込む領域
-           ヘッダー下とフッター上の共通余白はここで 16 に統一する -->
+          ヘッダー下とフッター上の共通余白はここで 16 に統一する -->
       <main class="flex-1 pt-16 pb-16">
+        {% if messages %}
+          <div class="mx-auto w-full max-w-[1280px] px-5 pt-5 sm:px-8 lg:px-10">
+            <div class="space-y-3">
+              {% for message in messages %} <!-- メッセージ表示 -->
+                <div class="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800 shadow-sm">
+                  {{ message }}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
         {% block content %}{% endblock %}
       </main>
 
