@@ -55,6 +55,7 @@ class ShiftRule(models.Model):
     )
     required_day_staff = models.IntegerField("必要日勤人数", default=0)
     required_night_staff = models.IntegerField("必要夜勤人数", default=0)
+    required_leader_staff = models.IntegerField("必要リーダー人数", default=0)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
     updated_at = models.DateTimeField("更新日時", auto_now=True)
 
