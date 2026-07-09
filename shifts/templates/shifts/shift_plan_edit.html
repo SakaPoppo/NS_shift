@@ -1,0 +1,270 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ shift_plan.title }} | Ns Shift{% endblock %}
+
+{% block content %}
+  <section class="mx-auto w-full max-w-[1680px] px-2 py-2 sm:px-3 lg:px-4">
+    <div class="flex flex-col gap-3">
+      <div class="flex flex-col gap-2">
+        <div>
+          <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
+            {{ shift_plan.title }}
+          </h1>
+        </div>
+      </div>
+
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_conditions">
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+          <div class="mb-3 flex items-center justify-between">
+            <h2 class="text-sm font-black tracking-wide text-slate-900">シフト条件設定</h2>
+          </div>
+
+          <div class="grid gap-3 lg:grid-cols-[repeat(4,minmax(0,150px))_auto_1fr] lg:items-end">
+            <div>
+              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_day_staff.id_for_label }}">
+                1日に必要な日勤数
+              </label>
+              {{ rule_form.required_day_staff }}
+              {% for error in rule_form.required_day_staff.errors %}
+                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+
+            <div>
+              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_night_staff.id_for_label }}">
+                １日に必要な夜勤数
+              </label>
+              {{ rule_form.required_night_staff }}
+              {% for error in rule_form.required_night_staff.errors %}
+                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+
+            <div>
+              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.off_days_per_staff.id_for_label }}">
+                今月の休み日数
+              </label>
+              {{ rule_form.off_days_per_staff }}
+              {% for error in rule_form.off_days_per_staff.errors %}
+                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+
+            <div>
+              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_leader_staff.id_for_label }}">
+                必要なリーダーの人数
+              </label>
+              {{ rule_form.required_leader_staff }}
+              {% for error in rule_form.required_leader_staff.errors %}
+                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+
+            <div class="lg:pb-[2px]">
+              <span class="inline-flex h-10 items-center rounded-full bg-sky-50 px-4 text-sm font-bold text-sky-700">
+                スタッフ数：{{ staff_count }}人
+              </span>
+            </div>
+
+            <div class="flex justify-end pt-1">
+              <button
+                type="submit"
+                class="inline-flex h-10 items-center justify-center rounded-xl bg-sky-700 px-4 text-sm font-bold text-white transition hover:bg-sky-800"
+              >
+                条件を保存する
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <form method="post" class="space-y-3">
+        {% csrf_token %}
+
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div class="border-b border-slate-200 bg-slate-50 px-3 py-3 sm:px-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <h2 class="text-sm font-black tracking-wide text-slate-900">シフト表</h2>
+              <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                <button
+                  type="submit"
+                  name="action"
+                  value="lock"
+                  class="inline-flex h-10 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-bold text-sky-800 transition hover:bg-sky-100"
+                >
+                  シフト固定
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="reset"
+                  class="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+                >
+                  リセット
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="generate"
+                  class="inline-flex h-10 items-center justify-center rounded-xl bg-sky-700 px-4 text-sm font-bold text-white transition hover:bg-sky-800"
+                >
+                  シフト生成
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="save"
+                  class="inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
+                >
+                  シフト保存
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="min-w-full border-separate border-spacing-0">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="sticky left-0 z-30 min-w-[118px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
+                    スタッフ
+                  </th>
+                  {% for header in day_headers %}
+                    <th class="min-w-[48px] border-b border-r border-slate-200 bg-slate-50 px-0.5 py-1 text-center">
+                      <div class="text-[11px] font-bold {% if header.is_sunday %}text-red-500{% elif header.is_saturday %}text-sky-600{% else %}text-slate-500{% endif %}">
+                        {{ header.weekday_label }}
+                      </div>
+                      <div class="mt-0.5 text-[14px] font-black {% if header.is_sunday %}text-red-600{% elif header.is_saturday %}text-sky-700{% else %}text-slate-900{% endif %}">
+                        {{ header.date.day }}
+                      </div>
+                    </th>
+                  {% endfor %}
+                  <th class="min-w-[48px] border-b border-r border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-[11px] font-bold text-slate-700">
+                    日勤
+                  </th>
+                  <th class="min-w-[48px] border-b border-r border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-[11px] font-bold text-slate-700">
+                    夜勤
+                  </th>
+                  <th class="min-w-[48px] border-b border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-[11px] font-bold text-slate-700">
+                    休み
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {% for row in staff_rows %}
+                  <tr>
+                    <th class="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-2.5 py-2 text-left align-middle">
+                      <div class="max-w-[7em] truncate whitespace-nowrap text-sm font-black text-slate-900" title="{{ row.staff_member.name }}">
+                        {{ row.staff_member.name }}
+                      </div>
+                    </th>
+
+                    {% for cell in row.cells %}
+                      <td class="border-b border-r border-slate-200 px-0.5 py-0.5 align-middle">
+                        <select
+                          name="{{ cell.field_name }}"
+                          data-shift-select
+                          class="h-8 w-full appearance-none rounded-lg border px-0 text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] outline-none transition focus:scale-[1.02] focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20 {{ cell.display_classes }}"
+                        >
+                          {% for value, label in shift_select_options %}
+                            <option value="{{ value }}" {% if cell.value == value %}selected{% endif %}>
+                              {{ label }}
+                            </option>
+                          {% endfor %}
+                        </select>
+                      </td>
+                    {% endfor %}
+
+                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
+                      {{ row.stats.day }}
+                    </td>
+                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
+                      {{ row.stats.night }}
+                    </td>
+                    <td class="border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
+                      {{ row.stats.off }}
+                    </td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="{{ month_dates|length|add:'4' }}" class="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                      在籍中のスタッフが登録されていません。
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+
+              <tfoot>
+                {% for summary in day_summary_rows %}
+                  <tr>
+                    <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                      日別集計 日勤
+                    </th>
+                    {% for value in summary.values %}
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
+                        {{ value.day_count }}
+                      </td>
+                    {% endfor %}
+                    <td class="border-r border-b border-slate-200 bg-slate-50"></td>
+                    <td class="border-r border-b border-slate-200 bg-slate-50"></td>
+                    <td class="border-b border-slate-200 bg-slate-50"></td>
+                  </tr>
+                  <tr>
+                    <th class="sticky left-0 z-10 border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                      日別集計 夜勤
+                    </th>
+                    {% for value in summary.values %}
+                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
+                        {{ value.night_count }}
+                      </td>
+                    {% endfor %}
+                    <td class="border-r border-slate-200 bg-slate-50"></td>
+                    <td class="border-r border-slate-200 bg-slate-50"></td>
+                    <td class="bg-slate-50"></td>
+                  </tr>
+                {% endfor %}
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+      </form>
+    </div>
+  </section>
+
+  <script>
+    (() => {
+      const classMap = {
+        "": ["border-slate-200", "bg-white", "text-slate-400"],
+        day: ["border-amber-200", "bg-amber-100", "text-amber-800"],
+        night: ["border-sky-200", "bg-sky-100", "text-sky-800"],
+        after_night: ["border-violet-200", "bg-violet-100", "text-violet-800"],
+        off: ["border-rose-200", "bg-rose-100", "text-rose-800"],
+        off_request: ["border-red-200", "bg-red-100", "text-red-800"],
+      };
+      const removableClasses = [
+        "border-slate-200", "bg-white", "text-slate-400",
+        "border-amber-200", "bg-amber-100", "text-amber-800",
+        "border-sky-200", "bg-sky-100", "text-sky-800",
+        "border-violet-200", "bg-violet-100", "text-violet-800",
+        "border-rose-200", "bg-rose-100", "text-rose-800",
+        "border-red-200", "bg-red-100", "text-red-800",
+      ];
+
+      document.querySelectorAll("[data-shift-select]").forEach((select) => {
+        const applyClasses = () => {
+          select.classList.remove(...removableClasses);
+          const classes = classMap[select.value] || classMap[""];
+          select.classList.add(...classes);
+        };
+
+        select.addEventListener("change", applyClasses);
+        applyClasses();
+      });
+    })();
+  </script>
+{% endblock %}
