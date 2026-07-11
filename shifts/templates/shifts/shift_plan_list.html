@@ -83,6 +83,12 @@
                 >
                   編集
                 </a>
+                <a
+                  href="{% url 'shifts:delete' shift_plan.pk %}"
+                  class="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-5 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+                >
+                  削除
+                </a>
               </div>
             </article>
           {% endfor %}
