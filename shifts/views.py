@@ -332,3 +332,23 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
         return HttpResponseRedirect(
             reverse("shifts:edit", kwargs={"pk": shift_plan.pk})
         )
+
+
+class ShiftPlanDeleteView(UserShiftPlanMixin, View):
+    template_name = "shifts/shift_plan_confirm_delete.html"
+
+    def get(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        return render(
+            request,
+            self.template_name,
+            {
+                "shift_plan": shift_plan,
+            },
+        )
+
+    def post(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        shift_plan.delete()
+        messages.success(request, "シフト表を削除しました。")
+        return HttpResponseRedirect(reverse("shifts:list"))
