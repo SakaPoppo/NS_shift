@@ -1,0 +1,41 @@
+{% extends "core/base.html" %}
+
+{% block title %}シフト表削除 | Ns Shift{% endblock %}
+
+{% block content %}
+  <section class="mx-auto w-full max-w-[720px] px-5 py-10 sm:px-8 lg:px-10">
+    <div class="mb-8">
+      <p class="text-sm font-semibold text-slate-500">シフト管理 &gt; シフト表削除</p>
+      <h1 class="mt-2 text-[2rem] font-black tracking-tight text-slate-900">シフト表削除</h1>
+      <p class="mt-2 text-sm font-medium text-slate-600">
+        このシフト表を削除します。関連するシフト条件や勤務結果も削除されます。
+      </p>
+    </div>
+
+    <div class="rounded-2xl border border-rose-100 bg-white p-6 shadow-sm sm:p-8">
+      <div class="rounded-2xl bg-rose-50 px-5 py-5">
+        <p class="text-sm font-medium text-slate-500">削除対象シフト表</p>
+        <p class="mt-2 text-xl font-black tracking-tight text-slate-900">{{ shift_plan.title }}</p>
+        <p class="mt-2 text-sm font-medium text-slate-600">
+          {{ shift_plan.year }}年{{ shift_plan.month }}月
+        </p>
+      </div>
+
+      <form method="post" class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {% csrf_token %}
+        <a
+          href="{% url 'shifts:list' %}"
+          class="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+        >
+          キャンセル
+        </a>
+        <button
+          type="submit"
+          class="inline-flex h-12 items-center justify-center rounded-xl bg-rose-600 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700"
+        >
+          削除する
+        </button>
+      </form>
+    </div>
+  </section>
+{% endblock %}
