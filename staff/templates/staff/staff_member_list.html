@@ -115,6 +115,13 @@
                 </div>
 
                 <div class="flex items-center justify-between gap-4">
+                  <dt class="text-xs font-medium text-slate-500">能力評価</dt>
+                  <dd class="text-sm font-bold text-slate-900">
+                    能力評価 {{ staff_member.ability_level }}
+                  </dd>
+                </div>
+
+                <div class="flex items-center justify-between gap-4">
                   <dt class="text-xs font-medium text-slate-500">夜勤の可否</dt>
                   <dd class="text-sm font-bold">
                     {% if staff_member.can_night_shift %}

@@ -84,12 +84,28 @@ class ShiftRuleForm(forms.Form):
         label="各勤務に必要なリーダークラス",
         min_value=0,
     )
+    max_consecutive_work_days = forms.IntegerField(
+        label="最大連勤数",
+        min_value=1,
+    )
+    night_shift_next_day_off = forms.BooleanField(
+        label="明け翌日を公休にする",
+        required=False,
+    )
 
     def __init__(self, *args, shift_rule=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.shift_rule = shift_rule
 
-        for field in self.fields.values():
+        for name, field in self.fields.items():
+            if name == "night_shift_next_day_off":
+                field.widget.attrs.update(
+                    {
+                        "class": "h-5 w-5 rounded border-slate-300 text-sky-700 focus:ring-sky-700",
+                    }
+                )
+                continue
+
             field.widget.attrs.update(
                 {
                     "class": "mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20",
@@ -103,6 +119,8 @@ class ShiftRuleForm(forms.Form):
                     "required_night_staff": shift_rule.required_night_staff,
                     "off_days_per_staff": shift_rule.off_days_per_staff,
                     "required_leader_staff": shift_rule.required_leader_staff,
+                    "max_consecutive_work_days": shift_rule.max_consecutive_work_days,
+                    "night_shift_next_day_off": shift_rule.night_shift_next_day_off,
                 }
             )
         elif not self.is_bound:
@@ -112,6 +130,8 @@ class ShiftRuleForm(forms.Form):
                     "required_night_staff": 0,
                     "off_days_per_staff": 0,
                     "required_leader_staff": 0,
+                    "max_consecutive_work_days": 5,
+                    "night_shift_next_day_off": True,
                 }
             )
 
@@ -130,9 +150,8 @@ class ShiftRuleForm(forms.Form):
         shift_rule.required_night_staff = self.cleaned_data["required_night_staff"]
         shift_rule.off_days_per_staff = self.cleaned_data["off_days_per_staff"]
         shift_rule.required_leader_staff = self.cleaned_data["required_leader_staff"]
-        if not shift_rule.pk:
-            shift_rule.max_consecutive_work_days = 5
-            shift_rule.night_shift_next_day_off = True
+        shift_rule.max_consecutive_work_days = self.cleaned_data["max_consecutive_work_days"]
+        shift_rule.night_shift_next_day_off = self.cleaned_data["night_shift_next_day_off"]
         shift_rule.save()
         self.shift_rule = shift_rule
         return shift_rule

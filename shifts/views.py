@@ -22,6 +22,9 @@ SHIFT_SELECT_OPTIONS = [  # シフトセルの選択肢を呼び出す
     (ShiftResult.ShiftTypeChoices.AFTER_NIGHT, "明"),
     (ShiftResult.ShiftTypeChoices.OFF, "休"),
     (ShiftResult.ShiftTypeChoices.OFF_REQUEST, "希"),
+    (ShiftResult.ShiftTypeChoices.PAID_LEAVE, "有"),
+    (ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE, "特"),
+    (ShiftResult.ShiftTypeChoices.TRAINING, "研"),
 ]
 
 SHIFT_DISPLAY_CONFIG = {  # シフトセルに表示するラベルと色を設定
@@ -44,6 +47,18 @@ SHIFT_DISPLAY_CONFIG = {  # シフトセルに表示するラベルと色を設�
     ShiftResult.ShiftTypeChoices.OFF_REQUEST: {
         "label": "希",
         "classes": "border-red-200 bg-red-100 text-red-800",
+    },
+    ShiftResult.ShiftTypeChoices.PAID_LEAVE: {
+        "label": "有",
+        "classes": "border-pink-200 bg-pink-100 text-pink-800",
+    },
+    ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE: {
+        "label": "特",
+        "classes": "border-pink-200 bg-pink-100 text-pink-800",
+    },
+    ShiftResult.ShiftTypeChoices.TRAINING: {
+        "label": "研",
+        "classes": "border-emerald-200 bg-emerald-100 text-emerald-800",
     },
     "blank": {
         "label": "",
@@ -85,7 +100,14 @@ def build_shift_plan_grid(staff_members, month_dates, shift_results_by_key, day_
         regular_day_offs = set(
             staff_member.regular_days_off.values_list("day_of_week", flat=True)
         )
-        row_stats = {"day": 0, "night": 0, "off": 0}
+        row_stats = {
+            "day": 0,
+            "night": 0,
+            "off": 0,
+            "paid_leave": 0,
+            "special_leave": 0,
+            "training": 0,
+        }
         cells = []
 
         for current_date in month_dates:  # 各日のシフト情報を取得
@@ -114,6 +136,12 @@ def build_shift_plan_grid(staff_members, month_dates, shift_results_by_key, day_
                 ShiftResult.ShiftTypeChoices.OFF_REQUEST,
             ):
                 row_stats["off"] += 1  # 休日の数をカウント
+            elif shift_type == ShiftResult.ShiftTypeChoices.PAID_LEAVE:
+                row_stats["paid_leave"] += 1
+            elif shift_type == ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE:
+                row_stats["special_leave"] += 1
+            elif shift_type == ShiftResult.ShiftTypeChoices.TRAINING:
+                row_stats["training"] += 1
             # シフトセルの表示ラベルとCSSクラスを取得
             config = SHIFT_DISPLAY_CONFIG.get(shift_type, SHIFT_DISPLAY_CONFIG["blank"])
             cells.append(  # 1セル分の情報をまとめてとる

@@ -27,11 +27,12 @@ class StaffMemberForm(forms.ModelForm):
 
     class Meta:
         model = StaffMember
-        fields = ("name", "gender", "job", "role", "can_night_shift")
+        fields = ("name", "gender", "job", "role", "ability_level", "can_night_shift")
         widgets = {
             "gender": forms.RadioSelect,
             "job": forms.Select,
             "role": forms.Select,
+            "ability_level": forms.Select,
         }
 
     def __init__(self, *args, **kwargs):
@@ -52,6 +53,14 @@ class StaffMemberForm(forms.ModelForm):
             {
                 "class": "mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20",
             }
+        )
+        self.fields["ability_level"].widget.attrs.update(
+            {
+                "class": "mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20",
+            }
+        )
+        self.fields["ability_level"].help_text = (
+            "1は自立前、3は新人指導可能、5は管理代行業務まで担える目安です。"
         )
         if self.instance and self.instance.pk:
             self.fields["regular_days_off"].initial = list(

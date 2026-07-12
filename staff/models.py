@@ -15,6 +15,13 @@ class StaffMember(models.Model): #テーブル作成宣言
         LEADER = "leader", "リーダー"
         MEMBER = "member", "メンバー"
 
+    class AbilityLevelChoices(models.IntegerChoices):
+        LEVEL_1 = 1, "1：1年目・自立なし"
+        LEVEL_2 = 2, "2：基本業務が自立"
+        LEVEL_3 = 3, "3：新人指導が可能"
+        LEVEL_4 = 4, "4：重症患者対応が可能"
+        LEVEL_5 = 5, "5：管理代行業務が可能"
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, #ユーザー情報を紐づける
         on_delete=models.CASCADE, #ユーザーが削除＝スタッフ情報も削除
@@ -38,6 +45,11 @@ class StaffMember(models.Model): #テーブル作成宣言
         max_length=20,
         choices=RoleChoices.choices,
         default=RoleChoices.MEMBER,
+    )
+    ability_level = models.PositiveSmallIntegerField(
+        "能力評価",
+        choices=AbilityLevelChoices.choices,
+        default=AbilityLevelChoices.LEVEL_2,
     )
     can_night_shift = models.BooleanField("夜勤可", default=True)
     is_active = models.BooleanField("在籍中", default=True)

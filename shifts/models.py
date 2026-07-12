@@ -103,6 +103,9 @@ class ShiftResult(models.Model):
         AFTER_NIGHT = "after_night", "明け"
         OFF = "off", "休み"
         OFF_REQUEST = "off_request", "希望休"
+        PAID_LEAVE = "paid_leave", "有給"
+        SPECIAL_LEAVE = "special_leave", "特別休暇"
+        TRAINING = "training", "研修"
 
     class InputTypeChoices(models.TextChoices):
         MANUAL = "manual", "手動"

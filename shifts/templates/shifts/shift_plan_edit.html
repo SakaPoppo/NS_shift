@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load static %}
 
 {% block title %}{{ shift_plan.title }} | Ns Shift{% endblock %}
 
@@ -22,7 +23,7 @@
             <h2 class="text-sm font-black tracking-wide text-slate-900">シフト条件設定</h2>
           </div>
 
-          <div class="grid gap-3 lg:grid-cols-[repeat(4,minmax(0,150px))_auto_1fr] lg:items-end">
+          <div class="grid gap-3 xl:grid-cols-[repeat(5,minmax(0,150px))_minmax(0,1fr)_auto] xl:items-end">
             <div>
               <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_day_staff.id_for_label }}">
                 1日に必要な日勤数
@@ -63,7 +64,34 @@
               {% endfor %}
             </div>
 
-            <div class="lg:pb-[2px]">
+            <div>
+              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.max_consecutive_work_days.id_for_label }}">
+                最大連勤数
+              </label>
+              {{ rule_form.max_consecutive_work_days }}
+              {% for error in rule_form.max_consecutive_work_days.errors %}
+                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div class="flex items-start gap-3">
+                {{ rule_form.night_shift_next_day_off }}
+                <div>
+                  <label class="text-sm font-bold text-slate-700" for="{{ rule_form.night_shift_next_day_off.id_for_label }}">
+                    明け翌日を公休にする
+                  </label>
+                  <p class="mt-1 text-xs font-medium text-slate-500">
+                    夜勤 → 明けの次の日を自動的に公休として扱う設定です。
+                  </p>
+                </div>
+              </div>
+              {% for error in rule_form.night_shift_next_day_off.errors %}
+                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+
+            <div class="xl:pb-[2px]">
               <span class="inline-flex h-10 items-center rounded-full bg-sky-50 px-4 text-sm font-bold text-sky-700">
                 スタッフ数：{{ staff_count }}人
               </span>
@@ -129,7 +157,7 @@
             <table class="min-w-full border-separate border-spacing-0">
               <thead class="bg-slate-50">
                 <tr>
-                  <th class="sticky left-0 z-30 min-w-[118px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
+                  <th class="sticky left-0 z-30 min-w-[146px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
                     スタッフ
                   </th>
                   {% for header in day_headers %}
@@ -157,9 +185,28 @@
               <tbody>
                 {% for row in staff_rows %}
                   <tr>
-                    <th class="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-2.5 py-2 text-left align-middle">
-                      <div class="max-w-[7em] truncate whitespace-nowrap text-sm font-black text-slate-900" title="{{ row.staff_member.name }}">
-                        {{ row.staff_member.name }}
+                    <th class="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-2 py-2 text-left align-middle">
+                      <div class="flex items-center gap-1.5 text-sm font-black text-slate-900">
+                        {% if row.staff_member.gender == "male" %}
+                          <img src="{% static 'staff/male_icon.png' %}" alt="男性" class="h-4 w-4 shrink-0 object-contain">
+                        {% elif row.staff_member.gender == "female" %}
+                          <img src="{% static 'staff/female_icon.png' %}" alt="女性" class="h-4 w-4 shrink-0 object-contain">
+                        {% endif %}
+                        {% if row.staff_member.role == "leader" %}
+                          <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-amber-100 px-1.5 text-[10px] font-black text-amber-700">
+                            L
+                          </span>
+                        {% else %}
+                          <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-slate-100 px-1.5 text-[10px] font-black text-slate-600">
+                            M
+                          </span>
+                        {% endif %}
+                        <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-sky-100 px-1.5 text-[10px] font-black text-sky-700">
+                          Lv{{ row.staff_member.ability_level }}
+                        </span>
+                        <span class="min-w-0 truncate whitespace-nowrap" title="{{ row.staff_member.name }}">
+                          {{ row.staff_member.name }}
+                        </span>
                       </div>
                     </th>
 
@@ -245,6 +292,9 @@
         after_night: ["border-violet-200", "bg-violet-100", "text-violet-800"],
         off: ["border-rose-200", "bg-rose-100", "text-rose-800"],
         off_request: ["border-red-200", "bg-red-100", "text-red-800"],
+        paid_leave: ["border-pink-200", "bg-pink-100", "text-pink-800"],
+        special_leave: ["border-pink-200", "bg-pink-100", "text-pink-800"],
+        training: ["border-emerald-200", "bg-emerald-100", "text-emerald-800"],
       };
       const removableClasses = [
         "border-slate-200", "bg-white", "text-slate-400",
@@ -253,6 +303,8 @@
         "border-violet-200", "bg-violet-100", "text-violet-800",
         "border-rose-200", "bg-rose-100", "text-rose-800",
         "border-red-200", "bg-red-100", "text-red-800",
+        "border-pink-200", "bg-pink-100", "text-pink-800",
+        "border-emerald-200", "bg-emerald-100", "text-emerald-800",
       ];
 
       document.querySelectorAll("[data-shift-select]").forEach((select) => {

@@ -15,10 +15,12 @@ class ShiftRuleAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "shift_plan",
-        "off_days_per_staff",
-        "max_consecutive_work_days",
         "required_day_staff",
         "required_night_staff",
+        "off_days_per_staff",
+        "required_leader_staff",
+        "max_consecutive_work_days",
+        "night_shift_next_day_off",
     )
 
 
