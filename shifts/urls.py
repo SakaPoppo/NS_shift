@@ -5,6 +5,7 @@ from .views import (
     ShiftPlanDeleteView,
     ShiftPlanEditView,
     ShiftPlanListView,
+    ShiftRuleEditView,
 )
 
 app_name = "shifts"
@@ -12,6 +13,7 @@ app_name = "shifts"
 urlpatterns = [
     path("", ShiftPlanListView.as_view(), name="list"),
     path("create/", ShiftPlanCreateView.as_view(), name="create"),
+    path("<int:pk>/conditions/", ShiftRuleEditView.as_view(), name="conditions"),
     path("<int:pk>/edit/", ShiftPlanEditView.as_view(), name="edit"),
     path("<int:pk>/delete/", ShiftPlanDeleteView.as_view(), name="delete"),
 ]

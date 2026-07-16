@@ -17,16 +17,16 @@ class SignUpForm(UserCreationForm):  # 新規登録フォーム
     def __init__(self, *args, **kwargs):  # フォームの初期化をした際の処理、CSSクラスを追加するなど見た目を調整
         super().__init__(*args, **kwargs)
         self.fields["username"].widget.attrs.update(
-            {"class": "input input-bordered w-full bg-white", "placeholder": "ユーザー名"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "ユーザー名"}
         )
         self.fields["email"].widget.attrs.update(
-            {"class": "input input-bordered w-full bg-white", "placeholder": "email@example.com"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "email@example.com"}
         )
         self.fields["password1"].widget.attrs.update(
-            {"class": "input input-bordered w-full bg-white", "placeholder": "パスワード"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード"}
         )
         self.fields["password2"].widget.attrs.update(
-            {"class": "input input-bordered w-full bg-white", "placeholder": "パスワード（確認用）"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード（確認用）"}
         )
 
     def clean_email(self):  # フォームに入力されたemailを取り出す
@@ -57,10 +57,10 @@ class LoginForm(forms.Form):  # DBに保存しないのでforms.Formを継承
         self.user_cache = None
         super().__init__(*args, **kwargs)
         self.fields["username_or_email"].widget.attrs.update(
-            {"class": "input input-bordered w-full bg-white", "placeholder": "ユーザー名またはメールアドレス"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "ユーザー名またはメールアドレス"}
         )
         self.fields["password"].widget.attrs.update(
-            {"class": "input input-bordered w-full bg-white", "placeholder": "パスワード"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード"}
         )
 
     def clean(self):  # ログインは組み合わせで認証するから、フォーム全体のcleanを使う

@@ -66,6 +66,85 @@ class ShiftRule(models.Model):
         return f"{self.shift_plan} のルール"
 
 
+class WeekdayShiftRule(models.Model):
+    class DayOfWeekChoices(models.IntegerChoices):
+        MONDAY = 0, "月"
+        TUESDAY = 1, "火"
+        WEDNESDAY = 2, "水"
+        THURSDAY = 3, "木"
+        FRIDAY = 4, "金"
+        SATURDAY = 5, "土"
+        SUNDAY = 6, "日"
+
+    shift_plan = models.ForeignKey(
+        ShiftPlan,
+        on_delete=models.CASCADE,
+        related_name="weekday_rules",
+    )
+    day_of_week = models.IntegerField("曜日", choices=DayOfWeekChoices.choices)
+    required_day_staff = models.IntegerField("必要日勤人数", null=True, blank=True)
+    required_night_staff = models.IntegerField("必要夜勤人数", null=True, blank=True)
+    required_leader_staff = models.IntegerField("必要リーダー人数", null=True, blank=True)
+    min_ability_level = models.PositiveSmallIntegerField(
+        "必要最低勤務レベル",
+        choices=StaffMember.AbilityLevelChoices.choices,
+        null=True,
+        blank=True,
+    )
+    min_ability_level_staff_count = models.IntegerField("必要人数", null=True, blank=True)
+    memo = models.TextField("メモ", blank=True)
+    created_at = models.DateTimeField("作成日時", auto_now_add=True)
+    updated_at = models.DateTimeField("更新日時", auto_now=True)
+
+    class Meta:
+        db_table = "weekday_shift_rules"
+        ordering = ["shift_plan_id", "day_of_week"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["shift_plan", "day_of_week"],
+                name="unique_weekday_shift_rule_shift_plan_day_of_week",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.shift_plan} - {self.get_day_of_week_display()}曜日"
+
+
+class DateShiftRule(models.Model):
+    shift_plan = models.ForeignKey(
+        ShiftPlan,
+        on_delete=models.CASCADE,
+        related_name="date_rules",
+    )
+    target_date = models.DateField("対象日")
+    required_day_staff = models.IntegerField("必要日勤人数", null=True, blank=True)
+    required_night_staff = models.IntegerField("必要夜勤人数", null=True, blank=True)
+    required_leader_staff = models.IntegerField("必要リーダー人数", null=True, blank=True)
+    min_ability_level = models.PositiveSmallIntegerField(
+        "必要最低勤務レベル",
+        choices=StaffMember.AbilityLevelChoices.choices,
+        null=True,
+        blank=True,
+    )
+    min_ability_level_staff_count = models.IntegerField("必要人数", null=True, blank=True)
+    memo = models.TextField("メモ", blank=True)
+    created_at = models.DateTimeField("作成日時", auto_now_add=True)
+    updated_at = models.DateTimeField("更新日時", auto_now=True)
+
+    class Meta:
+        db_table = "date_shift_rules"
+        ordering = ["target_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["shift_plan", "target_date"],
+                name="unique_date_shift_rule_shift_plan_target_date",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.shift_plan} - {self.target_date}"
+
+
 class DayOffRequest(models.Model):
     shift_plan = models.ForeignKey(
         ShiftPlan,

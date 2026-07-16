@@ -6,108 +6,85 @@
 {% block content %}
   <section class="mx-auto w-full max-w-[1680px] px-2 py-2 sm:px-3 lg:px-4">
     <div class="flex flex-col gap-3">
-      <div class="flex flex-col gap-2">
-        <div>
-          <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
-            {{ shift_plan.title }}
-          </h1>
+      <div>
+        <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
+          {{ shift_plan.title }}
+        </h1>
+      </div>
+
+      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="flex-1">
+            <h2 class="text-sm font-black tracking-wide text-slate-900">シフト生成条件</h2>
+            <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">必要日勤数</p>
+                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_day_staff }}人</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">必要夜勤数</p>
+                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_night_staff }}人</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">月休日数</p>
+                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.off_days_per_staff }}日</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">必要リーダー数</p>
+                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_leader_staff }}人</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">最大連勤</p>
+                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.max_consecutive_work_days }}日</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">明け翌日公休</p>
+                <p class="mt-1 text-base font-black text-slate-900">
+                  {% if shift_rule.night_shift_next_day_off %}する{% else %}しない{% endif %}
+                </p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">曜日条件</p>
+                <p class="mt-1 text-base font-black text-slate-900">曜日条件：{{ weekday_rule_count }}件</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-500">特定日条件</p>
+                <p class="mt-1 text-base font-black text-slate-900">特定日条件：{{ date_rule_count }}件</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex shrink-0 justify-end">
+            <a
+              href="{% url 'shifts:conditions' shift_plan.pk %}"
+              class="btn btn-outline h-11 rounded-lg border-base-300 bg-white px-5 text-sm text-base-content hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
+            >
+              条件設定へ
+            </a>
+          </div>
         </div>
       </div>
 
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="save_conditions">
-
-        <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div class="mb-3 flex items-center justify-between">
-            <h2 class="text-sm font-black tracking-wide text-slate-900">シフト条件設定</h2>
-          </div>
-
-          <div class="grid gap-3 xl:grid-cols-[repeat(5,minmax(0,150px))_minmax(0,1fr)_auto] xl:items-end">
-            <div>
-              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_day_staff.id_for_label }}">
-                1日に必要な日勤数
-              </label>
-              {{ rule_form.required_day_staff }}
-              {% for error in rule_form.required_day_staff.errors %}
-                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-
-            <div>
-              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_night_staff.id_for_label }}">
-                １日に必要な夜勤数
-              </label>
-              {{ rule_form.required_night_staff }}
-              {% for error in rule_form.required_night_staff.errors %}
-                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-
-            <div>
-              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.off_days_per_staff.id_for_label }}">
-                今月の休み日数
-              </label>
-              {{ rule_form.off_days_per_staff }}
-              {% for error in rule_form.off_days_per_staff.errors %}
-                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-
-            <div>
-              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.required_leader_staff.id_for_label }}">
-                必要なリーダーの人数
-              </label>
-              {{ rule_form.required_leader_staff }}
-              {% for error in rule_form.required_leader_staff.errors %}
-                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-
-            <div>
-              <label class="text-sm font-bold text-slate-700" for="{{ rule_form.max_consecutive_work_days.id_for_label }}">
-                最大連勤数
-              </label>
-              {{ rule_form.max_consecutive_work_days }}
-              {% for error in rule_form.max_consecutive_work_days.errors %}
-                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-
-            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div class="flex items-start gap-3">
-                {{ rule_form.night_shift_next_day_off }}
-                <div>
-                  <label class="text-sm font-bold text-slate-700" for="{{ rule_form.night_shift_next_day_off.id_for_label }}">
-                    明け翌日を公休にする
-                  </label>
-                  <p class="mt-1 text-xs font-medium text-slate-500">
-                    夜勤 → 明けの次の日を自動的に公休として扱う設定です。
-                  </p>
-                </div>
-              </div>
-              {% for error in rule_form.night_shift_next_day_off.errors %}
-                <p class="mt-2 text-sm font-medium text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-
-            <div class="xl:pb-[2px]">
-              <span class="inline-flex h-10 items-center rounded-full bg-sky-50 px-4 text-sm font-bold text-sky-700">
-                スタッフ数：{{ staff_count }}人
-              </span>
-            </div>
-
-            <div class="flex justify-end pt-1">
-              <button
-                type="submit"
-                class="inline-flex h-10 items-center justify-center rounded-xl bg-sky-700 px-4 text-sm font-bold text-white transition hover:bg-sky-800"
-              >
-                条件を保存する
-              </button>
-            </div>
-          </div>
+      <details class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <summary class="cursor-pointer list-none text-sm font-black text-slate-900">
+          勤務区分について ▼
+        </summary>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <span class="inline-flex rounded-lg border border-amber-200 bg-amber-100 px-3 py-1 text-sm font-black text-amber-800">日：日勤</span>
+          <span class="inline-flex rounded-lg border border-sky-200 bg-sky-100 px-3 py-1 text-sm font-black text-sky-800">夜：夜勤</span>
+          <span class="inline-flex rounded-lg border border-violet-200 bg-violet-100 px-3 py-1 text-sm font-black text-violet-800">明：夜勤明け</span>
+          <span class="inline-flex rounded-lg border border-rose-200 bg-rose-100 px-3 py-1 text-sm font-black text-rose-800">休：公休</span>
+          <span class="inline-flex rounded-lg border border-red-200 bg-red-100 px-3 py-1 text-sm font-black text-red-800">希：希望休</span>
+          <span class="inline-flex rounded-lg border border-pink-200 bg-pink-100 px-3 py-1 text-sm font-black text-pink-800">有：有給</span>
+          <span class="inline-flex rounded-lg border border-pink-200 bg-pink-100 px-3 py-1 text-sm font-black text-pink-800">特：特別休暇</span>
+          <span class="inline-flex rounded-lg border border-emerald-200 bg-emerald-100 px-3 py-1 text-sm font-black text-emerald-800">研：研修</span>
         </div>
-      </form>
+        <div class="mt-4 space-y-1 text-sm font-medium text-slate-600">
+          <p>公休・希望休は月休日数に含まれます。</p>
+          <p>有給・特別休暇は月休日数に含まれません。</p>
+          <p>研修は月休日数・日勤人数には含まれませんが、連勤には含まれます。</p>
+        </div>
+      </details>
 
       <form method="post" class="space-y-3">
         {% csrf_token %}
@@ -120,34 +97,34 @@
                 <button
                   type="submit"
                   name="action"
-                  value="lock"
-                  class="inline-flex h-10 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-bold text-sky-800 transition hover:bg-sky-100"
+                  value="save"
+                  class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
                 >
-                  シフト固定
-                </button>
-                <button
-                  type="submit"
-                  name="action"
-                  value="reset"
-                  class="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
-                >
-                  リセット
+                  保存
                 </button>
                 <button
                   type="submit"
                   name="action"
                   value="generate"
-                  class="inline-flex h-10 items-center justify-center rounded-xl bg-sky-700 px-4 text-sm font-bold text-white transition hover:bg-sky-800"
+                  class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
                 >
                   シフト生成
                 </button>
                 <button
                   type="submit"
                   name="action"
-                  value="save"
-                  class="inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
+                  value="lock"
+                  class="btn btn-outline h-10 min-h-10 rounded-lg border-base-300 bg-white px-4 text-sm text-base-content hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
                 >
-                  シフト保存
+                  現在のシフトを固定
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="reset"
+                  class="btn btn-error btn-outline h-10 min-h-10 rounded-lg px-4 text-sm"
+                >
+                  リセット
                 </button>
               </div>
             </div>
@@ -193,17 +170,11 @@
                           <img src="{% static 'staff/female_icon.png' %}" alt="女性" class="h-4 w-4 shrink-0 object-contain">
                         {% endif %}
                         {% if row.staff_member.role == "leader" %}
-                          <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-amber-100 px-1.5 text-[10px] font-black text-amber-700">
-                            L
-                          </span>
+                          <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-amber-100 px-1.5 text-[10px] font-black text-amber-700">L</span>
                         {% else %}
-                          <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-slate-100 px-1.5 text-[10px] font-black text-slate-600">
-                            M
-                          </span>
+                          <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-slate-100 px-1.5 text-[10px] font-black text-slate-600">M</span>
                         {% endif %}
-                        <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-sky-100 px-1.5 text-[10px] font-black text-sky-700">
-                          Lv{{ row.staff_member.ability_level }}
-                        </span>
+                        <span class="inline-flex h-5 shrink-0 items-center rounded-md bg-sky-100 px-1.5 text-[10px] font-black text-sky-700">Lv{{ row.staff_member.ability_level }}</span>
                         <span class="min-w-0 truncate whitespace-nowrap" title="{{ row.staff_member.name }}">
                           {{ row.staff_member.name }}
                         </span>
@@ -218,23 +189,15 @@
                           class="h-8 w-full appearance-none rounded-lg border px-0 text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] outline-none transition focus:scale-[1.02] focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20 {{ cell.display_classes }}"
                         >
                           {% for value, label in shift_select_options %}
-                            <option value="{{ value }}" {% if cell.value == value %}selected{% endif %}>
-                              {{ label }}
-                            </option>
+                            <option value="{{ value }}" {% if cell.value == value %}selected{% endif %}>{{ label }}</option>
                           {% endfor %}
                         </select>
                       </td>
                     {% endfor %}
 
-                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
-                      {{ row.stats.day }}
-                    </td>
-                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
-                      {{ row.stats.night }}
-                    </td>
-                    <td class="border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
-                      {{ row.stats.off }}
-                    </td>
+                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.day }}</td>
+                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.night }}</td>
+                    <td class="border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.off }}</td>
                   </tr>
                 {% empty %}
                   <tr>
@@ -252,9 +215,7 @@
                       日別集計 日勤
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
-                        {{ value.day_count }}
-                      </td>
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.day_count }}</td>
                     {% endfor %}
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
@@ -265,9 +226,7 @@
                       日別集計 夜勤
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">
-                        {{ value.night_count }}
-                      </td>
+                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.night_count }}</td>
                     {% endfor %}
                     <td class="border-r border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-slate-200 bg-slate-50"></td>
@@ -278,7 +237,6 @@
             </table>
           </div>
         </div>
-
       </form>
     </div>
   </section>

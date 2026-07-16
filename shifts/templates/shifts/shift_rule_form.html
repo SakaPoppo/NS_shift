@@ -1,0 +1,1101 @@
+{% extends "core/base.html" %}
+
+{% block title %}シフト条件設定 | Ns Shift{% endblock %}
+
+{% block content %}
+  <section class="mx-auto w-full max-w-[1120px] px-5 py-8 sm:px-8 lg:px-10">
+    <div class="mb-8">
+      <p class="text-sm font-semibold text-slate-500">シフト管理 &gt; シフト条件設定</p>
+      <h1 class="mt-2 text-[2rem] font-black tracking-tight text-slate-900">{{ shift_plan.title }} の条件設定</h1>
+      <p class="mt-2 text-sm font-medium text-slate-600">
+        シフトを生成するための条件を設定します。ここで設定した条件をもとにシフト表の自動生成が行われます。
+      </p>
+    </div>
+
+    {% if rule_form.non_field_errors %}
+      <div class="mb-4">
+        {% include "components/alert.html" with variant="error" text=rule_form.non_field_errors|join:" " %}
+      </div>
+    {% endif %}
+    {% for date_rule_form in date_rule_forms %}
+      {% if date_rule_form.non_field_errors %}
+        <div class="mb-4">
+          {% include "components/alert.html" with variant="error" text=date_rule_form.non_field_errors|join:" " %}
+        </div>
+      {% endif %}
+    {% endfor %}
+
+    <form method="post" class="space-y-6">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_conditions">
+      <input type="hidden" id="date-rule-total-forms" name="date_rule_total_forms" value="{{ date_rule_total_forms }}">
+
+      <div class="ns-page-panel-strong p-6 sm:p-8">
+        <div class="mb-6">
+          <h2 class="text-lg font-black tracking-tight text-slate-900">① 月条件の設定</h2>
+          <p class="mt-2 text-sm font-medium text-slate-600">
+            ここで入力した内容が、その月の基本条件になります。
+          </p>
+        </div>
+
+        <div class="mx-auto max-w-2xl space-y-5">
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ rule_form.required_day_staff.id_for_label }}">
+              <span class="label-text font-semibold text-slate-700">必要日勤数</span>
+              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+            </label>
+            <div class="label justify-start px-0 pt-0">
+              <span class="label-text-alt text-base-content/60">1日あたりに必要な日勤人数を入力してください。</span>
+            </div>
+            {{ rule_form.required_day_staff }}
+            {% for error in rule_form.required_day_staff.errors %}
+              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ rule_form.required_night_staff.id_for_label }}">
+              <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
+              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+            </label>
+            <div class="label justify-start px-0 pt-0">
+              <span class="label-text-alt text-base-content/60">1日あたりに必要な夜勤人数を入力してください。</span>
+            </div>
+            {{ rule_form.required_night_staff }}
+            {% for error in rule_form.required_night_staff.errors %}
+              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ rule_form.off_days_per_staff.id_for_label }}">
+              <span class="label-text font-semibold text-slate-700">月休日数</span>
+              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+            </label>
+            <div class="label justify-start px-0 pt-0">
+              <span class="label-text-alt text-base-content/60">スタッフ1人あたりの月間休日数を入力してください。</span>
+            </div>
+            {{ rule_form.off_days_per_staff }}
+            {% for error in rule_form.off_days_per_staff.errors %}
+              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ rule_form.max_consecutive_work_days.id_for_label }}">
+              <span class="label-text font-semibold text-slate-700">最大連勤数</span>
+              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+            </label>
+            <div class="label justify-start px-0 pt-0">
+              <span class="label-text-alt text-base-content/60">連続勤務を何日まで許可するかを入力してください。</span>
+            </div>
+            {{ rule_form.max_consecutive_work_days }}
+            {% for error in rule_form.max_consecutive_work_days.errors %}
+              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="form-control w-full gap-2">
+            <span class="label justify-start gap-3 pb-0">
+              <span class="label-text font-semibold text-slate-700">夜勤明け翌日を公休にするか</span>
+              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+            </span>
+            <div class="label justify-start px-0 pt-0">
+              <span class="label-text-alt text-base-content/60">「しない」を選んだ場合、夜勤が連続で配置される場合があります。</span>
+            </div>
+            <div class="mt-2 grid gap-3 sm:grid-cols-2">
+              {% for radio in rule_form.night_shift_next_day_off %}
+                <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 bg-base-100 px-4 py-3 transition hover:border-brand-300 hover:bg-brand-50">
+                  {{ radio.tag }}
+                  <span>{{ radio.choice_label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            {% for error in rule_form.night_shift_next_day_off.errors %}
+              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ rule_form.required_leader_staff.id_for_label }}">
+              <span class="label-text font-semibold text-slate-700">各勤務に必要なリーダー数</span>
+              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+            </label>
+            <div class="label justify-start px-0 pt-0">
+              <span class="label-text-alt text-base-content/60">必要な場合のみ入力してください。未入力時は0人として保存されます。</span>
+            </div>
+            {{ rule_form.required_leader_staff }}
+            {% for error in rule_form.required_leader_staff.errors %}
+              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="ns-page-panel-strong p-6 sm:p-8">
+        <div class="mb-6">
+          <h2 class="text-lg font-black tracking-tight text-slate-900">2. 拡張条件</h2>
+          <p class="mt-2 text-sm font-medium text-slate-600">
+            特定の日、もしくは特定の曜日で月の条件と異なる人数配置をしたいときに設定してください。
+          </p>
+        </div>
+
+        <div class="space-y-10">
+          <div class="space-y-4">
+            <div>
+              <h3 class="text-base font-black text-slate-900">曜日条件</h3>
+              <p class="mt-1 text-sm font-medium text-slate-500">
+                条件を設定したい曜日だけ選択してください。選択した曜日の入力欄が下に表示されます。
+              </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+              {% for row in weekday_form_rows %}
+                <button
+                  type="button"
+                  data-weekday-button
+                  data-weekday-index="{{ forloop.counter0 }}"
+                  class="rounded-xl border px-4 py-3 text-sm font-bold transition {% if row.is_selected %}border-sky-500 bg-sky-50 text-sky-700{% else %}border-base-300 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50{% endif %}"
+                >
+                  {{ row.label }}曜日
+                </button>
+              {% endfor %}
+            </div>
+
+            <div class="space-y-4">
+              {% for row in weekday_form_rows %}
+                <div
+                  data-weekday-panel
+                  data-weekday-index="{{ forloop.counter0 }}"
+                  class="{% if not row.is_selected %}hidden {% endif %}rounded-xl border border-slate-200 bg-white p-5"
+                >
+                  {{ row.form.selected }}
+                  {{ row.form.day_of_week }}
+                  <div class="mb-4">
+                    <h4 class="text-sm font-black text-slate-900">{{ row.label }}曜日の条件</h4>
+                    <p class="mt-1 text-sm font-medium text-slate-500">
+                      入力しない項目は月の条件が使われます。
+                    </p>
+                  </div>
+
+                  <div class="space-y-5">
+                    <div class="form-control w-full gap-2">
+                      <label class="label justify-start gap-3 pb-0" for="{{ row.form.required_day_staff.id_for_label }}">
+                        <span class="label-text font-semibold text-slate-700">必要日勤数</span>
+                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      </label>
+                      {{ row.form.required_day_staff }}
+                      {% for error in row.form.required_day_staff.errors %}
+                        <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                      {% endfor %}
+                    </div>
+
+                    <div class="form-control w-full gap-2">
+                      <label class="label justify-start gap-3 pb-0" for="{{ row.form.required_night_staff.id_for_label }}">
+                        <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
+                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      </label>
+                      {{ row.form.required_night_staff }}
+                      {% for error in row.form.required_night_staff.errors %}
+                        <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                      {% endfor %}
+                    </div>
+
+                    <div class="space-y-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4">
+                      <p class="text-sm font-semibold text-slate-700">追加条件</p>
+                      <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] sm:items-end">
+                        <div class="form-control w-full gap-2">
+                          <label class="label justify-start gap-3 pb-0" for="{{ row.form.min_ability_level.id_for_label }}">
+                            <span class="label-text font-semibold text-slate-700">勤務レベル</span>
+                            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                          </label>
+                          {{ row.form.min_ability_level }}
+                        </div>
+                        <p class="pb-3 text-sm font-semibold text-slate-600">以上のスタッフが</p>
+                        <div class="form-control w-full gap-2">
+                          <label class="label justify-start gap-3 pb-0" for="{{ row.form.min_ability_level_staff_count.id_for_label }}">
+                            <span class="label-text font-semibold text-slate-700">必要人数</span>
+                            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                          </label>
+                          {{ row.form.min_ability_level_staff_count }}
+                        </div>
+                        <p class="pb-3 text-sm font-semibold text-slate-600">人以上必要</p>
+                      </div>
+                      {% for error in row.form.min_ability_level.errors %}
+                        <p class="text-sm font-medium text-error">{{ error }}</p>
+                      {% endfor %}
+                      {% for error in row.form.min_ability_level_staff_count.errors %}
+                        <p class="text-sm font-medium text-error">{{ error }}</p>
+                      {% endfor %}
+                    </div>
+
+                    <div class="form-control w-full gap-2">
+                      <label class="label justify-start gap-3 pb-0" for="{{ row.form.required_leader_staff.id_for_label }}">
+                        <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
+                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      </label>
+                      {{ row.form.required_leader_staff }}
+                      {% for error in row.form.required_leader_staff.errors %}
+                        <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                      {% endfor %}
+                    </div>
+
+                    <div class="form-control w-full gap-2">
+                      <label class="label justify-start gap-3 pb-0" for="{{ row.form.memo.id_for_label }}">
+                        <span class="label-text font-semibold text-slate-700">メモ</span>
+                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      </label>
+                      {{ row.form.memo }}
+                      {% for error in row.form.memo.errors %}
+                        <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+
+              <div data-weekday-empty class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm font-medium text-slate-500 {% if weekday_form_rows|length %}hidden{% endif %}">
+                曜日を選択すると入力欄がここに表示されます。
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-4 border-t border-base-300 pt-8">
+            <div>
+              <h3 class="text-base font-black text-slate-900">例外日条件</h3>
+              <p class="mt-1 text-sm font-medium text-slate-500">
+                カレンダーで例外日にしたい日を選び、登録済み一覧から1件ずつ条件を編集します。
+              </p>
+            </div>
+
+            <div class="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div class="space-y-4">
+                <div class="rounded-2xl border border-base-300 bg-white p-5 shadow-sm">
+                  <div class="mb-4 flex items-center justify-between">
+                    <div>
+                      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Calendar</p>
+                      <h4 class="mt-1 text-lg font-black text-slate-900">{{ shift_plan.year }}年{{ shift_plan.month }}月</h4>
+                    </div>
+                    <span class="rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-600">月曜始まり</span>
+                  </div>
+                  <div class="mb-2 grid grid-cols-7 gap-2 text-center text-xs font-bold tracking-wide text-slate-500">
+                    <span>月</span>
+                    <span>火</span>
+                    <span>水</span>
+                    <span>木</span>
+                    <span>金</span>
+                    <span class="text-sky-600">土</span>
+                    <span class="text-rose-600">日</span>
+                  </div>
+                  <div id="date-rule-calendar" class="grid grid-cols-7 gap-2"></div>
+                </div>
+
+                <div id="selected-date-section" class="hidden rounded-2xl border border-base-300 bg-white p-5 shadow-sm">
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <p class="text-sm font-black text-slate-900">選択中 <span id="selected-date-count">0</span>日</p>
+                      <p class="mt-1 text-xs font-medium text-slate-500">登録済みの日付は追加対象に含まれません。</p>
+                    </div>
+                    <button
+                      type="button"
+                      id="add-selected-dates-button"
+                      class="btn btn-primary h-11 rounded-lg border-brand-500 bg-brand-500 px-5 text-sm text-white hover:border-brand-600 hover:bg-brand-600 disabled:border-base-300 disabled:bg-slate-100 disabled:text-slate-400"
+                      disabled
+                    >
+                      選択した0日を例外日として追加
+                    </button>
+                  </div>
+                  <div id="selected-date-chips" class="mt-4 flex flex-wrap gap-2"></div>
+                </div>
+
+                <div class="rounded-2xl border border-base-300 bg-white p-5 shadow-sm">
+                  <div class="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <p class="text-sm font-black text-slate-900">登録済み例外日 <span id="date-rule-list-count">0</span>件</p>
+                      <p class="mt-1 text-xs font-medium text-slate-500">日付順に表示されます。</p>
+                    </div>
+                  </div>
+                  <div id="date-rule-list" class="divide-y divide-base-300"></div>
+                  <div id="date-rule-list-empty" class="rounded-xl border border-dashed border-base-300 bg-slate-50 px-4 py-8 text-center text-sm font-medium text-slate-500">
+                    まだ例外日はありません。カレンダーから日付を選択して追加してください。
+                  </div>
+                </div>
+              </div>
+
+              <div class="lg:sticky lg:top-6">
+                <div class="rounded-2xl border border-base-300 bg-white p-5 shadow-sm">
+                  <div class="mb-4">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Editor</p>
+                    <h4 class="mt-1 text-lg font-black text-slate-900">例外日条件の編集</h4>
+                  </div>
+
+                  <div id="date-rule-editor-empty" class="rounded-xl border border-dashed border-base-300 bg-slate-50 px-4 py-12 text-center">
+                    <p class="text-sm font-black text-slate-900">例外日を選択してください</p>
+                    <p class="mt-2 text-sm font-medium text-slate-500">
+                      登録済み例外日の「編集」または「＋ 条件を設定」を押すと、この場所で条件を設定できます。
+                    </p>
+                  </div>
+
+                  <div id="date-rule-editor-panels" class="space-y-4">
+                    {% for date_rule_form in date_rule_forms %}
+                      <section
+                        data-date-rule-panel
+                        data-panel-index="{{ forloop.counter0 }}"
+                        data-has-errors="{% if date_rule_form.errors %}1{% else %}0{% endif %}"
+                        class="hidden"
+                      >
+                        {{ date_rule_form.active }}
+                        {{ date_rule_form.date_rule_id }}
+                        <div class="hidden">{{ date_rule_form.target_date }}</div>
+
+                        <div class="mb-5 rounded-xl border border-base-300 bg-slate-50 px-4 py-4">
+                          <h5 class="text-base font-black text-slate-900" data-date-rule-heading>
+                            例外日の条件
+                          </h5>
+                          <p class="mt-1 text-sm font-medium text-slate-500" data-date-rule-heading-sub>
+                            選択した日付にだけ適用する条件です。
+                          </p>
+                          {% for error in date_rule_form.target_date.errors %}
+                            <p class="mt-2 text-sm font-medium text-error">{{ error }}</p>
+                          {% endfor %}
+                        </div>
+
+                        <div class="space-y-5">
+                          <div class="form-control w-full gap-2">
+                            <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.required_day_staff.id_for_label }}">
+                              <span class="label-text font-semibold text-slate-700">必要日勤数</span>
+                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                            </label>
+                            {{ date_rule_form.required_day_staff }}
+                            {% for error in date_rule_form.required_day_staff.errors %}
+                              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                            {% endfor %}
+                          </div>
+
+                          <div class="form-control w-full gap-2">
+                            <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.required_night_staff.id_for_label }}">
+                              <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
+                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                            </label>
+                            {{ date_rule_form.required_night_staff }}
+                            {% for error in date_rule_form.required_night_staff.errors %}
+                              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                            {% endfor %}
+                          </div>
+
+                          <div class="space-y-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4">
+                            <p class="text-sm font-semibold text-slate-700">追加条件</p>
+                            <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] sm:items-end">
+                              <div class="form-control w-full gap-2">
+                                <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.min_ability_level.id_for_label }}">
+                                  <span class="label-text font-semibold text-slate-700">勤務レベル</span>
+                                  <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                                </label>
+                                {{ date_rule_form.min_ability_level }}
+                              </div>
+                              <p class="pb-3 text-sm font-semibold text-slate-600">以上のスタッフが</p>
+                              <div class="form-control w-full gap-2">
+                                <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.min_ability_level_staff_count.id_for_label }}">
+                                  <span class="label-text font-semibold text-slate-700">必要人数</span>
+                                  <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                                </label>
+                                {{ date_rule_form.min_ability_level_staff_count }}
+                              </div>
+                              <p class="pb-3 text-sm font-semibold text-slate-600">人以上必要</p>
+                            </div>
+                            {% for error in date_rule_form.min_ability_level.errors %}
+                              <p class="text-sm font-medium text-error">{{ error }}</p>
+                            {% endfor %}
+                            {% for error in date_rule_form.min_ability_level_staff_count.errors %}
+                              <p class="text-sm font-medium text-error">{{ error }}</p>
+                            {% endfor %}
+                          </div>
+
+                          <div class="form-control w-full gap-2">
+                            <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.required_leader_staff.id_for_label }}">
+                              <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
+                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                            </label>
+                            {{ date_rule_form.required_leader_staff }}
+                            {% for error in date_rule_form.required_leader_staff.errors %}
+                              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                            {% endfor %}
+                          </div>
+
+                          <div class="form-control w-full gap-2">
+                            <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.memo.id_for_label }}">
+                              <span class="label-text font-semibold text-slate-700">メモ</span>
+                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                            </label>
+                            {{ date_rule_form.memo }}
+                            {% for error in date_rule_form.memo.errors %}
+                              <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+                            {% endfor %}
+                          </div>
+                        </div>
+                      </section>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <template id="date-rule-template">
+              <section
+                data-date-rule-panel
+                data-panel-index="__prefix__"
+                data-has-errors="0"
+                class="hidden"
+              >
+                {{ empty_date_rule_form.active }}
+                {{ empty_date_rule_form.date_rule_id }}
+                <div class="hidden">{{ empty_date_rule_form.target_date }}</div>
+
+                <div class="mb-5 rounded-xl border border-base-300 bg-slate-50 px-4 py-4">
+                  <h5 class="text-base font-black text-slate-900" data-date-rule-heading>例外日の条件</h5>
+                  <p class="mt-1 text-sm font-medium text-slate-500" data-date-rule-heading-sub>選択した日付にだけ適用する条件です。</p>
+                </div>
+
+                <div class="space-y-5">
+                  <div class="form-control w-full gap-2">
+                    <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.required_day_staff.id_for_label }}">
+                      <span class="label-text font-semibold text-slate-700">必要日勤数</span>
+                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                    </label>
+                    {{ empty_date_rule_form.required_day_staff }}
+                  </div>
+
+                  <div class="form-control w-full gap-2">
+                    <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.required_night_staff.id_for_label }}">
+                      <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
+                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                    </label>
+                    {{ empty_date_rule_form.required_night_staff }}
+                  </div>
+
+                  <div class="space-y-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4">
+                    <p class="text-sm font-semibold text-slate-700">追加条件</p>
+                    <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] sm:items-end">
+                      <div class="form-control w-full gap-2">
+                        <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.min_ability_level.id_for_label }}">
+                          <span class="label-text font-semibold text-slate-700">勤務レベル</span>
+                          <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                        </label>
+                        {{ empty_date_rule_form.min_ability_level }}
+                      </div>
+                      <p class="pb-3 text-sm font-semibold text-slate-600">以上のスタッフが</p>
+                      <div class="form-control w-full gap-2">
+                        <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.min_ability_level_staff_count.id_for_label }}">
+                          <span class="label-text font-semibold text-slate-700">必要人数</span>
+                          <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                        </label>
+                        {{ empty_date_rule_form.min_ability_level_staff_count }}
+                      </div>
+                      <p class="pb-3 text-sm font-semibold text-slate-600">人以上必要</p>
+                    </div>
+                  </div>
+
+                  <div class="form-control w-full gap-2">
+                    <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.required_leader_staff.id_for_label }}">
+                      <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
+                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                    </label>
+                    {{ empty_date_rule_form.required_leader_staff }}
+                  </div>
+
+                  <div class="form-control w-full gap-2">
+                    <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.memo.id_for_label }}">
+                      <span class="label-text font-semibold text-slate-700">メモ</span>
+                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                    </label>
+                    {{ empty_date_rule_form.memo }}
+                  </div>
+                </div>
+              </section>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
+        <a
+          href="{% url 'shifts:list' %}"
+          class="btn btn-outline h-12 rounded-lg border-base-300 bg-white px-6 text-base-content hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
+        >
+          シフト一覧へ戻る
+        </a>
+        <button
+          type="submit"
+          class="btn btn-primary h-12 rounded-lg border-brand-500 bg-brand-500 px-6 text-white hover:border-brand-600 hover:bg-brand-600"
+        >
+          条件を保存してシフト入力へ進む
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <script>
+    (() => {
+      const weekdayButtons = document.querySelectorAll("[data-weekday-button]");
+      const weekdayPanels = document.querySelectorAll("[data-weekday-panel]");
+      const weekdayEmpty = document.querySelector("[data-weekday-empty]");
+      const selectedCalendarDates = new Set();
+      let selectedDateRulePanel = null;
+
+      function updateWeekdayState() {
+        let visibleCount = 0;
+
+        weekdayButtons.forEach((button) => {
+          const index = button.dataset.weekdayIndex;
+          const panel = document.querySelector(`[data-weekday-panel][data-weekday-index="${index}"]`);
+          if (!panel) {
+            return;
+          }
+
+          const selectedInput = panel.querySelector('input[name$="-selected"]');
+          const isSelected = selectedInput && selectedInput.value === "1";
+          panel.classList.toggle("hidden", !isSelected);
+          if (isSelected) {
+            visibleCount += 1;
+          }
+
+          button.classList.toggle("border-sky-500", isSelected);
+          button.classList.toggle("bg-sky-50", isSelected);
+          button.classList.toggle("text-sky-700", isSelected);
+          button.classList.toggle("border-base-300", !isSelected);
+          button.classList.toggle("bg-white", !isSelected);
+          button.classList.toggle("text-slate-700", !isSelected);
+
+          panel.querySelectorAll("input, select, textarea").forEach((field) => {
+            if (field === selectedInput || field.type === "hidden") {
+              return;
+            }
+            field.disabled = !isSelected;
+          });
+        });
+
+        if (weekdayEmpty) {
+          weekdayEmpty.classList.toggle("hidden", visibleCount > 0);
+        }
+      }
+
+      weekdayButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const index = button.dataset.weekdayIndex;
+          const panel = document.querySelector(`[data-weekday-panel][data-weekday-index="${index}"]`);
+          if (!panel) {
+            return;
+          }
+
+          const selectedInput = panel.querySelector('input[name$="-selected"]');
+          if (!selectedInput) {
+            return;
+          }
+
+          selectedInput.value = selectedInput.value === "1" ? "0" : "1";
+          updateWeekdayState();
+        });
+      });
+
+      const dateRuleCalendar = document.getElementById("date-rule-calendar");
+      const selectedDateSection = document.getElementById("selected-date-section");
+      const selectedDateCount = document.getElementById("selected-date-count");
+      const selectedDateChips = document.getElementById("selected-date-chips");
+      const addSelectedDatesButton = document.getElementById("add-selected-dates-button");
+      const dateRuleList = document.getElementById("date-rule-list");
+      const dateRuleListCount = document.getElementById("date-rule-list-count");
+      const dateRuleListEmpty = document.getElementById("date-rule-list-empty");
+      const dateRuleEditorEmpty = document.getElementById("date-rule-editor-empty");
+      const dateRuleEditorPanels = document.getElementById("date-rule-editor-panels");
+      const dateRuleTemplate = document.getElementById("date-rule-template");
+      const dateRuleTotalForms = document.getElementById("date-rule-total-forms");
+      const datePicker = document.getElementById("date-rule-picker");
+      const addDateRuleButton = document.getElementById("add-date-rule-button");
+      const calendarYear = Number("{{ shift_plan.year }}");
+      const calendarMonth = Number("{{ shift_plan.month }}");
+
+      function getDateRulePanels() {
+        return [...dateRuleEditorPanels.querySelectorAll("[data-date-rule-panel]")];
+      }
+
+      function getField(panel, suffix) {
+        return panel.querySelector(`[name$="-${suffix}"]`);
+      }
+
+      function isActiveDateRule(panel) {
+        const activeField = getField(panel, "active");
+        return activeField && activeField.value === "1";
+      }
+
+      function getDateRuleDate(panel) {
+        const targetDateField = getField(panel, "target_date");
+        return targetDateField ? targetDateField.value : "";
+      }
+
+      function hasDateRuleErrors(panel) {
+        return panel.dataset.hasErrors === "1";
+      }
+
+      function hasMeaningfulDateRuleValues(panel) {
+        return [
+          getField(panel, "required_day_staff")?.value,
+          getField(panel, "required_night_staff")?.value,
+          getField(panel, "min_ability_level")?.value,
+          getField(panel, "min_ability_level_staff_count")?.value,
+          getField(panel, "required_leader_staff")?.value,
+          getField(panel, "memo")?.value?.trim(),
+        ].some((value) => value);
+      }
+
+      function getDateRuleStatus(panel) {
+        if (hasDateRuleErrors(panel)) {
+          return {
+            key: "error",
+            label: "入力エラー",
+            badgeClass: "bg-rose-100 text-rose-700",
+            dotClass: "bg-rose-500",
+          };
+        }
+
+        if (hasMeaningfulDateRuleValues(panel)) {
+          return {
+            key: "configured",
+            label: "設定済み",
+            badgeClass: "bg-emerald-100 text-emerald-700",
+            dotClass: "bg-emerald-500",
+          };
+        }
+
+        return {
+          key: "empty",
+          label: "条件未設定",
+          badgeClass: "bg-amber-100 text-amber-700",
+          dotClass: "bg-amber-500",
+        };
+      }
+
+      function formatDateLabel(dateString, includeWeekday = true) {
+        if (!dateString) {
+          return "未設定";
+        }
+
+        const [year, month, day] = dateString.split("-").map(Number);
+        const date = new Date(year, month - 1, day);
+        const weekdayLabels = ["日", "月", "火", "水", "木", "金", "土"];
+        const weekday = weekdayLabels[date.getDay()];
+        return includeWeekday
+          ? `${month}月${day}日（${weekday}）`
+          : `${month}月${day}日`;
+      }
+
+      function truncateText(text, maxLength = 28) {
+        if (!text) {
+          return "";
+        }
+        return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+      }
+
+      function updateDateRuleSummary(panel) {
+        const targetDate = getDateRuleDate(panel);
+        const heading = panel.querySelector("[data-date-rule-heading]");
+        const headingSub = panel.querySelector("[data-date-rule-heading-sub]");
+        const dayStaff = getField(panel, "required_day_staff")?.value;
+        const nightStaff = getField(panel, "required_night_staff")?.value;
+        const minLevel = getField(panel, "min_ability_level")?.value;
+        const minLevelCount = getField(panel, "min_ability_level_staff_count")?.value;
+        const leaderStaff = getField(panel, "required_leader_staff")?.value;
+        const memo = getField(panel, "memo")?.value?.trim();
+        const summaryParts = [];
+
+        if (dayStaff) {
+          summaryParts.push(`日勤${dayStaff}人`);
+        }
+        if (nightStaff) {
+          summaryParts.push(`夜勤${nightStaff}人`);
+        }
+        if (leaderStaff) {
+          summaryParts.push(`リーダー${leaderStaff}人`);
+        }
+        if (minLevel && minLevelCount) {
+          summaryParts.push(`勤務Lv${minLevel}以上${minLevelCount}人`);
+        }
+        if (memo) {
+          summaryParts.push(truncateText(memo));
+        }
+
+        if (heading) {
+          heading.textContent = targetDate ? `${formatDateLabel(targetDate)}の例外条件` : "例外日の条件";
+        }
+        if (headingSub) {
+          headingSub.textContent = summaryParts.length > 0
+            ? summaryParts.join("・")
+            : "月条件をそのまま使用します。必要な項目だけ入力してください。";
+        }
+
+        return summaryParts.length > 0 ? summaryParts.join("・") : "月条件をそのまま使用";
+      }
+
+      function getRegisteredDatePanels() {
+        return getDateRulePanels()
+          .filter((panel) => isActiveDateRule(panel) && getDateRuleDate(panel))
+          .sort((left, right) => getDateRuleDate(left).localeCompare(getDateRuleDate(right)));
+      }
+
+      function updateCalendarState() {
+        buildCalendar();
+      }
+
+      function buildCalendar() {
+        if (!dateRuleCalendar) {
+          return;
+        }
+
+        dateRuleCalendar.innerHTML = "";
+        const firstDay = new Date(calendarYear, calendarMonth - 1, 1);
+        const lastDay = new Date(calendarYear, calendarMonth, 0).getDate();
+        const startOffset = (firstDay.getDay() + 6) % 7;
+        const registeredPanels = getRegisteredDatePanels();
+        const registeredMap = new Map();
+        registeredPanels.forEach((panel) => {
+          const date = getDateRuleDate(panel);
+          if (!registeredMap.has(date)) {
+            registeredMap.set(date, panel);
+          }
+        });
+
+        for (let blank = 0; blank < startOffset; blank += 1) {
+          const spacer = document.createElement("div");
+          spacer.className = "aspect-square rounded-xl border border-transparent";
+          dateRuleCalendar.appendChild(spacer);
+        }
+
+        for (let day = 1; day <= lastDay; day += 1) {
+          const date = new Date(calendarYear, calendarMonth - 1, day);
+          const dateString = `${calendarYear}-${String(calendarMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const weekday = date.getDay();
+          const isSaturday = weekday === 6;
+          const isSunday = weekday === 0;
+          const isSelected = selectedCalendarDates.has(dateString);
+          const registeredPanel = registeredMap.get(dateString);
+          const status = registeredPanel ? getDateRuleStatus(registeredPanel) : null;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.calendarDate = dateString;
+          button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+          button.setAttribute("aria-label", `${calendarYear}年${calendarMonth}月${day}日 ${["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"][weekday]}を選択`);
+          button.className = "relative flex aspect-square flex-col items-start justify-between rounded-xl border px-2.5 py-2 text-left text-sm font-bold shadow-sm transition focus:outline-2 focus:outline-offset-2 focus:outline-brand-500";
+
+          if (registeredPanel) {
+            button.classList.add("border-slate-200", "bg-slate-50", "text-slate-900");
+          } else if (isSelected) {
+            button.classList.add("border-brand-500", "bg-brand-50", "text-brand-700");
+          } else {
+            button.classList.add("border-base-300", "bg-white", "text-slate-800", "hover:border-brand-300", "hover:bg-brand-50");
+          }
+
+          if (isSaturday) {
+            button.classList.add("text-sky-700");
+          }
+          if (isSunday) {
+            button.classList.add("text-rose-700");
+          }
+
+          const dayLabel = document.createElement("span");
+          dayLabel.textContent = String(day);
+          button.appendChild(dayLabel);
+
+          if (registeredPanel && status) {
+            const badge = document.createElement("span");
+            badge.className = `inline-flex h-2.5 w-2.5 rounded-full ${status.dotClass}`;
+            button.appendChild(badge);
+          } else if (isSelected) {
+            const badge = document.createElement("span");
+            badge.className = "inline-flex h-2.5 w-2.5 rounded-full bg-brand-500";
+            button.appendChild(badge);
+          }
+
+          button.addEventListener("click", () => {
+            if (registeredPanel) {
+              selectDateRule(registeredPanel, { scroll: true });
+              return;
+            }
+            toggleCalendarDate(dateString);
+          });
+
+          dateRuleCalendar.appendChild(button);
+        }
+      }
+
+      function toggleCalendarDate(dateString) {
+        if (selectedCalendarDates.has(dateString)) {
+          selectedCalendarDates.delete(dateString);
+        } else {
+          selectedCalendarDates.add(dateString);
+        }
+        renderSelectedDateChips();
+        updateCalendarState();
+      }
+
+      function renderSelectedDateChips() {
+        if (!selectedDateSection || !selectedDateCount || !selectedDateChips || !addSelectedDatesButton) {
+          return;
+        }
+
+        const dates = [...selectedCalendarDates].sort();
+        selectedDateSection.classList.toggle("hidden", dates.length === 0);
+        selectedDateCount.textContent = String(dates.length);
+        selectedDateChips.innerHTML = "";
+
+        dates.forEach((dateString) => {
+          const chip = document.createElement("span");
+          chip.className = "inline-flex items-center gap-2 rounded-full border border-base-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700";
+          chip.textContent = formatDateLabel(dateString);
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "text-slate-400 transition hover:text-slate-700";
+          removeButton.setAttribute("aria-label", `${formatDateLabel(dateString)}を選択解除`);
+          removeButton.textContent = "×";
+          removeButton.addEventListener("click", () => {
+            selectedCalendarDates.delete(dateString);
+            renderSelectedDateChips();
+            updateCalendarState();
+          });
+          chip.appendChild(removeButton);
+          selectedDateChips.appendChild(chip);
+        });
+
+        addSelectedDatesButton.disabled = dates.length === 0;
+        addSelectedDatesButton.textContent = `選択した${dates.length}日を例外日として追加`;
+      }
+
+      function createDateRulePanel(dateString) {
+        if (!dateRuleTemplate || !dateRuleEditorPanels || !dateRuleTotalForms) {
+          return null;
+        }
+
+        const nextIndex = Number(dateRuleTotalForms.value || "0");
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = dateRuleTemplate.innerHTML.replaceAll("__prefix__", String(nextIndex)).trim();
+        const panel = wrapper.firstElementChild;
+        panel.dataset.panelIndex = String(nextIndex);
+        dateRuleEditorPanels.appendChild(panel);
+        dateRuleTotalForms.value = String(nextIndex + 1);
+        getField(panel, "active").value = "1";
+        getField(panel, "target_date").value = dateString;
+        attachDateRulePanelEvents(panel);
+        updateDateRuleSummary(panel);
+        return panel;
+      }
+
+      function addSelectedDates() {
+        const dates = [...selectedCalendarDates].sort();
+        const registeredDates = new Set(getRegisteredDatePanels().map((panel) => getDateRuleDate(panel)));
+        const newPanels = [];
+
+        dates.forEach((dateString) => {
+          if (registeredDates.has(dateString)) {
+            return;
+          }
+          const panel = createDateRulePanel(dateString);
+          if (panel) {
+            newPanels.push(panel);
+          }
+        });
+
+        selectedCalendarDates.clear();
+        renderSelectedDateChips();
+        renderDateRuleList();
+        updateCalendarState();
+        updateEmptyState();
+
+        if (newPanels.length > 0) {
+          selectDateRule(newPanels[0], { scroll: true });
+        }
+      }
+
+      function renderDateRuleList() {
+        if (!dateRuleList || !dateRuleListCount || !dateRuleListEmpty) {
+          return;
+        }
+
+        const panels = getRegisteredDatePanels();
+        dateRuleListCount.textContent = String(panels.length);
+        dateRuleList.innerHTML = "";
+        dateRuleListEmpty.classList.toggle("hidden", panels.length > 0);
+
+        panels.forEach((panel) => {
+          const dateString = getDateRuleDate(panel);
+          const status = getDateRuleStatus(panel);
+          const summary = updateDateRuleSummary(panel);
+          const isSelected = selectedDateRulePanel === panel;
+          const item = document.createElement("div");
+          item.className = `py-4 ${isSelected ? "rounded-xl bg-brand-50/60 px-4" : ""}`;
+
+          const topRow = document.createElement("div");
+          topRow.className = "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between";
+
+          const info = document.createElement("div");
+          info.className = "min-w-0";
+
+          const titleRow = document.createElement("div");
+          titleRow.className = "flex flex-wrap items-center gap-2";
+
+          const title = document.createElement("p");
+          title.className = "text-sm font-black text-slate-900";
+          title.textContent = formatDateLabel(dateString);
+          titleRow.appendChild(title);
+
+          const badge = document.createElement("span");
+          badge.className = `rounded-full px-2.5 py-1 text-[11px] font-bold ${status.badgeClass}`;
+          badge.textContent = status.label;
+          titleRow.appendChild(badge);
+          info.appendChild(titleRow);
+
+          const summaryText = document.createElement("p");
+          summaryText.className = "mt-2 text-sm font-medium text-slate-600";
+          summaryText.textContent = summary;
+          info.appendChild(summaryText);
+
+          const actions = document.createElement("div");
+          actions.className = "flex gap-2 sm:flex-col sm:items-end lg:flex-row lg:items-center";
+
+          const editButton = document.createElement("button");
+          editButton.type = "button";
+          editButton.className = `btn h-10 min-h-10 rounded-lg px-4 text-sm ${
+            isSelected
+              ? "btn-disabled border-base-300 bg-slate-100 text-slate-500"
+              : "btn-outline border-base-300 bg-white text-base-content hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
+          }`;
+          if (isSelected) {
+            editButton.textContent = "編集中";
+            editButton.disabled = true;
+          } else {
+            editButton.textContent = status.key === "empty" ? "＋ 条件を設定" : "編集";
+            editButton.addEventListener("click", () => selectDateRule(panel, { scroll: true }));
+          }
+          actions.appendChild(editButton);
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "btn btn-outline h-10 min-h-10 rounded-lg border-base-300 bg-white px-4 text-sm text-base-content hover:border-error hover:bg-error/5 hover:text-error";
+          removeButton.textContent = "削除";
+          removeButton.addEventListener("click", () => removeDateRule(panel));
+          actions.appendChild(removeButton);
+
+          topRow.appendChild(info);
+          topRow.appendChild(actions);
+          item.appendChild(topRow);
+          dateRuleList.appendChild(item);
+        });
+      }
+
+      function selectDateRule(panel, { scroll = false } = {}) {
+        selectedDateRulePanel = panel && isActiveDateRule(panel) ? panel : null;
+
+        getDateRulePanels().forEach((candidate) => {
+          candidate.classList.toggle("hidden", candidate !== selectedDateRulePanel);
+        });
+
+        updateEmptyState();
+        renderDateRuleList();
+        updateCalendarState();
+
+        if (scroll && selectedDateRulePanel && window.innerWidth < 1024) {
+          selectedDateRulePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+
+      function removeDateRule(panel) {
+        const dateString = getDateRuleDate(panel);
+        if (!window.confirm(`${formatDateLabel(dateString, false)}の例外条件を削除しますか？`)) {
+          return;
+        }
+
+        const activeField = getField(panel, "active");
+        if (activeField) {
+          activeField.value = "0";
+        }
+
+        if (selectedDateRulePanel === panel) {
+          selectedDateRulePanel = null;
+        }
+
+        renderDateRuleList();
+        updateCalendarState();
+        updateEmptyState();
+      }
+
+      function updateEmptyState() {
+        const activePanels = getRegisteredDatePanels();
+        if (dateRuleEditorEmpty) {
+          if (activePanels.length === 0) {
+            dateRuleEditorEmpty.classList.remove("hidden");
+            dateRuleEditorEmpty.innerHTML = `
+              <p class="text-sm font-black text-slate-900">まだ例外日はありません</p>
+              <p class="mt-2 text-sm font-medium text-slate-500">カレンダーから日付を選択して追加してください。</p>
+            `;
+          } else if (!selectedDateRulePanel) {
+            dateRuleEditorEmpty.classList.remove("hidden");
+            dateRuleEditorEmpty.innerHTML = `
+              <p class="text-sm font-black text-slate-900">例外日を選択してください</p>
+              <p class="mt-2 text-sm font-medium text-slate-500">登録済み例外日の「編集」を押すと、この場所で条件を設定できます。</p>
+            `;
+          } else {
+            dateRuleEditorEmpty.classList.add("hidden");
+          }
+        }
+
+        getDateRulePanels().forEach((panel) => {
+          if (!isActiveDateRule(panel)) {
+            panel.classList.add("hidden");
+          }
+        });
+      }
+
+      function attachDateRulePanelEvents(panel) {
+        const allFields = panel.querySelectorAll("input, select, textarea");
+        allFields.forEach((field) => {
+          field.addEventListener("input", () => {
+            updateDateRuleSummary(panel);
+            renderDateRuleList();
+            updateCalendarState();
+          });
+          field.addEventListener("change", () => {
+            updateDateRuleSummary(panel);
+            renderDateRuleList();
+            updateCalendarState();
+          });
+        });
+        updateDateRuleSummary(panel);
+      }
+
+      if (addSelectedDatesButton) {
+        addSelectedDatesButton.addEventListener("click", addSelectedDates);
+      }
+
+      if (addDateRuleButton && datePicker) {
+        addDateRuleButton.addEventListener("click", () => {
+          if (!datePicker.value) {
+            datePicker.focus();
+            return;
+          }
+          toggleCalendarDate(datePicker.value);
+          datePicker.value = "";
+        });
+      }
+
+      getDateRulePanels().forEach(attachDateRulePanelEvents);
+      renderSelectedDateChips();
+      renderDateRuleList();
+      updateCalendarState();
+      updateEmptyState();
+      updateWeekdayState();
+
+      const firstErrorPanel = getRegisteredDatePanels().find((panel) => hasDateRuleErrors(panel));
+      if (firstErrorPanel) {
+        selectDateRule(firstErrorPanel);
+      }
+    })();
+  </script>
+{% endblock %}

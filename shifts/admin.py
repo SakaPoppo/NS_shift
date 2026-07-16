@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DayOffRequest, ShiftPlan, ShiftResult, ShiftRule
+from .models import DateShiftRule, DayOffRequest, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 
 
 @admin.register(ShiftPlan)
@@ -22,6 +22,32 @@ class ShiftRuleAdmin(admin.ModelAdmin):
         "max_consecutive_work_days",
         "night_shift_next_day_off",
     )
+
+
+@admin.register(WeekdayShiftRule)
+class WeekdayShiftRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "shift_plan",
+        "day_of_week",
+        "required_day_staff",
+        "required_night_staff",
+        "required_leader_staff",
+    )
+    list_filter = ("day_of_week",)
+    search_fields = ("shift_plan__title",)
+
+
+@admin.register(DateShiftRule)
+class DateShiftRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "shift_plan",
+        "target_date",
+        "required_day_staff",
+        "required_night_staff",
+        "required_leader_staff",
+    )
+    list_filter = ("target_date",)
+    search_fields = ("shift_plan__title", "memo")
 
 
 @admin.register(DayOffRequest)
