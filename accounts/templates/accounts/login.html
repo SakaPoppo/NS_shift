@@ -4,44 +4,50 @@
 
 {% block content %}
   <section class="mx-auto flex w-full max-w-[1280px] items-center justify-center px-5 sm:px-8 lg:px-10">
-    <div class="card w-full max-w-xl border border-base-200 bg-white shadow-xl">
-      <div class="card-body gap-6 p-6 sm:p-8">
+    <div class="ns-page-panel-strong w-full max-w-xl p-6 sm:p-8">
+      <div class="space-y-6">
         <div class="space-y-2 text-center">
           <h1 class="text-3xl font-extrabold text-slate-900">ログイン</h1>
           <p class="text-sm font-medium text-slate-500">ユーザー名またはメールアドレスでログインします</p>
         </div>
 
         {% if form.non_field_errors %}
-          <div class="alert alert-error">
-            <span>{{ form.non_field_errors|join:" " }}</span>
-          </div>
+          {% include "components/alert.html" with variant="error" text=form.non_field_errors|join:" " %}
         {% endif %}
 
         <form method="post" class="space-y-5">
           {% csrf_token %}
 
-          <div class="form-control gap-2">
-            <label class="label" for="{{ form.username_or_email.id_for_label }}">
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ form.username_or_email.id_for_label }}">
               <span class="label-text font-bold text-slate-700">{{ form.username_or_email.label }}</span>
+              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
             </label>
+            <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">登録済みのユーザー名またはメールアドレスを入力してください。</span></div>
             {{ form.username_or_email }}
             {% for error in form.username_or_email.errors %}
-              <p class="text-sm font-medium text-error">{{ error }}</p>
+              <div class="label justify-start px-0 pt-1">
+                <span class="label-text-alt text-sm font-medium text-error">{{ error }}</span>
+              </div>
             {% endfor %}
           </div>
 
-          <div class="form-control gap-2">
-            <label class="label" for="{{ form.password.id_for_label }}">
+          <div class="form-control w-full gap-2">
+            <label class="label justify-start gap-3 pb-0" for="{{ form.password.id_for_label }}">
               <span class="label-text font-bold text-slate-700">{{ form.password.label }}</span>
+              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
             </label>
+            <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">アカウント作成時のパスワードを入力してください。</span></div>
             {{ form.password }}
             {% for error in form.password.errors %}
-              <p class="text-sm font-medium text-error">{{ error }}</p>
+              <div class="label justify-start px-0 pt-1">
+                <span class="label-text-alt text-sm font-medium text-error">{{ error }}</span>
+              </div>
             {% endfor %}
           </div>
 
-          <div class="card-actions pt-2">
-            <button type="submit" class="btn btn-primary w-full">ログインする</button>
+          <div class="pt-2">
+            <button type="submit" class="btn btn-primary h-12 w-full rounded-lg border-brand-500 bg-brand-500 text-white hover:border-brand-600 hover:bg-brand-600">ログインする</button>
           </div>
         </form>
 

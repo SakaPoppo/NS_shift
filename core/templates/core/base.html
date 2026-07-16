@@ -1,6 +1,6 @@
 {% load static tailwind_tags %}
 <!DOCTYPE html>
-<html lang="ja" data-theme="light">
+<html lang="ja" data-theme="corporate">
   <head>
     <!-- 基本的なメタ情報 -->
     <meta charset="utf-8">
@@ -55,23 +55,23 @@
               <span class="text-sm font-semibold text-slate-700">
                 ようこそ {{ request.user.get_username }}さん
               </span>
-              <a class="btn btn-ghost btn-sm text-slate-700" href="{% url 'shifts:list' %}">
+              <a class="btn btn-ghost btn-sm rounded-lg text-base-content hover:bg-brand-50 hover:text-brand-600" href="{% url 'shifts:list' %}">
                 シフト管理
               </a>
-              <a class="btn btn-ghost btn-sm text-slate-700" href="{% url 'staff:list' %}">
+              <a class="btn btn-ghost btn-sm rounded-lg text-base-content hover:bg-brand-50 hover:text-brand-600" href="{% url 'staff:list' %}">
                 スタッフ管理
               </a>
               <form method="post" action="{% url 'accounts:logout' %}">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-ghost btn-sm text-slate-700">
+                <button type="submit" class="btn btn-ghost btn-sm rounded-lg text-base-content hover:bg-brand-50 hover:text-brand-600">
                   ログアウト
                 </button>
               </form>
             {% else %}
-              <a class="btn btn-ghost btn-sm text-slate-700" href="{% url 'accounts:login' %}">
+              <a class="btn btn-ghost btn-sm rounded-lg text-base-content hover:bg-brand-50 hover:text-brand-600" href="{% url 'accounts:login' %}">
                 ログイン
               </a>
-              <a class="btn btn-sm border-brand-500 bg-brand-500 text-white hover:border-brand-600 hover:bg-brand-600" href="{% url 'accounts:signup' %}">
+              <a class="btn btn-primary btn-sm rounded-lg border-brand-500 bg-brand-500 text-white hover:border-brand-600 hover:bg-brand-600" href="{% url 'accounts:signup' %}">
                 新規登録
               </a>
             {% endif %}
@@ -86,9 +86,15 @@
           <div class="mx-auto w-full max-w-[1280px] px-5 pt-5 sm:px-8 lg:px-10">
             <div class="space-y-3">
               {% for message in messages %} <!-- メッセージ表示 -->
-                <div class="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800 shadow-sm">
-                  {{ message }}
-                </div>
+                {% if "error" in message.tags %}
+                  {% include "components/alert.html" with variant="error" text=message %}
+                {% elif "success" in message.tags %}
+                  {% include "components/alert.html" with variant="success" text=message %}
+                {% elif "warning" in message.tags %}
+                  {% include "components/alert.html" with variant="warning" text=message %}
+                {% else %}
+                  {% include "components/alert.html" with variant="info" text=message %}
+                {% endif %}
               {% endfor %}
             </div>
           </div>

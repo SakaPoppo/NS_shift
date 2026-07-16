@@ -1,0 +1,6 @@
+<div
+  role="alert"
+  class="alert rounded-xl border {% if variant == 'error' %}alert-error border-error/20{% elif variant == 'success' %}alert-success border-success/20{% elif variant == 'warning' %}alert-warning border-warning/20{% else %}alert-info border-info/20{% endif %}"
+>
+  <span class="text-sm font-medium">{{ text }}</span>
+</div>

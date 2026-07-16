@@ -1,5 +1,7 @@
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes: corporate --default;
+}
 
 @theme {
   --color-brand-50: #f4f8fc;
@@ -13,6 +15,30 @@
   --color-muted: #5f6b7a;
   --shadow-panel: 0 18px 40px rgba(15, 23, 42, 0.08);
   --font-sans: "Zen Kaku Gothic New", sans-serif;
+}
+
+[data-theme="corporate"] {
+  --color-primary: var(--color-brand-500);
+  --color-primary-content: #ffffff;
+  --color-secondary: #71add7;
+  --color-base-100: #ffffff;
+  --color-base-200: #edf2f7;
+  --color-base-300: #d8e1ea;
+  --color-base-content: var(--color-ink);
+  --color-info: #005b8e;
+  --color-success: #0f766e;
+  --color-warning: #b45309;
+  --color-error: #c2410c;
+}
+
+@layer components {
+  .ns-page-panel {
+    @apply rounded-xl border border-base-300 bg-white;
+  }
+
+  .ns-page-panel-strong {
+    @apply rounded-2xl border border-base-300 bg-white shadow-sm;
+  }
 }
 
 /**
