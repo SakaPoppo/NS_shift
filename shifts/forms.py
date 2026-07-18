@@ -6,75 +6,117 @@ from staff.models import StaffMember
 from .models import DateShiftRule, ShiftPlan, ShiftRule, WeekdayShiftRule
 from .services import get_month_date_range
 
+INPUT_CLASS = (
+    "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white "
+    "text-sm text-base-content focus:border-brand-500 focus:outline-none"
+)
+SELECT_CLASS = (
+    "select select-bordered h-12 w-full rounded-lg border-base-300 bg-white "
+    "text-sm text-base-content focus:border-brand-500 focus:outline-none"
+)
+TEXTAREA_CLASS = (
+    "textarea textarea-bordered w-full rounded-lg border-base-300 bg-white "
+    "text-sm text-base-content placeholder:text-base-content/45 "
+    "focus:border-brand-500 focus:outline-none"
+)
+
 
 def coerce_bool(value):
+    # HTML フォームからの入力値は基本的に文字列なので、以下の値はPythonのboolに変換する。トグル用
     return value in {True, "True", "true", "1", "on"}
 
 
+def set_widget_attrs(field, **attrs):
+    # HTMLにクラス用の属性を追加する用の省略パーツ、↓をいちいち書かない
+    field.widget.attrs.update(attrs)
+
+
+def add_ability_requirement_errors(form, cleaned_data):
+    # 勤務レベル条件の片方だけ入力されたとき、対象フォームにエラーを付ける
+    min_ability_level = cleaned_data.get("min_ability_level")
+    min_ability_level_staff_count = cleaned_data.get("min_ability_level_staff_count")
+    if (min_ability_level is None) ^ (min_ability_level_staff_count is None):
+        message = "勤務レベル条件を使う場合は、レベルと人数を両方入力してください。"
+        if min_ability_level is None:
+            form.add_error("min_ability_level", message) 
+        if min_ability_level_staff_count is None:
+            form.add_error("min_ability_level_staff_count", message)
+
+
+def delete_form_instance(form):
+    # 編集画面で条件を解除した時に、DB上のインスタンスを削除するためのヘルパー関数
+    if form.instance: # form.instance　には　weekday_rule　とかのオブジェクトが入る
+        form.instance.delete()
+        form.instance = None
+
+
 class ShiftPlanCreateForm(forms.ModelForm):
+    """シフト表の新規作成フォーム。
+
+    受け取るもの:
+    - year, month の入力値
+    - __init__ では user を受け取り、重複チェックに使う
+
+    返すもの:
+    - clean(): バリデーション済み cleaned_data
+    - save(): 保存済み、または保存前の ShiftPlan インスタンス
+    """
+
     START_YEAR = 2025
     YEAR_COUNT = 10
     YEAR_CHOICES = [(year, f"{year}年") for year in range(START_YEAR, START_YEAR + YEAR_COUNT)]
     MONTH_CHOICES = [(month, f"{month}月") for month in range(1, 13)]
 
-    year = forms.TypedChoiceField( #数値入力欄は嫌だから自分でフォーム書くとこ１
+    year = forms.TypedChoiceField(
         label="年",
         choices=YEAR_CHOICES,
-        coerce=int, #数値に変換
+        coerce=int,
     )
-    month = forms.TypedChoiceField( #数値〜フォーム書くとこ2
+    month = forms.TypedChoiceField(
         label="月",
         choices=MONTH_CHOICES,
-        coerce=int, #数値に変換
-        widget=forms.HiddenInput, #HiddenInputはHTML上で表示されない入力欄を作る
+        coerce=int,
+        widget=forms.HiddenInput, #ボタンで表示するためHidden
     )
 
-    class Meta: #どのモデル、フィールドを使うかを指定
+    class Meta: # ModelFormだから結びつくモッデルを指定
         model = ShiftPlan
-        fields = ("title", "year", "month")
+        fields = ("year", "month")
 
-    def __init__(self, *args, user=None, **kwargs): #ユーザーはフォーム入力されないので、自力で引っ張ってくる
+    def __init__(self, *args, user=None, **kwargs):
+        # ModelFormはuserを引数にできないから、__init__で受け取ってself.userに入れる
         self.user = user
         super().__init__(*args, **kwargs)
 
         today = timezone.localdate()
         year_choices = [choice[0] for choice in self.YEAR_CHOICES]
-        initial_year = today.year if today.year in year_choices else year_choices[0]
+        initial_year = today.year if today.year in year_choices else year_choices[0] # 今年の年を初期値に設定
 
-        self.fields["title"].required = False
-        self.fields["title"].widget.attrs.update(
-            {
-                "class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none",
-                "placeholder": "例：2026年7月 ICUシフト表",
-            }
-        )
-        self.fields["year"].initial = self.initial.get("year", initial_year)
-        self.fields["year"].widget.attrs.update(
-            {
-                "class": "select select-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
-            }
-        )
+        self.fields["year"].initial = self.initial.get("year", initial_year) 
+        set_widget_attrs(self.fields["year"], **{"class": SELECT_CLASS}) 
         self.fields["month"].initial = self.initial.get("month", today.month)
 
     def clean(self):
-        cleaned_data = super().clean()
-        year = cleaned_data.get("year")
+        # 入力された year/month を受け取り、同じ年月の重複作成がないか確認して返す。
+        cleaned_data = super().clean() # clean()はModelFormのバリデーション用メソッド
+        year = cleaned_data.get("year") #get()なのは、yearがない場合にエラーを吐かないようにするため
         month = cleaned_data.get("month")
         if self.user and year and month:
             if ShiftPlan.objects.filter(user=self.user, year=year, month=month).exists():
                 self.add_error("month", "選択した年月のシフト表はすでに作成されています。")
         return cleaned_data
 
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        if not instance.title:
-            instance.title = f"{instance.year}年{instance.month}月 シフト表"
-        if commit:
-            instance.save()
-        return instance
-
-
 class ShiftRuleForm(forms.Form):
+    """月共通のシフト条件を入力するフォーム。
+
+    受け取るもの:
+    - 必要人数、休日数、最大連勤数、夜勤翌日休み設定
+    - __init__ では既存の shift_rule を受け取り初期表示に使う
+
+    返すもの:
+    - save(): 保存された ShiftRule インスタンス
+    """
+
     required_day_staff = forms.IntegerField(
         label="必要日勤数",
         min_value=0,
@@ -100,25 +142,22 @@ class ShiftRuleForm(forms.Form):
         label="夜勤明け翌日を公休にするか",
         choices=((True, "する"), (False, "しない")),
         coerce=coerce_bool,
-        widget=forms.RadioSelect,
+        widget=forms.RadioSelect, #ラジオボタンで表示するためのウィジェット
     )
 
     def __init__(self, *args, shift_rule=None, **kwargs):
+        #  親のフォーム呼び出し、既存の shift_rule がない場合は初期値を設定する。
         super().__init__(*args, **kwargs)
         self.shift_rule = shift_rule
 
-        for name, field in self.fields.items():
+        for name, field in self.fields.items(): # 各フィールドにクラスを設定
             if name == "night_shift_next_day_off":
-                field.widget.attrs.update({"class": "radio radio-primary radio-sm"})
+                set_widget_attrs(field, **{"class": "radio radio-primary radio-sm"})
                 continue
 
-            field.widget.attrs.update(
-                {
-                    "class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
-                }
-            )
+            set_widget_attrs(field, **{"class": INPUT_CLASS})
 
-        if shift_rule and not self.is_bound:
+        if shift_rule and not self.is_bound: # 保存されているルールの値がある場合は、それを初期値として設定する
             self.initial.update(
                 {
                     "required_day_staff": shift_rule.required_day_staff,
@@ -129,7 +168,7 @@ class ShiftRuleForm(forms.Form):
                     "night_shift_next_day_off": shift_rule.night_shift_next_day_off,
                 }
             )
-        elif not self.is_bound:
+        elif not self.is_bound: # 保存されているルールがない場合は、初期値をこれにする
             self.initial.update(
                 {
                     "required_day_staff": 0,
@@ -142,6 +181,7 @@ class ShiftRuleForm(forms.Form):
             )
 
     def save(self, shift_plan):
+        # cleaned_data と shift_plan を受け取り、月共通ルールを保存して返す。
         shift_rule = self.shift_rule
         if shift_rule is None:
             try:
@@ -164,6 +204,17 @@ class ShiftRuleForm(forms.Form):
 
 
 class WeekdayShiftRuleForm(forms.Form):
+    """曜日ごとの追加条件を扱うフォーム。
+
+    受け取るもの:
+    - selected, day_of_week, 必要人数、勤務レベル条件、memo
+    - __init__ では day_of_week と既存 instance を受け取り初期表示に使う
+
+    返すもの:
+    - clean(): バリデーション済み cleaned_data
+    - save(): 保存された WeekdayShiftRule、または削除時は None
+    """
+
     selected = forms.CharField(required=False, widget=forms.HiddenInput)
     day_of_week = forms.IntegerField(min_value=0, max_value=6, widget=forms.HiddenInput)
     required_day_staff = forms.IntegerField(label="必要日勤数", min_value=0, required=False)
@@ -188,6 +239,7 @@ class WeekdayShiftRuleForm(forms.Form):
     )
 
     def __init__(self, *args, day_of_week=None, instance=None, **kwargs):
+        # 曜日番号と既存条件を受け取り、その曜日専用フォームを作る。
         super().__init__(*args, **kwargs)
         self.instance = instance
 
@@ -196,31 +248,27 @@ class WeekdayShiftRuleForm(forms.Form):
                 continue
 
             if field_name == "day_of_week":
-                field.widget.attrs.update({"value": day_of_week if day_of_week is not None else ""})
+                set_widget_attrs(
+                    field,
+                    **{"value": day_of_week if day_of_week is not None else ""},
+                )
                 continue
 
             if field_name == "min_ability_level":
-                field.widget.attrs.update(
-                    {
-                        "class": "select select-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
-                    }
-                )
+                set_widget_attrs(field, **{"class": SELECT_CLASS})
                 continue
 
             if field_name == "memo":
-                field.widget.attrs.update(
-                    {
-                        "class": "textarea textarea-bordered w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none",
+                set_widget_attrs(
+                    field,
+                    **{
+                        "class": TEXTAREA_CLASS,
                         "placeholder": "必要なメモがあれば入力",
-                    }
+                    },
                 )
                 continue
 
-            field.widget.attrs.update(
-                {
-                    "class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
-                }
-            )
+            set_widget_attrs(field, **{"class": INPUT_CLASS})
 
         if not self.is_bound:
             initial_day_of_week = instance.day_of_week if instance else day_of_week
@@ -239,11 +287,13 @@ class WeekdayShiftRuleForm(forms.Form):
                 )
 
     def is_selected(self):
+        # 曜日ボタンが選択されているかを見て、True / False を返す。
         if not self.is_bound:
             return self.initial.get("selected") == "1"
         return self.data.get(self.add_prefix("selected"), "0") == "1"
 
     def has_meaningful_input(self):
+        # 空欄だけのフォームかどうかを判定して、入力ありなら True を返す。
         if not self.is_bound:
             return bool(self.instance)
 
@@ -261,6 +311,7 @@ class WeekdayShiftRuleForm(forms.Form):
         return any(str(value).strip() for value in raw_fields)
 
     def clean(self):
+        # 曜日条件の整合性を確認し、cleaned_data を返す。
         cleaned_data = super().clean()
         day_of_week = cleaned_data.get("day_of_week")
         if not self.is_selected():
@@ -273,12 +324,7 @@ class WeekdayShiftRuleForm(forms.Form):
         if has_meaningful_input and day_of_week is None:
             self.add_error("day_of_week", "条件を設定する曜日を選択してください。")
 
-        if (min_ability_level is None) ^ (min_ability_level_staff_count is None):
-            message = "勤務レベル条件を使う場合は、レベルと人数を両方入力してください。"
-            if min_ability_level is None:
-                self.add_error("min_ability_level", message)
-            if min_ability_level_staff_count is None:
-                self.add_error("min_ability_level_staff_count", message)
+        add_ability_requirement_errors(self, cleaned_data)
 
         if day_of_week is None:
             return cleaned_data
@@ -295,16 +341,13 @@ class WeekdayShiftRuleForm(forms.Form):
         return cleaned_data
 
     def save(self, shift_plan):
+        # shift_plan を受け取り、曜日条件を保存するか削除するかを判定して返す。
         if not self.is_selected():
-            if self.instance:
-                self.instance.delete()
-                self.instance = None
+            delete_form_instance(self)
             return None
 
         if not self.has_meaningful_input():
-            if self.instance:
-                self.instance.delete()
-                self.instance = None
+            delete_form_instance(self)
             return None
 
         weekday_rule = self.instance or WeekdayShiftRule(shift_plan=shift_plan)
@@ -321,6 +364,17 @@ class WeekdayShiftRuleForm(forms.Form):
 
 
 class DateShiftRuleForm(forms.Form):
+    """特定日ごとの追加条件を扱うフォーム。
+
+    受け取るもの:
+    - active, target_date, 必要人数、勤務レベル条件、memo
+    - __init__ では shift_plan と既存 instance を受け取り、入力可能日も制限する
+
+    返すもの:
+    - clean(): バリデーション済み cleaned_data
+    - save(): 保存された DateShiftRule、または非アクティブ時は None
+    """
+
     active = forms.CharField(required=False, widget=forms.HiddenInput)
     date_rule_id = forms.IntegerField(required=False, widget=forms.HiddenInput)
     target_date = forms.DateField(
@@ -350,35 +404,30 @@ class DateShiftRuleForm(forms.Form):
     )
 
     def __init__(self, *args, shift_plan, instance=None, **kwargs):
+        # 対象シフト表を受け取り、その月の範囲だけ入力できる日付フォームを作る。
         super().__init__(*args, **kwargs)
         self.shift_plan = shift_plan
         self.instance = instance
 
-        self.fields["active"].widget.attrs.update({"value": "1" if instance else "0"})
+        set_widget_attrs(self.fields["active"], **{"value": "1" if instance else "0"})
         min_date, max_date = get_month_date_range(shift_plan.year, shift_plan.month)
-        self.fields["target_date"].widget.attrs.update(
-            {
-                "class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
+        set_widget_attrs(
+            self.fields["target_date"],
+            **{
+                "class": INPUT_CLASS,
                 "min": min_date,
                 "max": max_date,
-            }
+            },
         )
         for field_name in ("required_day_staff", "required_night_staff", "required_leader_staff", "min_ability_level_staff_count"):
-            self.fields[field_name].widget.attrs.update(
-                {
-                    "class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
-                }
-            )
-        self.fields["min_ability_level"].widget.attrs.update(
-            {
-                "class": "select select-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content focus:border-brand-500 focus:outline-none",
-            }
-        )
-        self.fields["memo"].widget.attrs.update(
-            {
-                "class": "textarea textarea-bordered w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none",
+            set_widget_attrs(self.fields[field_name], **{"class": INPUT_CLASS})
+        set_widget_attrs(self.fields["min_ability_level"], **{"class": SELECT_CLASS})
+        set_widget_attrs(
+            self.fields["memo"],
+            **{
+                "class": TEXTAREA_CLASS,
                 "placeholder": "必要なメモがあれば入力",
-            }
+            },
         )
 
         if not self.is_bound and instance:
@@ -397,11 +446,13 @@ class DateShiftRuleForm(forms.Form):
             )
 
     def is_active(self):
+        # この特定日フォームが有効かどうかを見て、True / False を返す。
         if not self.is_bound:
             return self.initial.get("active") == "1"
         return self.data.get(self.add_prefix("active"), "0") == "1"
 
     def has_meaningful_input(self):
+        # 実際に保存対象の入力があるかを見て、True / False を返す。
         if not self.is_bound:
             return bool(self.instance)
 
@@ -420,6 +471,7 @@ class DateShiftRuleForm(forms.Form):
         return any(str(value).strip() for value in raw_fields)
 
     def clean(self):
+        # 対象日と条件の整合性を確認し、cleaned_data を返す。
         cleaned_data = super().clean()
         if not self.is_active():
             return cleaned_data
@@ -441,22 +493,14 @@ class DateShiftRuleForm(forms.Form):
         if existing_rule.exists():
             self.add_error("target_date", "同じ日付の特定日条件はすでに登録されています。")
 
-        min_ability_level = cleaned_data.get("min_ability_level")
-        min_ability_level_staff_count = cleaned_data.get("min_ability_level_staff_count")
-        if (min_ability_level is None) ^ (min_ability_level_staff_count is None):
-            message = "勤務レベル条件を使う場合は、レベルと人数を両方入力してください。"
-            if min_ability_level is None:
-                self.add_error("min_ability_level", message)
-            if min_ability_level_staff_count is None:
-                self.add_error("min_ability_level_staff_count", message)
+        add_ability_requirement_errors(self, cleaned_data)
 
         return cleaned_data
 
     def save(self, shift_plan):
+        # shift_plan を受け取り、特定日条件を保存するか削除するかを判定して返す。
         if not self.is_active():
-            if self.instance:
-                self.instance.delete()
-                self.instance = None
+            delete_form_instance(self)
             return None
 
         if not self.has_meaningful_input():

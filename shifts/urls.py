@@ -10,6 +10,9 @@ from .views import (
 
 app_name = "shifts"
 
+# shifts アプリ内で使うURL一覧。
+# 受け取るもの: ブラウザからのパスと必要に応じた pk
+# 返すもの: 対応する view へのルーティング設定
 urlpatterns = [
     path("", ShiftPlanListView.as_view(), name="list"),
     path("create/", ShiftPlanCreateView.as_view(), name="create"),
