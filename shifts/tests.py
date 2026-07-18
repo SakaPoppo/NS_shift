@@ -5,12 +5,28 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
-from staff.models import StaffMember
+from staff.models import StaffMember, StaffRegularDayOff
 
-from .forms import ShiftRuleForm
-from .models import DateShiftRule, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
+from .forms import ShiftPlanCreateForm, ShiftRuleForm
+from .models import DateShiftRule, DayOffRequest, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import get_effective_rule_for_date
 from .views import build_shift_plan_grid
+
+
+class ShiftPlanModelTests(TestCase):
+    def test_display_title_is_generated_from_year_and_month(self):
+        user = get_user_model().objects.create_user(
+            username="plan-user",
+            password="password123",
+        )
+        shift_plan = ShiftPlan.objects.create(
+            user=user,
+            year=2026,
+            month=7,
+        )
+
+        self.assertEqual(shift_plan.display_title, "2026年7月 シフト表")
+        self.assertEqual(str(shift_plan), "2026年7月 シフト表")
 
 
 class ShiftResultModelTests(TestCase):
@@ -28,7 +44,6 @@ class ShiftResultModelTests(TestCase):
             user=self.user,
             year=2026,
             month=7,
-            title="2026年7月 シフト表",
         )
 
     def test_paid_special_training_shift_types_can_be_saved(self):
@@ -96,7 +111,10 @@ class ShiftAggregationTests(TestCase):
             ),
         }
         day_off_request_keys = {
-            (self.staff_member.id, month_dates[6]),
+            (self.staff_member.id, month_dates[6]): {
+                "shift_type": ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+                "source": "day_off_request",
+            }
         }
 
         staff_rows, day_summary_rows = build_shift_plan_grid(
@@ -129,7 +147,6 @@ class ShiftRuleFormTests(TestCase):
             user=self.user,
             year=2026,
             month=8,
-            title="2026年8月 シフト表",
         )
 
     def test_new_rule_form_has_expected_initial_values(self):
@@ -201,7 +218,6 @@ class EffectiveShiftRuleTests(TestCase):
             user=self.user,
             year=2026,
             month=8,
-            title="2026年8月 シフト表",
         )
         ShiftRule.objects.create(
             shift_plan=self.shift_plan,
@@ -251,13 +267,11 @@ class ShiftRuleWorkflowTests(TestCase):
             user=self.user,
             year=2026,
             month=8,
-            title="2026年8月 ICUシフト表",
         )
         self.other_shift_plan = ShiftPlan.objects.create(
             user=self.other_user,
             year=2026,
             month=9,
-            title="他ユーザーのシフト表",
         )
         self.staff_member = StaffMember.objects.create(
             user=self.user,
@@ -304,6 +318,48 @@ class ShiftRuleWorkflowTests(TestCase):
         data.update(overrides)
         return data
 
+    def test_create_form_has_only_year_and_month(self):
+        form = ShiftPlanCreateForm(user=self.user)
+
+        self.assertNotIn("title", form.fields)
+        self.assertIn("year", form.fields)
+        self.assertIn("month", form.fields)
+
+    def test_create_form_can_save_with_year_and_month_only(self):
+        form = ShiftPlanCreateForm(
+            data={
+                "year": "2026",
+                "month": "10",
+            },
+            user=self.user,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        shift_plan = form.save(commit=False)
+        shift_plan.user = self.user
+        shift_plan.save()
+
+        self.assertEqual(shift_plan.year, 2026)
+        self.assertEqual(shift_plan.month, 10)
+        self.assertEqual(shift_plan.display_title, "2026年10月 シフト表")
+
+    def test_create_form_rejects_duplicate_year_and_month_for_same_user(self):
+        ShiftPlan.objects.create(
+            user=self.user,
+            year=2026,
+            month=10,
+        )
+        form = ShiftPlanCreateForm(
+            data={
+                "year": "2026",
+                "month": "10",
+            },
+            user=self.user,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("month", form.errors)
+
     def create_common_rule(self):
         return ShiftRule.objects.create(
             shift_plan=self.shift_plan,
@@ -319,7 +375,6 @@ class ShiftRuleWorkflowTests(TestCase):
         response = self.client.post(
             reverse("shifts:create"),
             {
-                "title": "2026年10月 シフト表",
                 "year": "2026",
                 "month": "10",
             },
@@ -327,6 +382,28 @@ class ShiftRuleWorkflowTests(TestCase):
 
         created_shift_plan = ShiftPlan.objects.get(user=self.user, year=2026, month=10)
         self.assertRedirects(response, reverse("shifts:conditions", kwargs={"pk": created_shift_plan.pk}))
+
+    def test_create_page_does_not_show_title_input(self):
+        response = self.client.get(reverse("shifts:create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="title"')
+        self.assertNotContains(response, 'id="id_title"')
+        self.assertNotContains(response, "タイトルと対象年月")
+        self.assertContains(response, "対象年月を選択してください。")
+        self.assertContains(response, "年")
+        self.assertContains(response, "月")
+
+    def test_edit_page_hides_lock_button_and_shows_reset_choices(self):
+        self.create_common_rule()
+
+        response = self.client.get(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertNotContains(response, "現在のシフトを固定")
+        self.assertContains(response, "手入力まで戻す")
+        self.assertContains(response, "希望休・固定休まで戻す")
 
     def test_other_user_cannot_access_conditions(self):
         response = self.client.get(
@@ -656,3 +733,190 @@ class ShiftRuleWorkflowTests(TestCase):
                 shift_type=ShiftResult.ShiftTypeChoices.DAY,
             ).exists()
         )
+
+    def test_save_keeps_generated_result_when_value_is_unchanged(self):
+        self.create_common_rule()
+        result = ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-01",
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-01": ShiftResult.ShiftTypeChoices.DAY,
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        result.refresh_from_db()
+        self.assertEqual(result.input_type, ShiftResult.InputTypeChoices.GENERATED)
+
+    def test_base_fixed_cell_ignores_posted_shift_value(self):
+        self.create_common_rule()
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-01",
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-01": ShiftResult.ShiftTypeChoices.DAY,
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertFalse(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date="2026-08-01",
+            ).exists()
+        )
+
+    def test_night_before_day_off_request_is_rejected(self):
+        self.create_common_rule()
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-02",
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-01": ShiftResult.ShiftTypeChoices.NIGHT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1日の夜勤は保存できません。")
+        self.assertContains(response, "翌日の2日が希望休のため、夜勤明けを配置できません。")
+        self.assertFalse(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date="2026-08-01",
+            ).exists()
+        )
+
+    def test_after_night_without_previous_night_is_rejected(self):
+        self.create_common_rule()
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-02": ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "2日の明けは保存できません。")
+        self.assertContains(response, "前日の1日に夜勤が存在しません。")
+        self.assertFalse(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date="2026-08-02",
+            ).exists()
+        )
+
+    def test_reset_to_manual_deletes_only_generated_results(self):
+        self.create_common_rule()
+        manual_result = ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-01",
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        generated_result = ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-02",
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {"action": "reset_to_manual"},
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertTrue(ShiftResult.objects.filter(pk=manual_result.pk).exists())
+        self.assertFalse(ShiftResult.objects.filter(pk=generated_result.pk).exists())
+
+    def test_reset_to_base_deletes_all_shift_results(self):
+        self.create_common_rule()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-01",
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-02",
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {"action": "reset_to_base"},
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertFalse(ShiftResult.objects.filter(shift_plan=self.shift_plan).exists())
+
+    def test_base_fixed_conflict_is_shown_on_edit_screen(self):
+        self.create_common_rule()
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-01",
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date="2026-08-01",
+            shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        response = self.client.get(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertContains(response, "競合")
+        self.assertContains(response, "保存済みの「明け」と競合しています。")
+
+    def test_night_before_regular_day_off_is_rejected(self):
+        self.create_common_rule()
+        StaffRegularDayOff.objects.create(
+            staff_member=self.staff_member,
+            day_of_week=date(2026, 8, 2).weekday(),
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-01": ShiftResult.ShiftTypeChoices.NIGHT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "翌日の2日が固定休のため、夜勤明けを配置できません。")

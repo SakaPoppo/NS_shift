@@ -1,69 +1,69 @@
 {% extends "core/base.html" %}
 {% load static %}
 
-{% block title %}{{ shift_plan.title }} | Ns Shift{% endblock %}
+{% block title %}{{ shift_plan.display_title }} | Ns Shift{% endblock %}
 
 {% block content %}
   <section class="mx-auto w-full max-w-[1680px] px-2 py-2 sm:px-3 lg:px-4">
     <div class="flex flex-col gap-3">
       <div>
         <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
-          {{ shift_plan.title }}
+          {{ shift_plan.display_title }}
         </h1>
       </div>
 
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div class="flex-1">
-            <h2 class="text-sm font-black tracking-wide text-slate-900">シフト生成条件</h2>
-            <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">必要日勤数</p>
-                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_day_staff }}人</p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">必要夜勤数</p>
-                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_night_staff }}人</p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">月休日数</p>
-                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.off_days_per_staff }}日</p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">必要リーダー数</p>
-                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_leader_staff }}人</p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">最大連勤</p>
-                <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.max_consecutive_work_days }}日</p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">明け翌日公休</p>
-                <p class="mt-1 text-base font-black text-slate-900">
-                  {% if shift_rule.night_shift_next_day_off %}する{% else %}しない{% endif %}
-                </p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">曜日条件</p>
-                <p class="mt-1 text-base font-black text-slate-900">曜日条件：{{ weekday_rule_count }}件</p>
-              </div>
-              <div class="rounded-xl bg-slate-50 px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-500">特定日条件</p>
-                <p class="mt-1 text-base font-black text-slate-900">特定日条件：{{ date_rule_count }}件</p>
-              </div>
+      <details class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <summary class="cursor-pointer list-none text-sm font-black text-slate-900">
+          シフト生成条件 ▼
+        </summary>
+        <div class="mt-4">
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">必要日勤数</p>
+              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_day_staff }}人</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">必要夜勤数</p>
+              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_night_staff }}人</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">月休日数</p>
+              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.off_days_per_staff }}日</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">必要リーダー数</p>
+              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_leader_staff }}人</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">最大連勤</p>
+              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.max_consecutive_work_days }}日</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">明け翌日公休</p>
+              <p class="mt-1 text-base font-black text-slate-900">
+                {% if shift_rule.night_shift_next_day_off %}する{% else %}しない{% endif %}
+              </p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">曜日条件</p>
+              <p class="mt-1 text-base font-black text-slate-900">曜日条件：{{ weekday_rule_count }}件</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold text-slate-500">特定日条件</p>
+              <p class="mt-1 text-base font-black text-slate-900">特定日条件：{{ date_rule_count }}件</p>
             </div>
           </div>
 
-          <div class="flex shrink-0 justify-end">
+          <div class="mt-5 flex justify-end">
             <a
               href="{% url 'shifts:conditions' shift_plan.pk %}"
-              class="btn btn-outline h-11 rounded-lg border-base-300 bg-white px-5 text-sm text-base-content hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
+              class="btn btn-primary h-11 rounded-lg border-brand-500 bg-brand-500 px-5 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
             >
               条件設定へ
             </a>
           </div>
         </div>
-      </div>
+      </details>
 
       <details class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <summary class="cursor-pointer list-none text-sm font-black text-slate-900">
@@ -110,22 +110,40 @@
                 >
                   シフト生成
                 </button>
-                <button
-                  type="submit"
-                  name="action"
-                  value="lock"
-                  class="btn btn-outline h-10 min-h-10 rounded-lg border-base-300 bg-white px-4 text-sm text-base-content hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
-                >
-                  現在のシフトを固定
-                </button>
-                <button
-                  type="submit"
-                  name="action"
-                  value="reset"
-                  class="btn btn-error btn-outline h-10 min-h-10 rounded-lg px-4 text-sm"
-                >
-                  リセット
-                </button>
+                <details class="dropdown dropdown-end">
+                  <summary class="btn btn-error btn-outline h-10 min-h-10 rounded-lg px-4 text-sm">
+                    リセット
+                  </summary>
+                  <ul class="menu dropdown-content z-20 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                    <li class="px-3 py-2 text-xs font-medium leading-5 text-slate-500">
+                      戻り先を選択してください。
+                    </li>
+                    <li>
+                      <button
+                        type="submit"
+                        name="action"
+                        value="reset_to_manual"
+                        class="flex flex-col items-start gap-1 rounded-xl px-3 py-3 text-left"
+                        onclick="return confirm('自動生成した勤務だけを削除します。希望休・固定休・手入力した勤務は残ります。')"
+                      >
+                        <span class="text-sm font-bold text-slate-900">手入力まで戻す</span>
+                        <span class="text-xs font-medium leading-5 text-slate-500">自動生成した勤務だけを削除します。希望休・固定休・手入力した勤務は残ります。</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="submit"
+                        name="action"
+                        value="reset_to_base"
+                        class="flex flex-col items-start gap-1 rounded-xl px-3 py-3 text-left"
+                        onclick="return confirm('手入力した勤務と自動生成した勤務をすべて削除します。希望休・固定休だけが残ります。')"
+                      >
+                        <span class="text-sm font-bold text-slate-900">希望休・固定休まで戻す</span>
+                        <span class="text-xs font-medium leading-5 text-slate-500">手入力した勤務と自動生成した勤務をすべて削除します。希望休・固定休だけが残ります。</span>
+                      </button>
+                    </li>
+                  </ul>
+                </details>
               </div>
             </div>
           </div>
@@ -183,15 +201,32 @@
 
                     {% for cell in row.cells %}
                       <td class="border-b border-r border-slate-200 px-0.5 py-0.5 align-middle">
-                        <select
-                          name="{{ cell.field_name }}"
-                          data-shift-select
-                          class="h-8 w-full appearance-none rounded-lg border px-0 text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] outline-none transition focus:scale-[1.02] focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20 {{ cell.display_classes }}"
-                        >
-                          {% for value, label in shift_select_options %}
-                            <option value="{{ value }}" {% if cell.value == value %}selected{% endif %}>{{ label }}</option>
-                          {% endfor %}
-                        </select>
+                        {% if cell.is_base_fixed %}
+                          <div
+                            class="relative flex h-8 items-center justify-center rounded-lg border text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] {{ cell.display_classes }}"
+                            title="{% if cell.has_conflict %}{{ cell.conflict_message }}{% else %}{{ cell.display_label }}{% endif %}"
+                          >
+                            <span>{{ cell.display_label }}</span>
+                            {% if cell.has_conflict %}
+                              <span class="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-black text-white">
+                                ⚠
+                              </span>
+                              <span class="absolute left-1 top-1 rounded bg-orange-500 px-1 text-[8px] font-black leading-none text-white">
+                                競合
+                              </span>
+                            {% endif %}
+                          </div>
+                        {% else %}
+                          <select
+                            name="{{ cell.field_name }}"
+                            data-shift-select
+                            class="h-8 w-full appearance-none rounded-lg border px-0 text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] outline-none transition focus:scale-[1.02] focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20 {{ cell.display_classes }}"
+                          >
+                            {% for value, label in shift_select_options %}
+                              <option value="{{ value }}" {% if cell.value == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                          </select>
+                        {% endif %}
                       </td>
                     {% endfor %}
 

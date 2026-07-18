@@ -1,12 +1,12 @@
 {% extends "core/base.html" %}
 
-{% block title %}シフト条件設定 | Ns Shift{% endblock %}
+{% block title %}{{ shift_plan.display_title }} | Ns Shift{% endblock %}
 
 {% block content %}
   <section class="mx-auto w-full max-w-[1120px] px-5 py-8 sm:px-8 lg:px-10">
     <div class="mb-8">
       <p class="text-sm font-semibold text-slate-500">シフト管理 &gt; シフト条件設定</p>
-      <h1 class="mt-2 text-[2rem] font-black tracking-tight text-slate-900">{{ shift_plan.title }} の条件設定</h1>
+      <h1 class="mt-2 text-[2rem] font-black tracking-tight text-slate-900">{{ shift_plan.display_title }} の条件設定</h1>
       <p class="mt-2 text-sm font-medium text-slate-600">
         シフトを生成するための条件を設定します。ここで設定した条件をもとにシフト表の自動生成が行われます。
       </p>

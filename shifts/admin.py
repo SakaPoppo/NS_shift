@@ -5,13 +5,19 @@ from .models import DateShiftRule, DayOffRequest, ShiftPlan, ShiftResult, ShiftR
 
 @admin.register(ShiftPlan)
 class ShiftPlanAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "year", "month", "title", "status", "created_at")
+    # ShiftPlan を管理画面で一覧しやすくする設定。
+    list_display = ("id", "user", "display_title", "year", "month", "status", "created_at")
     list_filter = ("status", "year", "month")
-    search_fields = ("title", "user__username")
+    search_fields = ("user__username", "=year", "=month")
+
+    @admin.display(description="シフト表名")
+    def display_title(self, obj):
+        return obj.display_title
 
 
 @admin.register(ShiftRule)
 class ShiftRuleAdmin(admin.ModelAdmin):
+    # 月共通ルールを管理画面で確認しやすくする設定。
     list_display = (
         "id",
         "shift_plan",
@@ -26,6 +32,7 @@ class ShiftRuleAdmin(admin.ModelAdmin):
 
 @admin.register(WeekdayShiftRule)
 class WeekdayShiftRuleAdmin(admin.ModelAdmin):
+    # 曜日条件を管理画面で確認しやすくする設定。
     list_display = (
         "shift_plan",
         "day_of_week",
@@ -34,11 +41,12 @@ class WeekdayShiftRuleAdmin(admin.ModelAdmin):
         "required_leader_staff",
     )
     list_filter = ("day_of_week",)
-    search_fields = ("shift_plan__title",)
+    search_fields = ("=shift_plan__year", "=shift_plan__month", "memo")
 
 
 @admin.register(DateShiftRule)
 class DateShiftRuleAdmin(admin.ModelAdmin):
+    # 特定日条件を管理画面で確認しやすくする設定。
     list_display = (
         "shift_plan",
         "target_date",
@@ -47,18 +55,20 @@ class DateShiftRuleAdmin(admin.ModelAdmin):
         "required_leader_staff",
     )
     list_filter = ("target_date",)
-    search_fields = ("shift_plan__title", "memo")
+    search_fields = ("=shift_plan__year", "=shift_plan__month", "memo")
 
 
 @admin.register(DayOffRequest)
 class DayOffRequestAdmin(admin.ModelAdmin):
+    # 希望休を管理画面で確認しやすくする設定。
     list_display = ("id", "shift_plan", "staff_member", "date", "created_at")
     list_filter = ("date",)
-    search_fields = ("staff_member__name", "shift_plan__title")
+    search_fields = ("staff_member__name", "=shift_plan__year", "=shift_plan__month", "memo")
 
 
 @admin.register(ShiftResult)
 class ShiftResultAdmin(admin.ModelAdmin):
+    # 勤務結果を管理画面で確認しやすくする設定。
     list_display = (
         "id",
         "shift_plan",
@@ -69,4 +79,4 @@ class ShiftResultAdmin(admin.ModelAdmin):
         "is_locked",
     )
     list_filter = ("shift_type", "input_type", "is_locked", "date")
-    search_fields = ("staff_member__name", "shift_plan__title")
+    search_fields = ("staff_member__name", "=shift_plan__year", "=shift_plan__month", "memo")

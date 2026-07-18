@@ -8,7 +8,7 @@
       <p class="text-sm font-semibold text-slate-500">シフト管理 &gt; 新規シフト作成</p>
       <h1 class="mt-2 text-[2rem] font-black tracking-tight text-slate-900">新規シフト作成</h1>
       <p class="mt-2 text-sm font-medium text-slate-600">
-        これから作成するシフト表のタイトルと対象年月を設定してください。
+        これから作成するシフト表の対象年月を選択してください。
       </p>
     </div>
 
@@ -19,19 +19,6 @@
 
       <form method="post" class="space-y-7">
         {% csrf_token %}
-
-        <div class="form-control w-full gap-2">
-          <label class="label justify-start gap-3 pb-0" for="{{ form.title.id_for_label }}">
-            <span class="label-text font-semibold text-slate-700">タイトル</span>
-            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
-          </label>
-          <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">一覧画面で識別しやすい名前を入力してください。</span></div>
-          {{ form.title }}
-          <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-base-content/60">未入力の場合は「選択した年月 + シフト表」という名前で作成されます。</span></div>
-          {% for error in form.title.errors %}
-            <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
-          {% endfor %}
-        </div>
 
         <div class="form-control w-full gap-2">
           <label class="label justify-start gap-3 pb-0" for="{{ form.year.id_for_label }}">
