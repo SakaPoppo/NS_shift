@@ -4,6 +4,12 @@ from .models import StaffMember, StaffRegularDayOff
 
 
 class StaffMemberForm(forms.ModelForm):
+    """スタッフの基本情報と曜日固定休をまとめて扱うフォーム。
+
+    regular_days_off は StaffMember の直接フィールドではなく、
+    関連モデルの StaffRegularDayOff を更新するための入力欄として扱う。
+    """
+
     gender = forms.ChoiceField(
         label="性別",
         choices=StaffMember.GenderChoices.choices,
@@ -66,6 +72,7 @@ class StaffMemberForm(forms.ModelForm):
             "1は自立前、3は新人指導可能、5は管理代行業務まで担える目安です。"
         )
         if self.instance and self.instance.pk:
+            # 編集画面では、関連テーブルに保存済みの固定休をチェックボックスへ戻す。
             self.fields["regular_days_off"].initial = list(
                 self.instance.regular_days_off.values_list("day_of_week", flat=True)
             )

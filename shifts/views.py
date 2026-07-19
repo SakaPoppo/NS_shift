@@ -20,7 +20,7 @@ from .forms import (
 )
 from .models import DayOffRequest, ShiftPlan, ShiftResult, ShiftRule
 
-SHIFT_SELECT_OPTIONS = [ #
+SHIFT_SELECT_OPTIONS = [
     ("", ""),
     (ShiftResult.ShiftTypeChoices.DAY, "日"),
     (ShiftResult.ShiftTypeChoices.NIGHT, "夜"),
@@ -80,13 +80,11 @@ WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
 
 
 def get_month_dates(year, month):
-    # year と month を受け取り、その月の date 一覧を返す。
     last_day = calendar.monthrange(year, month)[1]
     return [date(year, month, day) for day in range(1, last_day + 1)]
 
 
 def build_day_headers(month_dates):
-    # date 一覧を受け取り、曜日表示用の辞書リストに変換して返す。
     return [
         {
             "date": current_date,
@@ -105,7 +103,17 @@ def build_shift_plan_grid(
     base_fixed_assignments,
     display_assignments=None,
 ):
-    # スタッフ一覧と各種シフト情報を受け取り、編集画面表示用の行データと日別集計を返す。
+    """編集画面用のグリッドデータを組み立てる。
+
+    セルの表示優先順位は次の通り。
+    1. 希望休・固定休
+    2. バリデーションエラー後に再表示する POST 値
+    3. DB に保存済みの ShiftResult
+    4. 空欄
+
+    希望休・固定休と保存済み勤務が競合している場合は、基礎データ側を表示しつつ
+    競合中の勤務区分を補足情報として残す。
+    """
     staff_rows = []
     day_totals = {current_date: {"day": 0, "night": 0} for current_date in month_dates}
 
@@ -212,59 +220,41 @@ def build_shift_plan_grid(
 
 
 class UserShiftPlanMixin(LoginRequiredMixin):
-    """ログイン中ユーザーのシフト表操作で共通利用するMixin。
-
-    受け取るもの:
-    - request.user
-    - 各 view から渡される shift_plan や POST データ
-
-    返すもの:
-    - シフト表取得用 queryset
-    - 条件画面、編集画面で使うフォームや context
-    """
+    """ログイン中ユーザーのシフト表編集で共有する補助処理。"""
 
     condition_success_message = "シフト条件を保存しました。"
 
     def get_queryset(self):
-        # request.user を使って、そのユーザーの ShiftPlan queryset を返す。
         return ShiftPlan.objects.filter(user=self.request.user)
 
     def get_object(self):
-        # URL の pk を受け取り、ログインユーザー所有の ShiftPlan を1件返す。
         return get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
 
     def get_shift_rule(self, shift_plan):
-        # ShiftPlan を受け取り、紐づく ShiftRule を返す。未作成なら None を返す。
         try:
             return shift_plan.shift_rule
         except ShiftRule.DoesNotExist:
             return None
 
     def get_staff_members(self):
-        # ログインユーザーの有効なスタッフ一覧を返す。
         return StaffMember.objects.filter(
             user=self.request.user,
             is_active=True,
         ).prefetch_related("regular_days_off").order_by("id")
 
     def get_shift_rule_form(self, shift_plan, data=None):
-        # ShiftPlan と POST データを受け取り、月共通ルール用フォームを返す。
         return ShiftRuleForm(data=data, shift_rule=self.get_shift_rule(shift_plan))
 
     def get_conditions_url(self, shift_plan):
-        # ShiftPlan を受け取り、条件設定画面のURL文字列を返す。
         return reverse("shifts:conditions", kwargs={"pk": shift_plan.pk})
 
     def get_edit_url(self, shift_plan):
-        # ShiftPlan を受け取り、シフト編集画面のURL文字列を返す。
         return reverse("shifts:edit", kwargs={"pk": shift_plan.pk})
 
     def get_ordered_date_rules(self, shift_plan):
-        # ShiftPlan を受け取り、日付順に並べた特定日条件 queryset を返す。
         return shift_plan.date_rules.order_by("target_date", "id")
 
     def get_weekday_forms(self, shift_plan, data=None):
-        # ShiftPlan と POST データを受け取り、月〜日の曜日条件フォーム一覧を返す。
         weekday_rules = {
             weekday_rule.day_of_week: weekday_rule
             for weekday_rule in shift_plan.weekday_rules.all()
@@ -280,7 +270,11 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         ]
 
     def get_date_rule_forms(self, shift_plan, data=None):
-        # ShiftPlan と POST データを受け取り、特定日条件フォーム一覧を返す。
+        """特定日条件フォームを返す。
+
+        GET 時は既存レコードを日付順で並べ、POST 後は hidden の date_rule_id を使って
+        既存レコードとの対応を復元する。
+        """
         if data is not None:
             try:
                 total_forms = int(data.get("date_rule_total_forms", 0))
@@ -313,14 +307,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         ]
 
     def get_empty_date_rule_form(self, shift_plan):
-        # 新規追加用の空の特定日フォームを1件返す。
         return DateShiftRuleForm(
             prefix="date-rule-__prefix__",
             shift_plan=shift_plan,
         )
 
     def get_shift_results_by_key(self, shift_plan, staff_members):
-        # ShiftPlan とスタッフ一覧を受け取り、(staff_id, date) をキーにした ShiftResult 辞書を返す。
         shift_results = ShiftResult.objects.filter(
             shift_plan=shift_plan,
             staff_member__in=staff_members,
@@ -331,7 +323,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         }
 
     def get_base_fixed_assignments(self, shift_plan, staff_members, month_dates):
-        # 希望休と固定休を受け取り、表示と保存で共通利用する基礎データ辞書を返す。
+        """希望休と曜日固定休を、編集不可の基礎データへ変換する。
+
+        優先順位は「希望休 > 曜日固定休」。
+        戻り値は {(staff_member_id, date): {"shift_type": str, "source": str}} の辞書で、
+        表示時と保存時の両方で同じ判定結果を使う。
+        """
         month_dates_set = set(month_dates)
         base_fixed_assignments = {}
         day_off_requests = DayOffRequest.objects.filter(
@@ -362,7 +359,6 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         return base_fixed_assignments
 
     def build_edit_context(self, shift_plan, *, display_assignments=None):
-        # ShiftPlan を受け取り、シフト編集画面描画に必要な context をまとめて返す。
         staff_members = list(self.get_staff_members())
         month_dates = get_month_dates(shift_plan.year, shift_plan.month)
         day_headers = build_day_headers(month_dates)
@@ -400,7 +396,10 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         month_dates,
         base_fixed_assignments,
     ):
-        # POSTされた勤務入力を受け取り、編集可能セルだけの勤務辞書を返す。
+        """POST された勤務入力を、保存候補の辞書へ変換する。
+
+        希望休・固定休セルは HTML だけでなくサーバー側でも除外し、POST されても無視する。
+        """
         valid_shift_types = {
             choice[0]
             for choice in ShiftResult.ShiftTypeChoices.choices
@@ -431,7 +430,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         base_fixed_assignments,
         submitted_assignments,
     ):
-        # 画面保存後に成立する最終勤務状態を、(staff_id, date) -> shift_type で返す。
+        """保存後に成立する勤務状態を、検証用に仮組みする。"""
         final_shift_types = {}
 
         for staff_member in staff_members:
@@ -458,7 +457,11 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         base_fixed_assignments,
         existing_results_by_key,
     ):
-        # 保存前の勤務入力を検証し、問題があればエラーメッセージ一覧を返す。
+        """夜勤と明けの前後関係を検証する。
+
+        夜勤・明けは隣接日とセットで成立するため、変更セルだけでなく前後の日付も検証対象に加える。
+        たとえば夜勤を消すと翌日の明けが不正になり、明けを別勤務へ変えると前日の夜勤が不正になる。
+        """
         month_dates_set = set(month_dates)
         final_shift_types = self.build_final_shift_types(
             staff_members,
@@ -477,6 +480,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
 
         validation_targets = set(changed_keys)
         for staff_member_id, current_date in changed_keys:
+            # 隣接日との組み合わせで成立する業務ルールなので、前後1日も再検証する。
             for offset in (-1, 1):
                 adjacent_date = current_date.fromordinal(current_date.toordinal() + offset)
                 if adjacent_date in month_dates_set:
@@ -490,6 +494,8 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             if current_shift_type == ShiftResult.ShiftTypeChoices.NIGHT:
                 next_date = current_date.fromordinal(current_date.toordinal() + 1)
                 if next_date not in month_dates_set:
+                    # 月末夜勤は翌月の明けをこの画面では検証しない。
+                    # TODO: 月をまたぐ「夜勤→明け」の扱いを決定する。
                     continue
 
                 next_key = (staff_member_id, next_date)
@@ -513,6 +519,8 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             if current_shift_type == ShiftResult.ShiftTypeChoices.AFTER_NIGHT:
                 previous_date = current_date.fromordinal(current_date.toordinal() - 1)
                 if previous_date not in month_dates_set:
+                    # 月初の明けは前月の夜勤を参照できないため、現在は不正として扱う。
+                    # TODO: 月をまたぐ「夜勤→明け」の扱いを決定する。
                     errors.append(
                         f"{current_date.day}日の明けは保存できません。"
                         f"前日の{previous_date.day}日に夜勤が存在しません。"
@@ -560,7 +568,6 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         date_rule_forms,
         empty_date_rule_form,
     ):
-        # 条件設定画面で使うフォーム群を受け取り、template 用 context を返す。
         return {
             "shift_plan": shift_plan,
             "rule_form": rule_form,
@@ -583,7 +590,11 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         submitted_assignments,
         existing_results_by_key,
     ):
-        # 検証済みの勤務入力を受け取り、必要なセルだけ MANUAL として保存する。
+        """検証済みの入力だけを ShiftResult へ反映する。
+
+        既存の GENERATED 結果と同じ値が送られた場合は、保存ボタンを押しただけで
+        MANUAL に昇格しないよう更新を行わない。
+        """
         for (staff_member_id, current_date), selected_value in submitted_assignments.items():
             existing_result = existing_results_by_key.get((staff_member_id, current_date))
 
@@ -609,45 +620,40 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             )
 
     def reset_generated_results(self, shift_plan):
-        # 自動生成勤務だけを削除して、手入力勤務は残す。
+        """自動生成勤務だけを削除し、手入力勤務は残す。"""
         ShiftResult.objects.filter(
             shift_plan=shift_plan,
             input_type=ShiftResult.InputTypeChoices.GENERATED,
         ).delete()
 
     def reset_all_shift_results(self, shift_plan):
-        # 勤務結果を全削除して、希望休・固定休だけの状態へ戻す。
+        """ShiftResult を全削除し、希望休・固定休だけの状態へ戻す。"""
         ShiftResult.objects.filter(
             shift_plan=shift_plan,
         ).delete()
 
 
 class ShiftPlanListView(LoginRequiredMixin, ListView):
-    # ログインユーザーが作成したシフト表一覧を表示するビュー。
     model = ShiftPlan
     template_name = "shifts/shift_plan_list.html"
     context_object_name = "shift_plans"
 
     def get_queryset(self):
-        # request.user を使って、自分のシフト表一覧 queryset を返す。
         return ShiftPlan.objects.filter(user=self.request.user)
 
 
 class ShiftPlanCreateView(LoginRequiredMixin, CreateView):
-    # シフト表の基本情報を受け取り、新規作成後に条件設定画面へ遷移するビュー。
     model = ShiftPlan
     form_class = ShiftPlanCreateForm
     template_name = "shifts/shift_plan_create.html"
     success_url = reverse_lazy("shifts:list")
 
     def get_form_kwargs(self):
-        # フォームに request.user を渡すための kwargs を返す。
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
         return kwargs
 
     def form_valid(self, form):
-        # 入力済みフォームを受け取り、user をセットして保存し、条件設定画面へリダイレクトする。
         form.instance.user = self.request.user
         self.object = form.save()
         return HttpResponseRedirect(
@@ -656,11 +662,9 @@ class ShiftPlanCreateView(LoginRequiredMixin, CreateView):
 
 
 class ShiftRuleEditView(UserShiftPlanMixin, View):
-    # 月共通条件・曜日条件・特定日条件をまとめて編集するビュー。
     template_name = "shifts/shift_rule_form.html"
 
     def get(self, request, *args, **kwargs):
-        # URL の pk を受け取り、条件設定画面表示用の context を返す。
         shift_plan = self.get_object()
         context = self.build_condition_context(
             shift_plan=shift_plan,
@@ -672,7 +676,6 @@ class ShiftRuleEditView(UserShiftPlanMixin, View):
         return render(request, self.template_name, context)
 
     def post(self, request, *args, **kwargs):
-        # 条件入力のPOSTを受け取り、削除または保存を行って次画面へ返す。
         shift_plan = self.get_object()
         delete_date_rule_id = request.POST.get("delete_date_rule_id")
 
@@ -722,11 +725,9 @@ class ShiftRuleEditView(UserShiftPlanMixin, View):
 
 
 class ShiftPlanEditView(UserShiftPlanMixin, View):
-    # シフト表本体の手動入力・保存・リセットを行うビュー。
     template_name = "shifts/shift_plan_edit.html"
 
     def get(self, request, *args, **kwargs):
-        # ShiftPlan を受け取り、条件未設定なら条件画面へ、設定済みなら編集画面を返す。
         shift_plan = self.get_object()
         if self.get_shift_rule(shift_plan) is None:
             return redirect("shifts:conditions", pk=shift_plan.pk)
@@ -735,7 +736,6 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
         return render(request, self.template_name, context)
 
     def post(self, request, *args, **kwargs):
-        # action を受け取り、シフト保存・リセットなどの処理結果を返す。
         shift_plan = self.get_object()
         if self.get_shift_rule(shift_plan) is None:
             return redirect("shifts:conditions", pk=shift_plan.pk)
@@ -798,11 +798,9 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
 
 
 class ShiftPlanDeleteView(UserShiftPlanMixin, View):
-    # シフト表削除の確認画面と削除実行を担当するビュー。
     template_name = "shifts/shift_plan_confirm_delete.html"
 
     def get(self, request, *args, **kwargs):
-        # 削除対象の ShiftPlan を受け取り、確認画面を返す。
         shift_plan = self.get_object()
         return render(
             request,
@@ -813,7 +811,6 @@ class ShiftPlanDeleteView(UserShiftPlanMixin, View):
         )
 
     def post(self, request, *args, **kwargs):
-        # 削除対象の ShiftPlan を受け取り、削除後に一覧へリダイレクトする。
         shift_plan = self.get_object()
         shift_plan.delete()
         messages.success(request, "シフト表を削除しました。")
