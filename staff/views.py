@@ -1,16 +1,22 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db import transaction #トランザクション処理
-from django.http import HttpResponseRedirect 
-from django.urls import reverse_lazy #逆引き用
+from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
 from .forms import StaffMemberForm
 from .models import StaffMember, StaffRegularDayOff
 
 
-def sync_regular_days_off(staff_member, regular_days_off): #固定休を更新する用の関数
-    staff_member.regular_days_off.all().delete() #既存の固定休を削除
-    StaffRegularDayOff.objects.bulk_create( #リストを作って一気にDBに保存するためのもの
+def sync_regular_days_off(staff_member, regular_days_off):
+    """スタッフの固定休をフォーム入力へ同期する。
+
+    差分更新ではなく、既存レコードを全削除してから再作成する。
+    途中で失敗した場合に削除だけが反映されないよう、呼び出し側の
+    transaction.atomic() 内で実行する前提にしている。
+    """
+    staff_member.regular_days_off.all().delete()
+    StaffRegularDayOff.objects.bulk_create(
         [
             StaffRegularDayOff(staff_member=staff_member, day_of_week=day_of_week)
             for day_of_week in regular_days_off
@@ -18,20 +24,22 @@ def sync_regular_days_off(staff_member, regular_days_off): #固定休を更新�
     )
 
 
-class UserStaffMemberQuerysetMixin(LoginRequiredMixin): #共通の処理まとめ,スタッフの呼び出し
-    model = StaffMember #使用するモデル
-    success_url = reverse_lazy("staff:list") #リダイレクト先
+class UserStaffMemberQuerysetMixin(LoginRequiredMixin):
+    """ログイン中ユーザーが管理する在籍スタッフだけを扱うMixin。"""
 
-    def get_queryset(self): #スタッフの取得条件　1,ログインユーザーのスタッフ　2,在籍中のスタッフ　
+    model = StaffMember
+    success_url = reverse_lazy("staff:list")
+
+    def get_queryset(self):
         return StaffMember.objects.filter(
             user=self.request.user,
             is_active=True,
-        ).prefetch_related("regular_days_off") #上の奴らの固定休を取得
+        ).prefetch_related("regular_days_off")
 
 
 class StaffMemberListView(UserStaffMemberQuerysetMixin, ListView):
     template_name = "staff/staff_member_list.html"
-    context_object_name = "staff_members" #HTMLで使う変数名を指定するためのもの
+    context_object_name = "staff_members"
 
     def get_queryset(self):
         return super().get_queryset().order_by("id")
@@ -43,10 +51,11 @@ class StaffMemberCreateView(LoginRequiredMixin, CreateView):
     template_name = "staff/staff_member_create.html"
     success_url = reverse_lazy("staff:list")
 
-    def form_valid(self, form): #
-        with transaction.atomic(): #DB１＝OK、DB２＝NGの時とかに、処理自体をもなかったことにする
-            form.instance.user = self.request.user #ログインユーザーをスタッフに紐付け
-            self.object = form.save() #スタッフを保存
+    def form_valid(self, form):
+        # StaffMember と固定休は別テーブルなので、片方だけ保存される状態を避ける。
+        with transaction.atomic():
+            form.instance.user = self.request.user
+            self.object = form.save()
             sync_regular_days_off(
                 self.object,
                 form.cleaned_data.get("regular_days_off", []),
@@ -60,6 +69,7 @@ class StaffMemberUpdateView(UserStaffMemberQuerysetMixin, UpdateView):
     template_name = "staff/staff_member_edit.html"
 
     def form_valid(self, form):
+        # 更新時も StaffMember 本体と固定休を同じトランザクションで扱う。
         with transaction.atomic():
             self.object = form.save()
             sync_regular_days_off(
@@ -75,6 +85,7 @@ class StaffMemberDeleteView(UserStaffMemberQuerysetMixin, DeleteView):
 
     def form_valid(self, form):
         self.object = self.get_object()
-        self.object.is_active = False #論理削除
+        # 物理削除すると関連データまで失われるため、一覧や今後の対象から外すだけに留める。
+        self.object.is_active = False
         self.object.save()
         return HttpResponseRedirect(self.get_success_url())

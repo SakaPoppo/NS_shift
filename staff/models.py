@@ -1,9 +1,15 @@
-from django.conf import settings #AUTH_USER_MODELを使うために必要
+from django.conf import settings
 from django.db import models
 
 
-class StaffMember(models.Model): #テーブル作成宣言
-    class JobChoices(models.TextChoices): #DBに保存する値と、管理画面で表示する値を分けてる
+class StaffMember(models.Model):
+    """ユーザーごとに管理するスタッフ情報。
+
+    シフト条件や勤務結果はこのモデルを起点に紐づくため、削除時は物理削除ではなく
+    is_active による除外を使う設計になっている。
+    """
+
+    class JobChoices(models.TextChoices):
         NURSE = "nurse", "看護師"
         CARE_WORKER = "care_worker", "介護士"
 
@@ -23,9 +29,9 @@ class StaffMember(models.Model): #テーブル作成宣言
         LEVEL_5 = 5, "5：管理代行業務が可能"
 
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, #ユーザー情報を紐づける
-        on_delete=models.CASCADE, #ユーザーが削除＝スタッフ情報も削除
-        related_name="staff_members",  #user.staff_members.all()でユーザー情報からスタッフ情報を取得
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="staff_members",
     )
     name = models.CharField("氏名", max_length=100)
     gender = models.CharField(
@@ -57,14 +63,21 @@ class StaffMember(models.Model): #テーブル作成宣言
     updated_at = models.DateTimeField("更新日時", auto_now=True)
 
     class Meta:
-        db_table = "staff_members" #ここが実際のテーブル名になる
-        ordering = ["id"] #id順に並べる
+        db_table = "staff_members"
+        ordering = ["id"]
 
-    def __str__(self): #管理画面とかで名前をobject(1)みたいなのじゃなくて、ちゃんと名前を表示する
+    def __str__(self):
         return self.name
-    
+
+
 class StaffRegularDayOff(models.Model):
-    class DayOfWeekChoices(models.IntegerChoices): #StaffRegularDayOff.DayOfWeekChoices.XXXで呼べる
+    """毎週の曜日固定休。
+
+    DayOffRequest が月ごとの希望休を表すのに対して、こちらは毎週繰り返す休みを表す。
+    shifts 側では ShiftResult と混ぜず、基礎データとして別扱いする。
+    """
+
+    class DayOfWeekChoices(models.IntegerChoices):
         MONDAY = 0, "月"
         TUESDAY = 1, "火"
         WEDNESDAY = 2, "水"
@@ -77,7 +90,7 @@ class StaffRegularDayOff(models.Model):
         StaffMember,
         on_delete=models.CASCADE,
         related_name="regular_days_off",
-        verbose_name="スタッフ",  # 管理画面での表示名
+        verbose_name="スタッフ",
     )
     day_of_week = models.IntegerField(
         "曜日",

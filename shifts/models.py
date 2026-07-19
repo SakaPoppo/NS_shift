@@ -5,15 +5,10 @@ from staff.models import StaffMember
 
 
 class ShiftPlan(models.Model):
-    """ユーザーごとの月単位のシフト表。
+    """ユーザーごとに1か月単位で管理するシフト表。
 
-    受け取るもの:
-    - user: シフト表の所有者
-    - year, month: 対象年月
-    - status: 画面表示や進行状態に使う値
-
-    返すもの:
-    - DBに保存される ShiftPlan インスタンス
+    同一ユーザーは同じ年月のシフト表を1つしか持てない。
+    画面表示名は保存せず、常に year と month から組み立てる。
     """
 
     class StatusChoices(models.TextChoices):
@@ -52,19 +47,13 @@ class ShiftPlan(models.Model):
         return f"{self.year}年{self.month}月 シフト表"
 
     def __str__(self):
-        # 管理画面やshellで見たときに、どの月のシフト表か分かる文字列を返す。
         return self.display_title
 
 
 class ShiftRule(models.Model):
-    """月全体に共通で適用するシフト条件。
+    """月全体に共通で適用する基本条件。
 
-    受け取るもの:
-    - shift_plan: どのシフト表の条件か
-    - 必要人数、休日日数、最大連勤数などの共通条件
-
-    返すもの:
-    - DBに保存される ShiftRule インスタンス
+    曜日条件や特定日条件は、このモデルの値を部分的に上書きする。
     """
 
     shift_plan = models.OneToOneField(
@@ -88,20 +77,15 @@ class ShiftRule(models.Model):
         db_table = "shift_rules"
 
     def __str__(self):
-        # どのシフト表に紐づくルールかを文字列で返す。
         return f"{self.shift_plan} のルール"
 
 
 class WeekdayShiftRule(models.Model):
-    """曜日ごとに上書きする追加条件。
+    """曜日ごとに月共通条件を上書きする追加条件。
 
-    受け取るもの:
-    - shift_plan: 対象のシフト表
-    - day_of_week: 0=月 〜 6=日
-    - 必要人数や勤務レベル条件などの曜日別条件
-
-    返すもの:
-    - DBに保存される WeekdayShiftRule インスタンス
+    同じシフト表の中では、1つの曜日に対して1レコードだけを持つ。
+    人数系のフィールドで None を使うのは「0人にする」ではなく、
+    この曜日では上書きせず月共通条件を使う、という意味。
     """
 
     class DayOfWeekChoices(models.IntegerChoices):
@@ -144,20 +128,14 @@ class WeekdayShiftRule(models.Model):
         ]
 
     def __str__(self):
-        # どの曜日の条件か分かる文字列を返す。
         return f"{self.shift_plan} - {self.get_day_of_week_display()}曜日"
 
 
 class DateShiftRule(models.Model):
-    """特定の日付だけに適用する追加条件。
+    """特定の日付だけに適用する最優先の追加条件。
 
-    受け取るもの:
-    - shift_plan: 対象のシフト表
-    - target_date: 条件を上書きしたい日付
-    - 必要人数や勤務レベル条件などの特定日条件
-
-    返すもの:
-    - DBに保存される DateShiftRule インスタンス
+    条件の優先順位は「特定日条件 > 曜日条件 > 月共通条件」。
+    ここでも None は「0」ではなく、下位条件へフォールバックすることを表す。
     """
 
     shift_plan = models.ForeignKey(
@@ -191,20 +169,13 @@ class DateShiftRule(models.Model):
         ]
 
     def __str__(self):
-        # どの日付の条件か分かる文字列を返す。
         return f"{self.shift_plan} - {self.target_date}"
 
 
 class DayOffRequest(models.Model):
-    """スタッフごとの希望休。
+    """スタッフが申請した希望休。
 
-    受け取るもの:
-    - shift_plan: どのシフト表の希望休か
-    - staff_member: 希望休を出したスタッフ
-    - date, memo: 希望休の日付と補足
-
-    返すもの:
-    - DBに保存される DayOffRequest インスタンス
+    ShiftResult とは別の基礎データで、編集画面では勤務結果より優先して表示する。
     """
 
     shift_plan = models.ForeignKey(
@@ -233,21 +204,14 @@ class DayOffRequest(models.Model):
         ]
 
     def __str__(self):
-        # スタッフ名と日付が一目で分かる文字列を返す。
         return f"{self.staff_member.name} - {self.date}"
 
 
 class ShiftResult(models.Model):
-    """日ごとの最終的な勤務入力結果。
+    """日ごとの勤務結果。
 
-    受け取るもの:
-    - shift_plan: どのシフト表の結果か
-    - staff_member: 対象スタッフ
-    - date, shift_type: その日の勤務内容
-    - input_type, is_locked, memo: 入力種別や固定状態など
-
-    返すもの:
-    - DBに保存される ShiftResult インスタンス
+    希望休や曜日固定休のような基礎データはこのモデルには保存しない。
+    手入力結果と自動生成結果を input_type で区別し、再編集やリセットの対象を切り分ける。
     """
 
     class ShiftTypeChoices(models.TextChoices):
@@ -302,5 +266,4 @@ class ShiftResult(models.Model):
         ]
 
     def __str__(self):
-        # スタッフ・日付・勤務区分をまとめた表示文字列を返す。
         return f"{self.staff_member.name} - {self.date} - {self.get_shift_type_display()}"
