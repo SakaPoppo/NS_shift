@@ -8,6 +8,7 @@ from django.urls import reverse
 from staff.models import StaffMember, StaffRegularDayOff
 
 from .forms import ShiftPlanCreateForm, ShiftRuleForm
+from .shift_generator import ShiftGenerationError, generate_shift
 from .models import DateShiftRule, DayOffRequest, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import get_effective_rule_for_date
 from .views import build_shift_plan_grid
@@ -920,3 +921,209 @@ class ShiftRuleWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "翌日の2日が固定休のため、夜勤明けを配置できません。")
+
+
+class ShiftGeneratorTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="generator-user",
+            password="password123",
+        )
+        self.shift_plan = ShiftPlan.objects.create(
+            user=self.user,
+            year=2026,
+            month=7,
+        )
+
+    def create_rule(self, **overrides):
+        data = {
+            "required_day_staff": 0,
+            "required_night_staff": 0,
+            "required_leader_staff": 0,
+            "off_days_per_staff": 8,
+            "max_consecutive_work_days": 5,
+            "night_shift_next_day_off": True,
+        }
+        data.update(overrides)
+        return ShiftRule.objects.create(shift_plan=self.shift_plan, **data)
+
+    def create_staff_member(self, name="佐藤 花子", can_night_shift=True):
+        return StaffMember.objects.create(
+            user=self.user,
+            name=name,
+            gender=StaffMember.GenderChoices.FEMALE,
+            can_night_shift=can_night_shift,
+        )
+
+    def build_shift_map(self, shifts):
+        return {
+            (generated_shift.staff_member_id, generated_shift.date): generated_shift.shift_type
+            for generated_shift in shifts
+        }
+
+    def test_generate_shift_returns_all_days_and_exact_off_days(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(result.status, "success")
+        self.assertIn(result.solver_status, {"OPTIMAL", "FEASIBLE"})
+        self.assertEqual(result.staff_count, 1)
+        self.assertEqual(result.target_day_count, 31)
+        self.assertEqual(len(result.shifts), 31)
+        self.assertEqual(
+            sum(
+                1
+                for target_date in [date(2026, 7, day) for day in range(1, 32)]
+                if shift_map[(staff_member.id, target_date)]
+                in {
+                    ShiftResult.ShiftTypeChoices.OFF,
+                    ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+                }
+            ),
+            8,
+        )
+
+    def test_generate_shift_respects_day_off_request_and_regular_day_off(self):
+        self.create_rule(off_days_per_staff=9)
+        staff_member = self.create_staff_member()
+        StaffRegularDayOff.objects.create(
+            staff_member=staff_member,
+            day_of_week=date(2026, 7, 6).weekday(),
+        )
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 6),
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 6))],
+            ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+        )
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 13))],
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+
+    def test_generate_shift_respects_manual_night_and_followup_pattern(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 10),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 10))],
+            ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 11))],
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        )
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 12))],
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+
+    def test_generate_shift_ignores_unlocked_generated_result(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+            is_locked=False,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertNotEqual(
+            shift_map[(staff_member.id, date(2026, 7, 31))],
+            ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+
+    def test_generate_shift_preserves_locked_result(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 5),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+            is_locked=True,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 5))],
+            ShiftResult.ShiftTypeChoices.DAY,
+        )
+
+    def test_generate_shift_allows_first_day_fixed_after_night(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 1),
+            shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 1))],
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        )
+
+    def test_generate_shift_rejects_night_for_night_ineligible_staff(self):
+        self.create_rule()
+        staff_member = self.create_staff_member(can_night_shift=False)
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 10),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        with self.assertRaisesMessage(ShiftGenerationError, "夜勤不可"):
+            generate_shift(self.shift_plan)
+
+    def test_generate_shift_rejects_excess_fixed_off_days(self):
+        self.create_rule(off_days_per_staff=1)
+        staff_member = self.create_staff_member()
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 1),
+        )
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 2),
+        )
+
+        with self.assertRaisesMessage(ShiftGenerationError, "月休日数 1 日を超えています"):
+            generate_shift(self.shift_plan)

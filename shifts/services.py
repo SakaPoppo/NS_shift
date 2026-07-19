@@ -1,5 +1,6 @@
 import calendar
 from dataclasses import dataclass
+from datetime import date
 
 from .models import ShiftPlan
 
@@ -56,3 +57,9 @@ def get_month_date_range(year, month):
     """その月に入力可能な日付範囲を HTML date input 用の文字列で返す。"""
     last_day = calendar.monthrange(year, month)[1]
     return f"{year}-{month:02d}-01", f"{year}-{month:02d}-{last_day:02d}"
+
+
+def get_month_dates(year, month):
+    """指定した年月に含まれる日付一覧を date オブジェクトで返す。"""
+    last_day = calendar.monthrange(year, month)[1]
+    return [date(year, month, day) for day in range(1, last_day + 1)]
