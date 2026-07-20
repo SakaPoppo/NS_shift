@@ -19,6 +19,11 @@ from .forms import (
     WeekdayShiftRuleForm,
 )
 from .models import DayOffRequest, ShiftPlan, ShiftResult, ShiftRule
+from .shift_generator import (
+    ShiftGenerationError,
+    format_generation_violation_messages,
+    generate_and_save_shift,
+)
 
 SHIFT_SELECT_OPTIONS = [
     ("", ""),
@@ -760,10 +765,6 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             messages.success(request, "勤務データを削除し、希望休・固定休だけの状態へ戻しました。")
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
-        if action == "generate":
-            messages.info(request, "シフト生成処理は未実装です。")
-            return HttpResponseRedirect(self.get_edit_url(shift_plan))
-
         submitted_assignments = self.parse_submitted_assignments(
             shift_plan,
             staff_members,
@@ -785,6 +786,34 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 display_assignments=submitted_assignments,
             )
             return render(request, self.template_name, context)
+
+        if action == "generate":
+            try:
+                with transaction.atomic():
+                    self.save_manual_shift_results(
+                        shift_plan,
+                        submitted_assignments,
+                        existing_results_by_key,
+                    )
+                    generation_result = generate_and_save_shift(shift_plan)
+            except ShiftGenerationError as error:
+                messages.error(request, f"シフトを生成できませんでした。 {error}")
+                context = self.build_edit_context(
+                    shift_plan,
+                    display_assignments=submitted_assignments,
+                )
+                return render(request, self.template_name, context)
+
+            if generation_result.has_violations:
+                warning_lines = format_generation_violation_messages(generation_result.violations)
+                messages.warning(
+                    request,
+                    "シフトを生成しましたが、一部の条件を満たせませんでした。 "
+                    + " ".join(warning_lines),
+                )
+            else:
+                messages.success(request, "シフトを生成しました。")
+            return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
         with transaction.atomic():
             self.save_manual_shift_results(

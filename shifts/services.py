@@ -30,8 +30,18 @@ def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
     上書き用フィールドが None の場合は、その条件では値を確定せず下位条件へフォールバックする。
     """
     shift_rule = shift_plan.shift_rule
-    weekday_rule = shift_plan.weekday_rules.filter(day_of_week=target_date.weekday()).first()
-    date_rule = shift_plan.date_rules.filter(target_date=target_date).first()
+    weekday_rule_map = getattr(shift_plan, "_weekday_rule_map", None)
+    date_rule_map = getattr(shift_plan, "_date_rule_map", None)
+
+    if weekday_rule_map is not None:
+        weekday_rule = weekday_rule_map.get(target_date.weekday())
+    else:
+        weekday_rule = shift_plan.weekday_rules.filter(day_of_week=target_date.weekday()).first()
+
+    if date_rule_map is not None:
+        date_rule = date_rule_map.get(target_date)
+    else:
+        date_rule = shift_plan.date_rules.filter(target_date=target_date).first()
 
     def resolve(field_name, default_value):
         # None は「0」ではなく「この条件では上書きしない」を意味する。
