@@ -80,14 +80,19 @@
           <span class="inline-flex rounded-lg border border-emerald-200 bg-emerald-100 px-3 py-1 text-sm font-black text-emerald-800">研：研修</span>
         </div>
         <div class="mt-4 space-y-1 text-sm font-medium text-slate-600">
-          <p>公休・希望休は月休日数に含まれます。</p>
-          <p>有給・特別休暇は月休日数に含まれません。</p>
+          <p>公休・希望休・有給・特別休暇は、月間の非勤務日数として集計されます。</p>
           <p>研修は月休日数・日勤人数には含まれませんが、連勤には含まれます。</p>
         </div>
       </details>
 
       <form method="post" class="space-y-3">
         {% csrf_token %}
+
+        {% if missing_previous_staff_members %}
+          <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            前月シフトを取得できないスタッフは月を跨いだ連続勤務を自動では考慮できません。前月末が夜勤だった場合は、月初1日に「明」を手入力してください。
+          </div>
+        {% endif %}
 
         <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div class="border-b border-slate-200 bg-slate-50 px-3 py-3 sm:px-4">

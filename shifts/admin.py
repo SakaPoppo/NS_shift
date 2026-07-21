@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DateShiftRule, DayOffRequest, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
+from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 
 
 @admin.register(ShiftPlan)
@@ -80,3 +80,11 @@ class ShiftResultAdmin(admin.ModelAdmin):
     )
     list_filter = ("shift_type", "input_type", "is_locked", "date")
     search_fields = ("staff_member__name", "=shift_plan__year", "=shift_plan__month", "memo")
+
+
+@admin.register(ShiftCarryover)
+class ShiftCarryoverAdmin(admin.ModelAdmin):
+    list_display = (
+        "shift_plan", "staff_member", "source", "previous_shift_plan",
+        "previous_last_shift_type", "previous_consecutive_work_days",
+    )
