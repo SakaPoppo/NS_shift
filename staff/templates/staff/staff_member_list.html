@@ -135,13 +135,18 @@
                 <div class="flex items-start justify-between gap-4">
                   <dt class="shrink-0 text-xs font-medium text-slate-500">固定休日</dt>
                   <dd class="flex flex-wrap justify-end gap-1 text-sm font-bold text-slate-900">
-                    {% for day_off in staff_member.regular_days_off.all %}
-                      <span>
-                        {{ day_off.get_day_of_week_display }}{% if not forloop.last %}{% endif %}
-                      </span>
-                    {% empty %}
-                      <span class="font-medium text-slate-400">なし</span>
-                    {% endfor %}
+                    {% with regular_days_off=staff_member.regular_days_off.all %}
+                      {% if regular_days_off or staff_member.is_holiday_off %}
+                        {% for day_off in regular_days_off %}
+                          <span>{{ day_off.get_day_of_week_display }}</span>
+                        {% endfor %}
+                        {% if staff_member.is_holiday_off %}
+                          <span>祝</span>
+                        {% endif %}
+                      {% else %}
+                        <span class="font-medium text-slate-400">なし</span>
+                      {% endif %}
+                    {% endwith %}
                   </dd>
                 </div>
               </dl>

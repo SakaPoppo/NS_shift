@@ -58,6 +58,7 @@ class StaffMember(models.Model):
         default=AbilityLevelChoices.LEVEL_2,
     )
     can_night_shift = models.BooleanField("夜勤可", default=True)
+    is_holiday_off = models.BooleanField("祝日固定休", default=False)
     is_active = models.BooleanField("在籍中", default=True)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
     updated_at = models.DateTimeField("更新日時", auto_now=True)

@@ -18,7 +18,14 @@ from .forms import (
     ShiftRuleForm,
     WeekdayShiftRuleForm,
 )
-from .models import DayOffRequest, ShiftPlan, ShiftResult, ShiftRule
+from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule
+from .services import (
+    MonthBoundaryConflictError,
+    build_shift_carryovers,
+    get_japanese_holiday_dates,
+    sync_month_boundary_assignments,
+    sync_next_month_boundary_assignments,
+)
 from .shift_generator import (
     ShiftGenerationError,
     format_generation_violation_messages,
@@ -26,7 +33,7 @@ from .shift_generator import (
 )
 
 SHIFT_SELECT_OPTIONS = [
-    ("", ""),
+    ("", "-"),
     (ShiftResult.ShiftTypeChoices.DAY, "日"),
     (ShiftResult.ShiftTypeChoices.NIGHT, "夜"),
     (ShiftResult.ShiftTypeChoices.AFTER_NIGHT, "明"),
@@ -71,7 +78,7 @@ SHIFT_DISPLAY_CONFIG = {
         "classes": "border-emerald-200 bg-emerald-100 text-emerald-800",
     },
     "blank": {
-        "label": "",
+        "label": "-",
         "classes": "border-slate-200 bg-white text-slate-400",
     },
 }
@@ -79,7 +86,9 @@ SHIFT_DISPLAY_CONFIG = {
 SHIFT_TYPE_LABELS = dict(ShiftResult.ShiftTypeChoices.choices)
 BASE_FIXED_SOURCE_LABELS = {
     "day_off_request": "希望休",
-    "regular_day_off": "固定休",
+    "regular_day_off": "曜日固定休",
+    "holiday_off": "祝日固定休",
+    "month_boundary": "前月勤務の引き継ぎ",
 }
 WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
 
@@ -89,13 +98,14 @@ def get_month_dates(year, month):
     return [date(year, month, day) for day in range(1, last_day + 1)]
 
 
-def build_day_headers(month_dates):
+def build_day_headers(month_dates, holiday_dates=frozenset()):
     return [
         {
             "date": current_date,
             "weekday_label": WEEKDAY_LABELS[current_date.weekday()],
             "is_saturday": current_date.weekday() == 5,
             "is_sunday": current_date.weekday() == 6,
+            "is_holiday": current_date in holiday_dates,
         }
         for current_date in month_dates
     ]
@@ -148,7 +158,7 @@ def build_shift_plan_grid(
                 shift_type = base_fixed["shift_type"]
                 source = base_fixed["source"]
                 is_base_fixed = True
-                has_conflict = result is not None
+                has_conflict = result is not None and result.shift_type != shift_type
                 conflicting_shift_type = result.shift_type if result else None
                 if conflicting_shift_type:
                     conflict_message = (
@@ -328,14 +338,15 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         }
 
     def get_base_fixed_assignments(self, shift_plan, staff_members, month_dates):
-        """希望休と曜日固定休を、編集不可の基礎データへ変換する。
+        """希望休と曜日・祝日固定休を、編集不可の基礎データへ変換する。
 
-        優先順位は「希望休 > 曜日固定休」。
+        優先順位は「希望休 > 曜日固定休・祝日固定休」。
         戻り値は {(staff_member_id, date): {"shift_type": str, "source": str}} の辞書で、
         表示時と保存時の両方で同じ判定結果を使う。
         """
         month_dates_set = set(month_dates)
         base_fixed_assignments = {}
+        holiday_dates = get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
         day_off_requests = DayOffRequest.objects.filter(
             shift_plan=shift_plan,
             staff_member__in=staff_members,
@@ -348,9 +359,9 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             }
 
         for staff_member in staff_members:
-            regular_days_off = set(
-                staff_member.regular_days_off.values_list("day_of_week", flat=True)
-            )
+            regular_days_off = {
+                day_off.day_of_week for day_off in staff_member.regular_days_off.all()
+            }
             for current_date in month_dates:
                 cell_key = (staff_member.id, current_date)
                 if cell_key in base_fixed_assignments:
@@ -360,13 +371,31 @@ class UserShiftPlanMixin(LoginRequiredMixin):
                         "shift_type": ShiftResult.ShiftTypeChoices.OFF,
                         "source": "regular_day_off",
                     }
+                elif staff_member.is_holiday_off and current_date in holiday_dates:
+                    base_fixed_assignments[cell_key] = {
+                        "shift_type": ShiftResult.ShiftTypeChoices.OFF,
+                        "source": "holiday_off",
+                    }
+
+        for result in ShiftResult.objects.filter(
+            shift_plan=shift_plan,
+            staff_member__in=staff_members,
+            lock_reason=ShiftResult.LockReasonChoices.MONTH_BOUNDARY,
+        ):
+            cell_key = (result.staff_member_id, result.date)
+            if cell_key not in base_fixed_assignments:
+                base_fixed_assignments[cell_key] = {
+                    "shift_type": result.shift_type,
+                    "source": "month_boundary",
+                }
 
         return base_fixed_assignments
 
     def build_edit_context(self, shift_plan, *, display_assignments=None):
         staff_members = list(self.get_staff_members())
         month_dates = get_month_dates(shift_plan.year, shift_plan.month)
-        day_headers = build_day_headers(month_dates)
+        holiday_dates = get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
+        day_headers = build_day_headers(month_dates, holiday_dates)
         shift_results_by_key = self.get_shift_results_by_key(shift_plan, staff_members)
         base_fixed_assignments = self.get_base_fixed_assignments(
             shift_plan,
@@ -381,6 +410,13 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             display_assignments=display_assignments,
         )
         shift_rule = self.get_shift_rule(shift_plan)
+        carryover_staff_ids = set(
+            shift_plan.carryovers.filter(
+                staff_member__in=staff_members,
+                source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            )
+            .values_list("staff_member_id", flat=True)
+        )
         return {
             "shift_plan": shift_plan,
             "shift_rule": shift_rule,
@@ -392,6 +428,10 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             "staff_count": len(staff_members),
             "weekday_rule_count": shift_plan.weekday_rules.count(),
             "date_rule_count": shift_plan.date_rules.count(),
+            "missing_previous_staff_members": [
+                staff_member for staff_member in staff_members
+                if staff_member.id not in carryover_staff_ids
+            ],
         }
 
     def parse_submitted_assignments(
@@ -456,6 +496,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
 
     def validate_manual_assignments(
         self,
+        shift_plan,
         staff_members,
         month_dates,
         submitted_assignments,
@@ -524,8 +565,13 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             if current_shift_type == ShiftResult.ShiftTypeChoices.AFTER_NIGHT:
                 previous_date = current_date.fromordinal(current_date.toordinal() - 1)
                 if previous_date not in month_dates_set:
-                    # 月初の明けは前月の夜勤を参照できないため、現在は不正として扱う。
-                    # TODO: 月をまたぐ「夜勤→明け」の扱いを決定する。
+                    # 前月情報がないスタッフは、月初の明けを手入力で補完できる。
+                    if not ShiftCarryover.objects.filter(
+                        shift_plan=shift_plan,
+                        staff_member_id=staff_member_id,
+                        source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+                    ).exists():
+                        continue
                     errors.append(
                         f"{current_date.day}日の明けは保存できません。"
                         f"前日の{previous_date.day}日に夜勤が存在しません。"
@@ -629,13 +675,14 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         ShiftResult.objects.filter(
             shift_plan=shift_plan,
             input_type=ShiftResult.InputTypeChoices.GENERATED,
+            is_locked=False,
         ).delete()
 
     def reset_all_shift_results(self, shift_plan):
         """ShiftResult を全削除し、希望休・固定休だけの状態へ戻す。"""
         ShiftResult.objects.filter(
             shift_plan=shift_plan,
-        ).delete()
+        ).exclude(lock_reason=ShiftResult.LockReasonChoices.MONTH_BOUNDARY).delete()
 
 
 class ShiftPlanListView(LoginRequiredMixin, ListView):
@@ -661,6 +708,12 @@ class ShiftPlanCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.user = self.request.user
         self.object = form.save()
+        build_shift_carryovers(self.object)
+        try:
+            sync_month_boundary_assignments(self.object)
+        except MonthBoundaryConflictError:
+            # 条件未設定・月初競合は編集画面で確認できるよう、作成自体は完了させる。
+            pass
         return HttpResponseRedirect(
             reverse("shifts:conditions", kwargs={"pk": self.object.pk})
         )
@@ -756,12 +809,18 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
         )
 
         if action == "reset_to_manual":
-            self.reset_generated_results(shift_plan)
+            with transaction.atomic():
+                self.reset_generated_results(shift_plan)
+                sync_month_boundary_assignments(shift_plan)
+                sync_next_month_boundary_assignments(shift_plan)
             messages.success(request, "自動生成した勤務を削除し、手入力した勤務だけを残しました。")
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
         if action == "reset_to_base":
-            self.reset_all_shift_results(shift_plan)
+            with transaction.atomic():
+                self.reset_all_shift_results(shift_plan)
+                sync_month_boundary_assignments(shift_plan)
+                sync_next_month_boundary_assignments(shift_plan)
             messages.success(request, "勤務データを削除し、希望休・固定休だけの状態へ戻しました。")
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
@@ -772,6 +831,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             base_fixed_assignments,
         )
         validation_errors = self.validate_manual_assignments(
+            shift_plan,
             staff_members,
             month_dates,
             submitted_assignments,
@@ -795,8 +855,10 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                         submitted_assignments,
                         existing_results_by_key,
                     )
+                    sync_month_boundary_assignments(shift_plan)
                     generation_result = generate_and_save_shift(shift_plan)
-            except ShiftGenerationError as error:
+                    sync_next_month_boundary_assignments(shift_plan)
+            except (ShiftGenerationError, MonthBoundaryConflictError) as error:
                 messages.error(request, f"シフトを生成できませんでした。 {error}")
                 context = self.build_edit_context(
                     shift_plan,
@@ -821,6 +883,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 submitted_assignments,
                 existing_results_by_key,
             )
+            sync_next_month_boundary_assignments(shift_plan)
             messages.success(request, "シフトを保存しました。")
 
         return HttpResponseRedirect(self.get_edit_url(shift_plan))
