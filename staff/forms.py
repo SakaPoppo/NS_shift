@@ -24,7 +24,7 @@ class StaffMemberForm(forms.ModelForm):
         initial=True,
     )
     regular_days_off = forms.TypedMultipleChoiceField(
-        label="希望休日",
+        label="固定休",
         choices=StaffRegularDayOff.DayOfWeekChoices.choices,
         coerce=int,
         required=False,
@@ -33,12 +33,16 @@ class StaffMemberForm(forms.ModelForm):
 
     class Meta:
         model = StaffMember
-        fields = ("name", "gender", "job", "role", "ability_level", "can_night_shift")
+        fields = (
+            "name", "gender", "job", "role", "ability_level",
+            "can_night_shift", "is_holiday_off",
+        )
         widgets = {
             "gender": forms.RadioSelect,
             "job": forms.Select,
             "role": forms.Select,
             "ability_level": forms.Select,
+            "is_holiday_off": forms.CheckboxInput,
         }
 
     def __init__(self, *args, **kwargs):
@@ -46,6 +50,9 @@ class StaffMemberForm(forms.ModelForm):
         self.fields["gender"].widget.attrs.update({"class": "radio radio-primary radio-sm"})
         self.fields["can_night_shift"].widget.attrs.update({"class": "radio radio-primary radio-sm"})
         self.fields["regular_days_off"].widget.attrs.update({"class": "checkbox checkbox-primary checkbox-sm rounded-md"})
+        self.fields["is_holiday_off"].widget.attrs.update(
+            {"class": "checkbox checkbox-primary checkbox-sm rounded-md"}
+        )
         self.fields["name"].widget.attrs.update(
             {
                 "class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none",

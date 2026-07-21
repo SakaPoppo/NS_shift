@@ -162,10 +162,10 @@
                   </th>
                   {% for header in day_headers %}
                     <th class="min-w-[48px] border-b border-r border-slate-200 bg-slate-50 px-0.5 py-1 text-center">
-                      <div class="text-[11px] font-bold {% if header.is_sunday %}text-red-500{% elif header.is_saturday %}text-sky-600{% else %}text-slate-500{% endif %}">
+                      <div class="text-[11px] font-bold {% if header.is_sunday or header.is_holiday %}text-red-500{% elif header.is_saturday %}text-sky-600{% else %}text-slate-500{% endif %}">
                         {{ header.weekday_label }}
                       </div>
-                      <div class="mt-0.5 text-[14px] font-black {% if header.is_sunday %}text-red-600{% elif header.is_saturday %}text-sky-700{% else %}text-slate-900{% endif %}">
+                      <div class="mt-0.5 text-[14px] font-black {% if header.is_sunday or header.is_holiday %}text-red-600{% elif header.is_saturday %}text-sky-700{% else %}text-slate-900{% endif %}">
                         {{ header.date.day }}
                       </div>
                     </th>
