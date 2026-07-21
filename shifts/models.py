@@ -228,6 +228,10 @@ class ShiftResult(models.Model):
         MANUAL = "manual", "手動"
         GENERATED = "generated", "自動生成"
 
+    class LockReasonChoices(models.TextChoices):
+        MONTH_BOUNDARY = "month_boundary", "前月勤務の引き継ぎ"
+        USER = "user", "ユーザー固定"
+
     shift_plan = models.ForeignKey(
         ShiftPlan,
         on_delete=models.CASCADE,
@@ -251,6 +255,13 @@ class ShiftResult(models.Model):
         default=InputTypeChoices.GENERATED,
     )
     is_locked = models.BooleanField("ロック済み", default=False)
+    lock_reason = models.CharField(
+        "固定理由",
+        max_length=30,
+        choices=LockReasonChoices.choices,
+        blank=True,
+        default="",
+    )
     memo = models.TextField("メモ", blank=True)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
     updated_at = models.DateTimeField("更新日時", auto_now=True)
@@ -267,3 +278,42 @@ class ShiftResult(models.Model):
 
     def __str__(self):
         return f"{self.staff_member.name} - {self.date} - {self.get_shift_type_display()}"
+
+
+class ShiftCarryover(models.Model):
+    """スタッフ単位の前月末勤務と、月初へ持ち越す連勤数。"""
+
+    class SourceChoices(models.TextChoices):
+        PREVIOUS_PLAN = "previous_plan", "前月シフト表"
+        MANUAL = "manual", "手入力"
+
+    shift_plan = models.ForeignKey(
+        ShiftPlan, on_delete=models.CASCADE, related_name="carryovers"
+    )
+    staff_member = models.ForeignKey(
+        StaffMember, on_delete=models.CASCADE, related_name="shift_carryovers"
+    )
+    source = models.CharField(max_length=30, choices=SourceChoices.choices)
+    previous_shift_plan = models.ForeignKey(
+        ShiftPlan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="next_month_carryovers",
+    )
+    previous_last_shift_type = models.CharField(
+        max_length=30,
+        choices=ShiftResult.ShiftTypeChoices.choices,
+        null=True,
+        blank=True,
+    )
+    previous_consecutive_work_days = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "shift_carryovers"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["shift_plan", "staff_member"],
+                name="unique_shift_carryover_plan_staff",
+            )
+        ]
