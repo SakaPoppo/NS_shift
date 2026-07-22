@@ -244,7 +244,7 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
         .values_list("staff_member_id", "date")
     )
     regular = {
-        staff.id: set(staff.regular_days_off.values_list("day_of_week", flat=True))
+        staff.id: {day_off.day_of_week for day_off in staff.regular_days_off.all()}
         for staff in StaffMember.objects.filter(id__in=[c.staff_member_id for c in carryovers])
         .prefetch_related("regular_days_off")
     }
@@ -252,9 +252,13 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
     for key, (carryover, required_type) in wanted.items():
         staff_id, target_date = key
         current = existing.get(key)
-        base_off = key in requests or target_date.weekday() in regular.get(staff_id, set())
+        regular_off = target_date.weekday() in regular.get(staff_id, set())
+        base_off = key in requests or regular_off
         # 2日目のOFFは既に保証された休みと重複保存しない。一方、明けや夜勤とは競合する。
         if base_off and required_type == ShiftResult.ShiftTypeChoices.OFF:
+            continue
+        # 月境界の2日目だけは曜日固定休を優先し、明け翌日夜勤の例外を許可する。
+        if target_date.day == 2 and regular_off:
             continue
         if base_off or (current and current.lock_reason != ShiftResult.LockReasonChoices.MONTH_BOUNDARY):
             reason = "希望休または曜日固定休" if base_off else current.get_shift_type_display()
@@ -276,8 +280,10 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
     saved = []
     for key, (_, shift_type) in wanted.items():
         staff_id, target_date = key
-        if shift_type == ShiftResult.ShiftTypeChoices.OFF and (
-            key in requests or target_date.weekday() in regular.get(staff_id, set())
+        regular_off = target_date.weekday() in regular.get(staff_id, set())
+        if (
+            (shift_type == ShiftResult.ShiftTypeChoices.OFF and (key in requests or regular_off))
+            or (target_date.day == 2 and regular_off)
         ):
             ShiftResult.objects.filter(
                 shift_plan=shift_plan, staff_member_id=staff_id, date=target_date,

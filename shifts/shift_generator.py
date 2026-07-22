@@ -1,10 +1,10 @@
 """OR-Tools を使ったシフト自動生成ロジック。
 
-第2段階では、第1段階のハード制約に加えて以下を追加している。
+ハード制約に加えて以下を追加している。
 
 - 必要日勤人数のセミハード制約
-- 必要夜勤人数のセミハード制約
 - 最大連勤数のセミハード制約
+- 月間夜勤回数差のセミハード制約
 - 違反内容の組み立て
 - 生成結果の DB 保存
 """
@@ -46,15 +46,13 @@ WORKLIKE_SHIFT_TYPES = {
 }
 
 SEMI_HARD_WEIGHTS = {
-    "night_shortage": 100,
-    "day_shortage": 80,
-    "max_consecutive_work": 70,
-    "night_excess": 30,
+    "day_shortage": 100,
+    "max_consecutive_work": 80,
+    "night_count_imbalance": 60,
     "day_excess": 20,
 }
 
 SOFT_CONSTRAINT_WEIGHTS = {
-    "night_shift_balance": 100,
     "ability_balance": 60,
     "day_shift_balance": 30,
     "long_consecutive_work": 20,
@@ -72,8 +70,7 @@ class ShiftGenerationViolationType:
 
     DAY_SHORTAGE = "day_shortage"
     DAY_EXCESS = "day_excess"
-    NIGHT_SHORTAGE = "night_shortage"
-    NIGHT_EXCESS = "night_excess"
+    NIGHT_COUNT_IMBALANCE = "night_count_imbalance"
     MAX_CONSECUTIVE_WORK = "max_consecutive_work"
 
 
@@ -99,6 +96,10 @@ class ShiftGenerationViolation:
     amount: int | None = None
     start_date: date | None = None
     end_date: date | None = None
+    minimum_count: int | None = None
+    maximum_count: int | None = None
+    count_difference: int | None = None
+    allowed_difference: int | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,7 @@ class ShiftOptimizationSummary:
     long_streak_penalty: int
     ability_balance_penalty: int
     semi_hard_optimal: bool
+    night_shift_counts: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -140,6 +142,8 @@ class SoftObjectiveData:
     day_max: object | None = None
     long_streak_terms: list = field(default_factory=list)
     ability_terms: list = field(default_factory=list)
+    night_count_vars: dict[int, object] = field(default_factory=dict)
+    night_balance_violation: object | None = None
 
 @dataclass(frozen=True)
 class GenerationContext:
@@ -172,6 +176,12 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         fixed_assignments=context.fixed_assignments,
     )
     _add_night_shift_eligibility_constraints(
+        model=model,
+        staff_members=context.staff_members,
+        month_dates=context.month_dates,
+        shift_vars=shift_vars,
+    )
+    _add_next_month_first_regular_day_off_constraints(
         model=model,
         staff_members=context.staff_members,
         month_dates=context.month_dates,
@@ -216,6 +226,15 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
             previous_consecutive_work_days=context.previous_consecutive_work_days,
         )
     )
+    night_min, night_max, night_count_vars, night_balance_violation, night_terms = (
+        _add_night_count_balance_semi_hard_constraint(
+            model=model,
+            staff_members=context.staff_members,
+            month_dates=context.month_dates,
+            shift_vars=shift_vars,
+        )
+    )
+    semi_hard_terms.extend(night_terms)
     semi_hard_score = sum(semi_hard_terms) if semi_hard_terms else 0
     soft_data = _build_soft_objective(
         model=model,
@@ -225,6 +244,10 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         fixed_assignments=context.fixed_assignments,
         max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
         previous_consecutive_work_days=context.previous_consecutive_work_days,
+        night_min=night_min,
+        night_max=night_max,
+        night_count_vars=night_count_vars,
+        night_balance_violation=night_balance_violation,
     )
 
     # 第1フェーズの最良値を等式で固定するため、ソフト制約がセミハード違反を増やせない。
@@ -259,6 +282,10 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         month_dates=context.month_dates,
         effective_rules=context.effective_rules,
         max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
+        night_shift_counts={
+            staff_id: _solver_value(solver, count_var)
+            for staff_id, count_var in soft_data.night_count_vars.items()
+        },
     )
     optimization_summary = _build_optimization_summary(
         solver=solver,
@@ -615,6 +642,23 @@ def _add_night_shift_eligibility_constraints(*, model, staff_members, month_date
             )
 
 
+def _add_next_month_first_regular_day_off_constraints(
+    *, model, staff_members, month_dates, shift_vars
+):
+    """翌月1日が曜日固定休なら、当月末夜勤を候補から外す。"""
+    next_month_first = month_dates[-1].fromordinal(month_dates[-1].toordinal() + 1)
+    last_date = month_dates[-1]
+    for staff_member in staff_members:
+        regular_days = {
+            day_off.day_of_week for day_off in staff_member.regular_days_off.all()
+        }
+        if next_month_first.weekday() in regular_days:
+            model.Add(
+                shift_vars[(staff_member.id, last_date)][ShiftResult.ShiftTypeChoices.NIGHT]
+                == 0
+            )
+
+
 def _add_night_pattern_constraints(
     *,
     model,
@@ -822,6 +866,31 @@ def _add_shift_count_balance_objective(
     return minimum, maximum, [maximum - minimum]
 
 
+def _add_night_count_balance_semi_hard_constraint(
+    *, model, staff_members, month_dates, shift_vars
+):
+    eligible_staff = [staff for staff in staff_members if staff.can_night_shift]
+    if len(eligible_staff) <= 1:
+        return None, None, {}, None, []
+    count_vars = {}
+    for staff_member in eligible_staff:
+        count_var = model.NewIntVar(0, len(month_dates), f"night_count_{staff_member.id}")
+        model.Add(count_var == sum(
+            shift_vars[(staff_member.id, target_date)][ShiftResult.ShiftTypeChoices.NIGHT]
+            for target_date in month_dates
+        ))
+        count_vars[staff_member.id] = count_var
+    minimum = model.NewIntVar(0, len(month_dates), "night_count_min")
+    maximum = model.NewIntVar(0, len(month_dates), "night_count_max")
+    model.AddMinEquality(minimum, list(count_vars.values()))
+    model.AddMaxEquality(maximum, list(count_vars.values()))
+    violation = model.NewIntVar(0, len(month_dates), "night_balance_violation")
+    model.Add(violation >= maximum - minimum - 1)
+    return minimum, maximum, count_vars, violation, [
+        violation * SEMI_HARD_WEIGHTS[ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE]
+    ]
+
+
 def _add_long_consecutive_work_objective(
     *, model, staff_members, month_dates, shift_vars, fixed_assignments,
     max_consecutive_work_days, previous_consecutive_work_days,
@@ -895,14 +964,14 @@ def _add_ability_balance_objective(
 def _build_soft_objective(
     *, model, staff_members, month_dates, shift_vars, fixed_assignments,
     max_consecutive_work_days, previous_consecutive_work_days,
+    night_min, night_max, night_count_vars, night_balance_violation,
 ):
     data = SoftObjectiveData()
     night_staff = [staff_member for staff_member in staff_members if staff_member.can_night_shift]
-    data.night_min, data.night_max, night_terms = _add_shift_count_balance_objective(
-        model=model, staff_members=night_staff, month_dates=month_dates,
-        shift_vars=shift_vars, shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
-        name="night",
-    )
+    data.night_min = night_min
+    data.night_max = night_max
+    data.night_count_vars = night_count_vars
+    data.night_balance_violation = night_balance_violation
     data.day_min, data.day_max, day_terms = _add_shift_count_balance_objective(
         model=model, staff_members=staff_members, month_dates=month_dates,
         shift_vars=shift_vars, shift_type=ShiftResult.ShiftTypeChoices.DAY,
@@ -925,9 +994,6 @@ def _build_soft_objective(
             shift_vars=shift_vars, shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
             name="night",
         )
-    )
-    data.weighted_terms.extend(
-        term * SOFT_CONSTRAINT_WEIGHTS["night_shift_balance"] for term in night_terms
     )
     data.weighted_terms.extend(
         term * SOFT_CONSTRAINT_WEIGHTS["ability_balance"] for term in data.ability_terms
@@ -971,6 +1037,10 @@ def _build_optimization_summary(
             _solver_value(solver, term) for term in soft_data.ability_terms
         ),
         semi_hard_optimal=semi_hard_optimal,
+        night_shift_counts={
+            staff_id: _solver_value(solver, count_var)
+            for staff_id, count_var in soft_data.night_count_vars.items()
+        },
     )
 
 
@@ -1016,6 +1086,7 @@ def _build_generation_violations(
     month_dates,
     effective_rules,
     max_consecutive_work_days,
+    night_shift_counts,
 ):
     """解から表示用の違反一覧を組み立てる。"""
 
@@ -1040,7 +1111,30 @@ def _build_generation_violations(
             max_consecutive_work_days=max_consecutive_work_days,
         )
     )
+    violations.extend(_build_night_count_imbalance_violation(night_shift_counts))
     return violations
+
+
+def _build_night_count_imbalance_violation(night_shift_counts):
+    if len(night_shift_counts) <= 1:
+        return []
+    minimum = min(night_shift_counts.values())
+    maximum = max(night_shift_counts.values())
+    difference = maximum - minimum
+    if difference <= 1:
+        return []
+    return [ShiftGenerationViolation(
+        violation_type=ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE,
+        message=(
+            f"スタッフ間の夜勤回数差が{difference}回あります。"
+            "目標は1回以内ですが、固定勤務などの影響により調整できませんでした。"
+        ),
+        minimum_count=minimum,
+        maximum_count=maximum,
+        count_difference=difference,
+        allowed_difference=1,
+        amount=difference - 1,
+    )]
 
 
 def _build_staffing_violations(*, shift_map, staff_members, month_dates, effective_rules):
@@ -1053,11 +1147,6 @@ def _build_staffing_violations(*, shift_map, staff_members, month_dates, effecti
             1
             for staff_member in staff_members
             if shift_map[(staff_member.id, target_date)] == ShiftResult.ShiftTypeChoices.DAY
-        )
-        actual_night_count = sum(
-            1
-            for staff_member in staff_members
-            if shift_map[(staff_member.id, target_date)] == ShiftResult.ShiftTypeChoices.NIGHT
         )
         rule = effective_rules[target_date]
 
@@ -1076,37 +1165,6 @@ def _build_staffing_violations(*, shift_map, staff_members, month_dates, effecti
                     amount=amount,
                 )
             )
-        if actual_night_count < rule.required_night_staff:
-            amount = rule.required_night_staff - actual_night_count
-            violations.append(
-                ShiftGenerationViolation(
-                    violation_type=ShiftGenerationViolationType.NIGHT_SHORTAGE,
-                    message=(
-                        f"{target_date.month}月{target_date.day}日の夜勤が{amount}人不足しています。"
-                        f" 必要人数：{rule.required_night_staff}人 / 実際の人数：{actual_night_count}人"
-                    ),
-                    date=target_date,
-                    required_count=rule.required_night_staff,
-                    actual_count=actual_night_count,
-                    amount=amount,
-                )
-            )
-        elif actual_night_count > rule.required_night_staff:
-            amount = actual_night_count - rule.required_night_staff
-            violations.append(
-                ShiftGenerationViolation(
-                    violation_type=ShiftGenerationViolationType.NIGHT_EXCESS,
-                    message=(
-                        f"{target_date.month}月{target_date.day}日の夜勤が{amount}人超過しています。"
-                        f" 必要人数：{rule.required_night_staff}人 / 実際の人数：{actual_night_count}人"
-                    ),
-                    date=target_date,
-                    required_count=rule.required_night_staff,
-                    actual_count=actual_night_count,
-                    amount=amount,
-                )
-            )
-
     return violations
 
 
