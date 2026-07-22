@@ -130,7 +130,7 @@ class ShiftRuleForm(forms.Form):
         widget=forms.RadioSelect,
     )
 
-    def __init__(self, *args, shift_rule=None, **kwargs):
+    def __init__(self, *args, shift_rule=None, initial_shift_rule=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.shift_rule = shift_rule
 
@@ -151,6 +151,17 @@ class ShiftRuleForm(forms.Form):
                     "required_leader_staff": shift_rule.required_leader_staff,
                     "max_consecutive_work_days": shift_rule.max_consecutive_work_days,
                     "night_shift_next_day_off": shift_rule.night_shift_next_day_off,
+                }
+            )
+        elif initial_shift_rule and not self.is_bound:
+            self.initial.update(
+                {
+                    "required_day_staff": initial_shift_rule.required_day_staff,
+                    "required_night_staff": initial_shift_rule.required_night_staff,
+                    "off_days_per_staff": initial_shift_rule.off_days_per_staff,
+                    "required_leader_staff": initial_shift_rule.required_leader_staff,
+                    "max_consecutive_work_days": initial_shift_rule.max_consecutive_work_days,
+                    "night_shift_next_day_off": initial_shift_rule.night_shift_next_day_off,
                 }
             )
         elif not self.is_bound:
@@ -218,7 +229,7 @@ class WeekdayShiftRuleForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 2}),
     )
 
-    def __init__(self, *args, day_of_week=None, instance=None, **kwargs):
+    def __init__(self, *args, day_of_week=None, instance=None, initial_rule=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.instance = instance
 
@@ -251,18 +262,19 @@ class WeekdayShiftRuleForm(forms.Form):
 
         # POST後の再表示では、ユーザーが入力した値を initial で潰さない。
         if not self.is_bound:
-            initial_day_of_week = instance.day_of_week if instance else day_of_week
-            self.initial["selected"] = "1" if instance else "0"
+            source_rule = instance or initial_rule
+            initial_day_of_week = source_rule.day_of_week if source_rule else day_of_week
+            self.initial["selected"] = "1" if source_rule else "0"
             self.initial["day_of_week"] = initial_day_of_week
-            if instance:
+            if source_rule:
                 self.initial.update(
                     {
-                        "required_day_staff": instance.required_day_staff,
-                        "required_night_staff": instance.required_night_staff,
-                        "required_leader_staff": instance.required_leader_staff,
-                        "min_ability_level": instance.min_ability_level,
-                        "min_ability_level_staff_count": instance.min_ability_level_staff_count,
-                        "memo": instance.memo,
+                        "required_day_staff": source_rule.required_day_staff,
+                        "required_night_staff": source_rule.required_night_staff,
+                        "required_leader_staff": source_rule.required_leader_staff,
+                        "min_ability_level": source_rule.min_ability_level,
+                        "min_ability_level_staff_count": source_rule.min_ability_level_staff_count,
+                        "memo": source_rule.memo,
                     }
                 )
 
