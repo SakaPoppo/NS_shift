@@ -15,6 +15,7 @@ from .shift_generator import (
     ShiftGenerationResult,
     ShiftGenerationViolation,
     ShiftGenerationViolationType,
+    _build_night_count_imbalance_violation,
     generate_and_save_shift,
     generate_shift,
 )
@@ -469,6 +470,89 @@ class ShiftRuleWorkflowTests(TestCase):
 
         self.assertEqual(response.context["rule_form"].initial["required_day_staff"], 6)
         self.assertEqual(response.context["rule_form"].initial["required_night_staff"], 2)
+
+    def test_previous_month_conditions_are_used_only_as_unsaved_initial_values(self):
+        previous_plan = ShiftPlan.objects.create(user=self.user, year=2026, month=7)
+        ShiftRule.objects.create(
+            shift_plan=previous_plan,
+            required_day_staff=7,
+            required_night_staff=3,
+            off_days_per_staff=10,
+            required_leader_staff=2,
+            max_consecutive_work_days=4,
+            night_shift_next_day_off=False,
+        )
+        WeekdayShiftRule.objects.create(
+            shift_plan=previous_plan,
+            day_of_week=0,
+            required_day_staff=8,
+            required_night_staff=2,
+            min_ability_level=4,
+            min_ability_level_staff_count=2,
+            memo="前月の月曜条件",
+        )
+        DateShiftRule.objects.create(
+            shift_plan=previous_plan,
+            target_date=date(2026, 7, 10),
+            required_day_staff=9,
+            memo="引き継がない",
+        )
+
+        response = self.client.get(
+            reverse("shifts:conditions", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        rule_form = response.context["rule_form"]
+        self.assertEqual(rule_form.initial["required_day_staff"], 7)
+        self.assertEqual(rule_form.initial["required_night_staff"], 3)
+        self.assertEqual(rule_form.initial["off_days_per_staff"], 10)
+        self.assertEqual(rule_form.initial["required_leader_staff"], 2)
+        self.assertEqual(rule_form.initial["max_consecutive_work_days"], 4)
+        self.assertFalse(rule_form.initial["night_shift_next_day_off"])
+        monday_form = response.context["weekday_form_rows"][0]["form"]
+        self.assertEqual(monday_form.initial["selected"], "1")
+        self.assertEqual(monday_form.initial["required_day_staff"], 8)
+        self.assertEqual(monday_form.initial["memo"], "前月の月曜条件")
+        self.assertEqual(response.context["date_rule_forms"], [])
+        self.assertFalse(ShiftRule.objects.filter(shift_plan=self.shift_plan).exists())
+        self.assertFalse(WeekdayShiftRule.objects.filter(shift_plan=self.shift_plan).exists())
+        self.assertNotContains(response, "前月の条件を初期値として表示しています")
+
+    def test_current_month_conditions_take_priority_over_previous_month(self):
+        previous_plan = ShiftPlan.objects.create(user=self.user, year=2026, month=7)
+        ShiftRule.objects.create(
+            shift_plan=previous_plan, required_day_staff=9, required_night_staff=3,
+            off_days_per_staff=10, max_consecutive_work_days=4,
+        )
+        WeekdayShiftRule.objects.create(
+            shift_plan=previous_plan, day_of_week=0, required_day_staff=9,
+        )
+        self.create_common_rule()
+
+        response = self.client.get(
+            reverse("shifts:conditions", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertEqual(response.context["rule_form"].initial["required_day_staff"], 6)
+        self.assertEqual(
+            response.context["weekday_form_rows"][0]["form"].initial["selected"], "0"
+        )
+
+    def test_invalid_post_redisplay_keeps_posted_values_over_previous_month(self):
+        previous_plan = ShiftPlan.objects.create(user=self.user, year=2026, month=7)
+        ShiftRule.objects.create(
+            shift_plan=previous_plan, required_day_staff=9, required_night_staff=3,
+            off_days_per_staff=10, max_consecutive_work_days=4,
+        )
+
+        response = self.client.post(
+            reverse("shifts:conditions", kwargs={"pk": self.shift_plan.pk}),
+            self.build_conditions_post_data(required_day_staff=""),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["rule_form"].data["required_day_staff"], "")
+        self.assertFalse(ShiftRule.objects.filter(shift_plan=self.shift_plan).exists())
 
     def test_edit_redirects_to_conditions_when_rule_missing(self):
         response = self.client.get(
@@ -1028,6 +1112,27 @@ class ShiftGeneratorTests(TestCase):
             ShiftResult.ShiftTypeChoices.OFF,
         )
 
+    def test_next_month_first_regular_off_forbids_last_day_night_without_next_plan(self):
+        self.create_rule(off_days_per_staff=4)
+        staff_member = self.create_staff_member()
+        StaffRegularDayOff.objects.create(
+            staff_member=staff_member,
+            day_of_week=date(2026, 8, 1).weekday(),
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        self.assertFalse(
+            ShiftPlan.objects.filter(user=self.user, year=2026, month=8).exists()
+        )
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
+
     def test_generate_shift_respects_manual_night_and_followup_pattern(self):
         self.create_rule()
         staff_member = self.create_staff_member()
@@ -1273,13 +1378,11 @@ class ShiftGeneratorTests(TestCase):
 
         result = generate_shift(self.shift_plan)
 
-        self.assertFalse(
-            any(
-                violation.violation_type == ShiftGenerationViolationType.NIGHT_EXCESS
-                and violation.date == date(2026, 7, 6)
-                for violation in result.violations
-            )
-        )
+        self.assertEqual(sum(
+            shift.date == date(2026, 7, 6)
+            and shift.shift_type == ShiftResult.ShiftTypeChoices.NIGHT
+            for shift in result.shifts
+        ), 2)
 
     def test_generate_shift_returns_max_consecutive_work_violation(self):
         self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=0)
@@ -1386,6 +1489,62 @@ class ShiftSoftOptimizationTests(TestCase):
                 shift.date == target_date and shift.shift_type == ShiftResult.ShiftTypeChoices.NIGHT
                 for shift in result.shifts
             ), 1)
+
+    def test_night_imbalance_violation_amount_allows_one_shift_difference(self):
+        for counts, expected_amount in (
+            ({1: 4, 2: 4}, None),
+            ({1: 4, 2: 3}, None),
+            ({1: 4, 2: 2}, 1),
+            ({1: 5, 2: 2}, 2),
+        ):
+            with self.subTest(counts=counts):
+                violations = _build_night_count_imbalance_violation(counts)
+                if expected_amount is None:
+                    self.assertEqual(violations, [])
+                    continue
+                violation = violations[0]
+                self.assertEqual(violation.amount, expected_amount)
+                self.assertEqual(violation.minimum_count, min(counts.values()))
+                self.assertEqual(violation.maximum_count, max(counts.values()))
+                self.assertEqual(
+                    violation.count_difference, max(counts.values()) - min(counts.values())
+                )
+                self.assertEqual(violation.allowed_difference, 1)
+
+    def test_fixed_nights_can_exceed_ideal_spread_without_making_model_infeasible(self):
+        self.create_rule(
+            required_day_staff=0, required_night_staff=0, off_days_per_staff=9,
+            max_consecutive_work_days=31, night_shift_next_day_off=True,
+        )
+        night_staff = self.create_staff_member(name="固定夜勤")
+        other_staff = [
+            self.create_staff_member(name="夜勤B"),
+            self.create_staff_member(name="夜勤C"),
+        ]
+        for day in (1, 4, 7):
+            DateShiftRule.objects.create(
+                shift_plan=self.shift_plan,
+                target_date=date(2026, 2, day),
+                required_night_staff=1,
+            )
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=night_staff,
+                date=date(2026, 2, day),
+                shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        result = generate_shift(self.shift_plan)
+
+        counts = result.optimization_summary.night_shift_counts
+        self.assertEqual(counts[night_staff.id], 3)
+        self.assertTrue(all(counts[staff.id] == 0 for staff in other_staff))
+        violation = next(
+            item for item in result.violations
+            if item.violation_type == ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE
+        )
+        self.assertEqual(violation.amount, 2)
 
     def test_day_counts_are_balanced_without_worsening_semi_hard_score(self):
         self.create_rule(
@@ -1894,3 +2053,61 @@ class ShiftCarryoverServiceTests(TestCase):
         result = ShiftResult.objects.get(shift_plan=self.current, staff_member=self.staff)
         self.assertEqual(result.date, date(2026, 1, 1))
         self.assertEqual(result.shift_type, ShiftResult.ShiftTypeChoices.OFF)
+
+    def test_previous_after_night_uses_first_day_regular_off_without_duplicate_result(self):
+        StaffRegularDayOff.objects.create(
+            staff_member=self.staff,
+            day_of_week=date(2026, 1, 1).weekday(),
+        )
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        )
+
+        results = sync_month_boundary_assignments(self.current)
+
+        self.assertEqual(results, [])
+        self.assertFalse(
+            ShiftResult.objects.filter(
+                shift_plan=self.current, staff_member=self.staff, date=date(2026, 1, 1)
+            ).exists()
+        )
+
+    def test_second_day_regular_off_wins_for_both_boundary_rule_values(self):
+        StaffRegularDayOff.objects.create(
+            staff_member=self.staff,
+            day_of_week=date(2026, 1, 2).weekday(),
+        )
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+
+        for next_day_off in (True, False):
+            with self.subTest(night_shift_next_day_off=next_day_off):
+                ShiftRule.objects.update_or_create(
+                    shift_plan=self.current,
+                    defaults={
+                        "off_days_per_staff": 9,
+                        "max_consecutive_work_days": 5,
+                        "required_day_staff": 0,
+                        "required_night_staff": 0,
+                        "night_shift_next_day_off": next_day_off,
+                    },
+                )
+                results = sync_month_boundary_assignments(self.current)
+                self.assertEqual(
+                    {result.date: result.shift_type for result in results},
+                    {date(2026, 1, 1): ShiftResult.ShiftTypeChoices.AFTER_NIGHT},
+                )
+                self.assertFalse(
+                    ShiftResult.objects.filter(
+                        shift_plan=self.current,
+                        staff_member=self.staff,
+                        date=date(2026, 1, 2),
+                    ).exists()
+                )
