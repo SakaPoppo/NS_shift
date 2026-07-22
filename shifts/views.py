@@ -23,6 +23,7 @@ from .services import (
     MonthBoundaryConflictError,
     build_shift_carryovers,
     get_japanese_holiday_dates,
+    get_previous_month_year_and_month,
     sync_month_boundary_assignments,
     sync_next_month_boundary_assignments,
 )
@@ -251,6 +252,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         except ShiftRule.DoesNotExist:
             return None
 
+    def get_previous_plan_with_conditions(self, shift_plan):
+        year, month = get_previous_month_year_and_month(shift_plan.year, shift_plan.month)
+        return ShiftPlan.objects.filter(
+            user=shift_plan.user, year=year, month=month, shift_rule__isnull=False
+        ).select_related("shift_rule").prefetch_related("weekday_rules").first()
+
     def get_staff_members(self):
         return StaffMember.objects.filter(
             user=self.request.user,
@@ -258,7 +265,15 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         ).prefetch_related("regular_days_off").order_by("id")
 
     def get_shift_rule_form(self, shift_plan, data=None):
-        return ShiftRuleForm(data=data, shift_rule=self.get_shift_rule(shift_plan))
+        current_rule = self.get_shift_rule(shift_plan)
+        previous_plan = (
+            self.get_previous_plan_with_conditions(shift_plan)
+            if current_rule is None and data is None else None
+        )
+        previous_rule = previous_plan.shift_rule if previous_plan else None
+        return ShiftRuleForm(
+            data=data, shift_rule=current_rule, initial_shift_rule=previous_rule
+        )
 
     def get_conditions_url(self, shift_plan):
         return reverse("shifts:conditions", kwargs={"pk": shift_plan.pk})
@@ -274,12 +289,20 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             weekday_rule.day_of_week: weekday_rule
             for weekday_rule in shift_plan.weekday_rules.all()
         }
+        previous_weekday_rules = {}
+        if self.get_shift_rule(shift_plan) is None and data is None:
+            previous_plan = self.get_previous_plan_with_conditions(shift_plan)
+            if previous_plan:
+                previous_weekday_rules = {
+                    rule.day_of_week: rule for rule in previous_plan.weekday_rules.all()
+                }
         return [
             WeekdayShiftRuleForm(
                 data=data,
                 prefix=f"weekday-{day_of_week}",
                 day_of_week=day_of_week,
                 instance=weekday_rules.get(day_of_week),
+                initial_rule=previous_weekday_rules.get(day_of_week),
             )
             for day_of_week in range(7)
         ]
