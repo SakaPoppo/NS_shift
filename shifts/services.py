@@ -10,6 +10,7 @@ from staff.models import StaffMember
 
 from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult
 
+"""画面表示以外の共通業務ロジック用ファイル"""
 
 _jp_holiday = JPHoliday()
 
@@ -49,12 +50,13 @@ class EffectiveShiftRule:
     max_consecutive_work_days: int
     night_shift_next_day_off: bool
 
+# 1.日付条件決定用の関数
 
 def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
-    """指定日の最終条件を返す。
-
-    優先順位は「特定日条件 > 曜日条件 > 月共通条件」。
-    上書き用フィールドが None の場合は、その条件では値を確定せず下位条件へフォールバックする。
+    """
+    指定日の優先度決定用
+    優先順位は「特定日条件 > 曜日条件 > 月共通条件」
+    上書き用フィールドが None の場合は、その条件では値を確定せず下位条件へフォールバックする
     """
     shift_rule = shift_plan.shift_rule
     weekday_rule_map = getattr(shift_plan, "_weekday_rule_map", None)
@@ -91,27 +93,29 @@ def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
 
 
 def get_month_date_range(year, month):
-    """その月に入力可能な日付範囲を HTML date input 用の文字列で返す。"""
+    """指定月の最初の日と最後の日を文字列で返す
+    例：("2026-07-01", "2026-07-31")"""
     last_day = calendar.monthrange(year, month)[1]
     return f"{year}-{month:02d}-01", f"{year}-{month:02d}-{last_day:02d}"
 
 
 def get_month_dates(year, month):
-    """指定した年月に含まれる日付一覧を date オブジェクトで返す。"""
+    """指定月の全日付をリストで返す"""
     last_day = calendar.monthrange(year, month)[1]
     return [date(year, month, day) for day in range(1, last_day + 1)]
 
 
 @lru_cache(maxsize=120)
 def get_japanese_holiday_dates(year: int, month: int) -> frozenset[date]:
-    """対象月の日本の祝日をキャッシュして返す。"""
+    """対象月の日本の祝日を取得"""
     return frozenset(holiday.date for holiday in _jp_holiday.month_holidays(year, month))
 
 
 def get_previous_month_year_and_month(year: int, month: int) -> tuple[int, int]:
+    # 前月が何年何月か返す
     return (year - 1, 12) if month == 1 else (year, month - 1)
 
-
+# 2.前月結果の自動引き継ぎ用の関数
 def get_usable_previous_shift_plan(shift_plan: ShiftPlan) -> ShiftPlan | None:
     year, month = get_previous_month_year_and_month(shift_plan.year, shift_plan.month)
     return ShiftPlan.objects.filter(

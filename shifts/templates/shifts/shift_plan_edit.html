@@ -85,7 +85,7 @@
         </div>
       </details>
 
-      <form method="post" class="space-y-3">
+      <form id="shift-plan-form" method="post" class="space-y-3" aria-busy="false">
         {% csrf_token %}
 
         {% if missing_previous_staff_members %}
@@ -108,9 +108,11 @@
                   保存
                 </button>
                 <button
+                  id="generate-shift-button"
                   type="submit"
                   name="action"
                   value="generate"
+                  data-generate-shift
                   class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
                 >
                   シフト生成
@@ -252,7 +254,7 @@
                 {% for summary in day_summary_rows %}
                   <tr>
                     <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
-                      日別集計 日勤
+                      日別集計 日勤人数
                     </th>
                     {% for value in summary.values %}
                       <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.day_count }}</td>
@@ -262,11 +264,33 @@
                     <td class="border-b border-slate-200 bg-slate-50"></td>
                   </tr>
                   <tr>
-                    <th class="sticky left-0 z-10 border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
-                      日別集計 夜勤
+                    <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                      日別集計 夜勤人数
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.night_count }}</td>
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.night_count }}</td>
+                    {% endfor %}
+                    <td class="border-r border-b border-slate-200 bg-slate-50"></td>
+                    <td class="border-r border-b border-slate-200 bg-slate-50"></td>
+                    <td class="border-b border-slate-200 bg-slate-50"></td>
+                  </tr>
+                  <tr>
+                    <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                      日別集計 日勤能力
+                    </th>
+                    {% for value in summary.values %}
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.day_ability_total }}</td>
+                    {% endfor %}
+                    <td class="border-r border-b border-slate-200 bg-slate-50"></td>
+                    <td class="border-r border-b border-slate-200 bg-slate-50"></td>
+                    <td class="border-b border-slate-200 bg-slate-50"></td>
+                  </tr>
+                  <tr>
+                    <th class="sticky left-0 z-10 border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                      日別集計 夜勤能力
+                    </th>
+                    {% for value in summary.values %}
+                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.night_ability_total }}</td>
                     {% endfor %}
                     <td class="border-r border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-slate-200 bg-slate-50"></td>
@@ -280,6 +304,20 @@
       </form>
     </div>
   </section>
+
+  <div
+    id="shift-generation-loading"
+    class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm"
+    role="status"
+    aria-live="polite"
+    aria-hidden="true"
+  >
+    <div class="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl">
+      <span class="loading loading-spinner loading-lg text-brand-500" aria-hidden="true"></span>
+      <p class="mt-4 text-lg font-black text-slate-900">シフトを生成中です</p>
+      <p class="mt-2 text-sm font-medium text-slate-600">画面を閉じずにお待ちください。</p>
+    </div>
+  </div>
 
   <script>
     (() => {
@@ -315,6 +353,48 @@
         select.addEventListener("change", applyClasses);
         applyClasses();
       });
+
+      const shiftForm = document.getElementById("shift-plan-form");
+      const generateButton = document.querySelector("[data-generate-shift]");
+      const loadingOverlay = document.getElementById("shift-generation-loading");
+      let isGenerating = false;
+
+      const resetGenerationLoading = () => {
+        isGenerating = false;
+        shiftForm.setAttribute("aria-busy", "false");
+        loadingOverlay.classList.add("hidden");
+        loadingOverlay.classList.remove("flex");
+        loadingOverlay.setAttribute("aria-hidden", "true");
+        generateButton.disabled = false;
+        shiftForm.querySelector("[data-generated-action]")?.remove();
+      };
+
+      shiftForm.addEventListener("submit", (event) => {
+        if (isGenerating) {
+          event.preventDefault();
+          return;
+        }
+        if (event.submitter?.value !== "generate") {
+          return;
+        }
+
+        // ボタンを無効化してもaction値がPOSTされるよう、hiddenへ引き継ぐ。
+        const actionInput = document.createElement("input");
+        actionInput.type = "hidden";
+        actionInput.name = "action";
+        actionInput.value = "generate";
+        actionInput.dataset.generatedAction = "true";
+        shiftForm.appendChild(actionInput);
+
+        isGenerating = true;
+        shiftForm.setAttribute("aria-busy", "true");
+        loadingOverlay.classList.remove("hidden");
+        loadingOverlay.classList.add("flex");
+        loadingOverlay.setAttribute("aria-hidden", "false");
+        generateButton.disabled = true;
+      });
+
+      window.addEventListener("pageshow", resetGenerationLoading);
     })();
   </script>
 {% endblock %}
