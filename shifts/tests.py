@@ -869,6 +869,8 @@ class ShiftRuleWorkflowTests(TestCase):
         self.assertContains(response, 'id="shift-generation-loading"')
         self.assertContains(response, "data-generate-shift")
         self.assertContains(response, "シフトを生成中です")
+        self.assertContains(response, "window.requestAnimationFrame")
+        self.assertContains(response, "HTMLFormElement.prototype.submit.call")
 
     def test_shift_save_processing_still_works(self):
         self.create_common_rule()
