@@ -307,13 +307,27 @@
 
   <div
     id="shift-generation-loading"
-    class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm"
+    style="position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; padding: 1rem; background: rgb(15 23 42 / 55%); backdrop-filter: blur(4px);"
     role="status"
     aria-live="polite"
     aria-hidden="true"
   >
-    <div class="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl">
-      <span class="loading loading-spinner loading-lg text-brand-500" aria-hidden="true"></span>
+    <div
+      class="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl"
+      style="width: 100%; max-width: 24rem; padding: 2rem; border-radius: 1rem; background: white; text-align: center; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 35%);"
+    >
+      <svg
+        width="48"
+        height="48"
+        viewBox="0 0 50 50"
+        style="display: inline-block; color: #0284c7;"
+        aria-hidden="true"
+      >
+        <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="5" opacity="0.2"></circle>
+        <path d="M25 5a20 20 0 0 1 20 20" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round">
+          <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.8s" repeatCount="indefinite"></animateTransform>
+        </path>
+      </svg>
       <p class="mt-4 text-lg font-black text-slate-900">シフトを生成中です</p>
       <p class="mt-2 text-sm font-medium text-slate-600">画面を閉じずにお待ちください。</p>
     </div>
@@ -357,15 +371,16 @@
       const shiftForm = document.getElementById("shift-plan-form");
       const generateButton = document.querySelector("[data-generate-shift]");
       const loadingOverlay = document.getElementById("shift-generation-loading");
+      const originalBodyOverflow = document.body.style.overflow;
       let isGenerating = false;
 
       const resetGenerationLoading = () => {
         isGenerating = false;
         shiftForm.setAttribute("aria-busy", "false");
-        loadingOverlay.classList.add("hidden");
-        loadingOverlay.classList.remove("flex");
+        loadingOverlay.style.display = "none";
         loadingOverlay.setAttribute("aria-hidden", "true");
         generateButton.disabled = false;
+        document.body.style.overflow = originalBodyOverflow;
         shiftForm.querySelector("[data-generated-action]")?.remove();
       };
 
@@ -377,6 +392,7 @@
         if (event.submitter?.value !== "generate") {
           return;
         }
+        event.preventDefault();
 
         // ボタンを無効化してもaction値がPOSTされるよう、hiddenへ引き継ぐ。
         const actionInput = document.createElement("input");
@@ -388,10 +404,17 @@
 
         isGenerating = true;
         shiftForm.setAttribute("aria-busy", "true");
-        loadingOverlay.classList.remove("hidden");
-        loadingOverlay.classList.add("flex");
+        loadingOverlay.style.display = "flex";
         loadingOverlay.setAttribute("aria-hidden", "false");
         generateButton.disabled = true;
+        document.body.style.overflow = "hidden";
+
+        // DOM更新を実際に描画してから、従来どおりの同期POSTを開始する。
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            HTMLFormElement.prototype.submit.call(shiftForm);
+          });
+        });
       });
 
       window.addEventListener("pageshow", resetGenerationLoading);
