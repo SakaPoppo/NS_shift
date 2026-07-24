@@ -96,6 +96,8 @@ class ShiftAggregationTests(TestCase):
         )
 
     def test_summary_counts_follow_requested_rules(self):
+        self.staff_member.ability_level = 5
+        self.staff_member.save(update_fields=["ability_level"])
         month_dates = [date(2026, 7, day) for day in range(1, 8)]
         shift_results = {
             (self.staff_member.id, month_dates[0]): ShiftResult(
@@ -154,6 +156,54 @@ class ShiftAggregationTests(TestCase):
         self.assertEqual(day_summary_rows[0]["values"][1]["night_count"], 1)
         self.assertEqual(day_summary_rows[0]["values"][4]["day_count"], 0)
         self.assertEqual(day_summary_rows[0]["values"][4]["night_count"], 0)
+        self.assertEqual(day_summary_rows[0]["values"][0]["day_ability_total"], 5)
+        self.assertEqual(day_summary_rows[0]["values"][1]["night_ability_total"], 5)
+        self.assertEqual(day_summary_rows[0]["values"][4]["day_ability_total"], 0)
+        self.assertEqual(day_summary_rows[0]["values"][4]["night_ability_total"], 0)
+
+    def test_ability_totals_include_only_day_and_night_shifts(self):
+        month_dates = [date(2026, 7, 1), date(2026, 7, 2)]
+        staff_data = [
+            ("日勤A", 5, ShiftResult.ShiftTypeChoices.DAY),
+            ("日勤B", 3, ShiftResult.ShiftTypeChoices.DAY),
+            ("夜勤A", 4, ShiftResult.ShiftTypeChoices.NIGHT),
+            ("夜勤B", 2, ShiftResult.ShiftTypeChoices.NIGHT),
+            ("夜勤明け", 5, ShiftResult.ShiftTypeChoices.AFTER_NIGHT),
+            ("研修", 5, ShiftResult.ShiftTypeChoices.TRAINING),
+            ("休み", 5, ShiftResult.ShiftTypeChoices.OFF),
+        ]
+        staff_members = []
+        shift_results = {}
+        for name, ability_level, shift_type in staff_data:
+            staff_member = StaffMember.objects.create(
+                user=self.user,
+                name=name,
+                ability_level=ability_level,
+            )
+            staff_members.append(staff_member)
+            shift_results[(staff_member.id, month_dates[0])] = ShiftResult(
+                staff_member=staff_member,
+                date=month_dates[0],
+                shift_type=shift_type,
+            )
+
+        _, day_summary_rows = build_shift_plan_grid(
+            staff_members,
+            month_dates,
+            shift_results,
+            {},
+        )
+
+        first_day = day_summary_rows[0]["values"][0]
+        self.assertEqual(first_day["day_count"], 2)
+        self.assertEqual(first_day["night_count"], 2)
+        self.assertEqual(first_day["day_ability_total"], 8)
+        self.assertEqual(first_day["night_ability_total"], 6)
+        second_day = day_summary_rows[0]["values"][1]
+        self.assertEqual(second_day["day_count"], 0)
+        self.assertEqual(second_day["night_count"], 0)
+        self.assertEqual(second_day["day_ability_total"], 0)
+        self.assertEqual(second_day["night_ability_total"], 0)
 
 
 class ShiftRuleFormTests(TestCase):
@@ -814,6 +864,11 @@ class ShiftRuleWorkflowTests(TestCase):
         self.assertContains(response, "特定日条件：1件")
         self.assertContains(response, reverse("shifts:conditions", kwargs={"pk": self.shift_plan.pk}))
         self.assertContains(response, "勤務区分について")
+        self.assertContains(response, "日別集計 日勤能力")
+        self.assertContains(response, "日別集計 夜勤能力")
+        self.assertContains(response, 'id="shift-generation-loading"')
+        self.assertContains(response, "data-generate-shift")
+        self.assertContains(response, "シフトを生成中です")
 
     def test_shift_save_processing_still_works(self):
         self.create_common_rule()

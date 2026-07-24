@@ -131,7 +131,15 @@ def build_shift_plan_grid(
     競合中の勤務区分を補足情報として残す。
     """
     staff_rows = []
-    day_totals = {current_date: {"day": 0, "night": 0} for current_date in month_dates}
+    day_totals = {
+        current_date: {
+            "day": 0,
+            "night": 0,
+            "day_ability_total": 0,
+            "night_ability_total": 0,
+        }
+        for current_date in month_dates
+    }
 
     for staff_member in staff_members:
         row_stats = {
@@ -176,9 +184,11 @@ def build_shift_plan_grid(
             if shift_type == ShiftResult.ShiftTypeChoices.DAY:
                 row_stats["day"] += 1
                 day_totals[current_date]["day"] += 1
+                day_totals[current_date]["day_ability_total"] += staff_member.ability_level
             elif shift_type == ShiftResult.ShiftTypeChoices.NIGHT:
                 row_stats["night"] += 1
                 day_totals[current_date]["night"] += 1
+                day_totals[current_date]["night_ability_total"] += staff_member.ability_level
             elif shift_type in (
                 ShiftResult.ShiftTypeChoices.OFF,
                 ShiftResult.ShiftTypeChoices.OFF_REQUEST,
@@ -226,6 +236,8 @@ def build_shift_plan_grid(
                     "date": current_date,
                     "day_count": day_totals[current_date]["day"],
                     "night_count": day_totals[current_date]["night"],
+                    "day_ability_total": day_totals[current_date]["day_ability_total"],
+                    "night_ability_total": day_totals[current_date]["night_ability_total"],
                 }
                 for current_date in month_dates
             ],
