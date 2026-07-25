@@ -1,13 +1,16 @@
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
+from ortools.sat.python import cp_model
 
 from staff.models import StaffMember, StaffRegularDayOff
 
+from . import shift_generator
 from .forms import ShiftPlanCreateForm, ShiftRuleForm
 from .shift_generator import (
     LONG_STREAK_WEIGHTS,
@@ -15,6 +18,7 @@ from .shift_generator import (
     ShiftGenerationResult,
     ShiftGenerationViolation,
     ShiftGenerationViolationType,
+    _add_staffing_semi_hard_constraints,
     _build_night_count_imbalance_violation,
     generate_and_save_shift,
     generate_shift,
@@ -1603,7 +1607,7 @@ class ShiftSoftOptimizationTests(TestCase):
         )
         self.assertEqual(violation.amount, 2)
 
-    def test_day_counts_are_balanced_without_worsening_semi_hard_score(self):
+    def test_monthly_day_count_balance_is_not_part_of_soft_objective(self):
         self.create_rule(
             required_day_staff=1, required_night_staff=0, off_days_per_staff=14,
             max_consecutive_work_days=31,
@@ -1613,8 +1617,135 @@ class ShiftSoftOptimizationTests(TestCase):
 
         summary = generate_shift(self.shift_plan).optimization_summary
         self.assertEqual(summary.semi_hard_score, 0)
-        self.assertEqual(summary.day_shift_count_max - summary.day_shift_count_min, 0)
         self.assertTrue(summary.semi_hard_optimal)
+        self.assertNotIn("day_shift_balance", shift_generator.SOFT_CONSTRAINT_WEIGHTS)
+        self.assertFalse(hasattr(summary, "day_shift_count_min"))
+        self.assertFalse(hasattr(summary, "day_shift_count_max"))
+        self.assertFalse(
+            hasattr(shift_generator, "_add_shift_count_balance_objective")
+        )
+
+    def test_staffing_data_uses_each_dates_required_day_count(self):
+        staff_members = [
+            self.create_staff_member(name="日勤A"),
+            self.create_staff_member(name="日勤B"),
+        ]
+        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
+        model = cp_model.CpModel()
+        shift_vars = {}
+        for staff_member in staff_members:
+            for target_date in month_dates:
+                shift_vars[(staff_member.id, target_date)] = {
+                    ShiftResult.ShiftTypeChoices.DAY: model.NewBoolVar(
+                        f"day_{staff_member.id}_{target_date}"
+                    ),
+                    ShiftResult.ShiftTypeChoices.NIGHT: model.NewBoolVar(
+                        f"night_{staff_member.id}_{target_date}"
+                    ),
+                }
+                model.Add(
+                    shift_vars[(staff_member.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    == 0
+                )
+
+        # 1日目は2人、2日目は1人を配置し、それぞれの日の必要人数と一致させる。
+        for staff_member in staff_members:
+            model.Add(
+                shift_vars[(staff_member.id, month_dates[0])][
+                    ShiftResult.ShiftTypeChoices.DAY
+                ]
+                == 1
+            )
+        model.Add(
+            shift_vars[(staff_members[0].id, month_dates[1])][
+                ShiftResult.ShiftTypeChoices.DAY
+            ]
+            == 1
+        )
+        model.Add(
+            shift_vars[(staff_members[1].id, month_dates[1])][
+                ShiftResult.ShiftTypeChoices.DAY
+            ]
+            == 0
+        )
+        effective_rules = {
+            month_dates[0]: SimpleNamespace(required_day_staff=2, required_night_staff=0),
+            month_dates[1]: SimpleNamespace(required_day_staff=1, required_night_staff=0),
+        }
+
+        data = _add_staffing_semi_hard_constraints(
+            model=model,
+            staff_members=staff_members,
+            month_dates=month_dates,
+            shift_vars=shift_vars,
+            effective_rules=effective_rules,
+        )
+        model.Minimize(sum(data.weighted_terms))
+        solver = cp_model.CpSolver()
+        self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
+
+        self.assertEqual(solver.Value(data.total_day_shortage), 0)
+        self.assertEqual(solver.Value(data.total_day_excess), 0)
+        self.assertEqual(solver.Value(data.max_day_shortage), 0)
+        self.assertEqual(solver.Value(data.max_day_excess), 0)
+
+    def test_staffing_data_exposes_daily_totals_and_maximum_deviations(self):
+        staff_members = [
+            self.create_staff_member(name="偏差A"),
+            self.create_staff_member(name="偏差B"),
+        ]
+        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
+        model = cp_model.CpModel()
+        shift_vars = {}
+        for staff_member in staff_members:
+            for target_date in month_dates:
+                day_var = model.NewBoolVar(f"day_{staff_member.id}_{target_date}")
+                night_var = model.NewBoolVar(f"night_{staff_member.id}_{target_date}")
+                shift_vars[(staff_member.id, target_date)] = {
+                    ShiftResult.ShiftTypeChoices.DAY: day_var,
+                    ShiftResult.ShiftTypeChoices.NIGHT: night_var,
+                }
+                model.Add(night_var == 0)
+
+        # 1日目は必要2人に対して1人不足、2日目は必要1人に対して1人超過。
+        model.Add(
+            sum(
+                shift_vars[(staff.id, month_dates[0])][ShiftResult.ShiftTypeChoices.DAY]
+                for staff in staff_members
+            )
+            == 1
+        )
+        model.Add(
+            sum(
+                shift_vars[(staff.id, month_dates[1])][ShiftResult.ShiftTypeChoices.DAY]
+                for staff in staff_members
+            )
+            == 2
+        )
+        effective_rules = {
+            month_dates[0]: SimpleNamespace(required_day_staff=2, required_night_staff=0),
+            month_dates[1]: SimpleNamespace(required_day_staff=1, required_night_staff=0),
+        }
+
+        data = _add_staffing_semi_hard_constraints(
+            model=model,
+            staff_members=staff_members,
+            month_dates=month_dates,
+            shift_vars=shift_vars,
+            effective_rules=effective_rules,
+        )
+        model.Minimize(sum(data.weighted_terms))
+        solver = cp_model.CpSolver()
+        self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
+
+        self.assertEqual(solver.Value(data.day_shortage_vars[month_dates[0]]), 1)
+        self.assertEqual(solver.Value(data.day_excess_vars[month_dates[1]]), 1)
+        self.assertEqual(solver.Value(data.total_day_shortage), 1)
+        self.assertEqual(solver.Value(data.total_day_excess), 1)
+        self.assertEqual(solver.Value(data.max_day_shortage), 1)
+        self.assertEqual(solver.Value(data.max_day_excess), 1)
 
     def test_ability_balance_uses_integer_average_equivalent(self):
         self.create_rule(
