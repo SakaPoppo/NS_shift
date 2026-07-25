@@ -1616,9 +1616,9 @@ class ShiftSoftOptimizationTests(TestCase):
         self.create_staff_member(name="日勤B")
 
         summary = generate_shift(self.shift_plan).optimization_summary
-        self.assertEqual(summary.semi_hard_score, 0)
-        self.assertTrue(summary.semi_hard_optimal)
-        self.assertNotIn("day_shift_balance", shift_generator.SOFT_CONSTRAINT_WEIGHTS)
+        self.assertEqual(summary.total_day_shortage, 0)
+        self.assertTrue(all(summary.phase_optimal_flags.values()))
+        self.assertFalse(hasattr(shift_generator, "SOFT_CONSTRAINT_WEIGHTS"))
         self.assertFalse(hasattr(summary, "day_shift_count_min"))
         self.assertFalse(hasattr(summary, "day_shift_count_max"))
         self.assertFalse(
@@ -1682,7 +1682,7 @@ class ShiftSoftOptimizationTests(TestCase):
             shift_vars=shift_vars,
             effective_rules=effective_rules,
         )
-        model.Minimize(sum(data.weighted_terms))
+        model.Minimize(data.total_day_shortage + data.total_day_excess)
         solver = cp_model.CpSolver()
         self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
 
@@ -1736,7 +1736,7 @@ class ShiftSoftOptimizationTests(TestCase):
             shift_vars=shift_vars,
             effective_rules=effective_rules,
         )
-        model.Minimize(sum(data.weighted_terms))
+        model.Minimize(data.total_day_shortage + data.total_day_excess)
         solver = cp_model.CpSolver()
         self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
 
@@ -1747,7 +1747,254 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(solver.Value(data.max_day_shortage), 1)
         self.assertEqual(solver.Value(data.max_day_excess), 1)
 
-    def test_ability_balance_uses_integer_average_equivalent(self):
+    def test_different_effective_conditions_are_not_balanced_together(self):
+        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
+        model = cp_model.CpModel()
+        actual_counts = {}
+        for target_date, count in zip(month_dates, (5, 3)):
+            count_var = model.NewIntVar(0, 6, f"count_{target_date}")
+            model.Add(count_var == count)
+            actual_counts[target_date] = count_var
+        staffing_data = shift_generator.StaffingObjectiveData(
+            actual_day_count_vars=actual_counts
+        )
+        effective_rules = {
+            month_dates[0]: SimpleNamespace(
+                required_day_staff=5, required_night_staff=0,
+                required_leader_staff=0, min_ability_level=None,
+                min_ability_level_staff_count=None,
+            ),
+            month_dates[1]: SimpleNamespace(
+                required_day_staff=3, required_night_staff=0,
+                required_leader_staff=0, min_ability_level=None,
+                min_ability_level_staff_count=None,
+            ),
+        }
+
+        data = shift_generator._build_day_count_balance_objective(
+            model=model,
+            staff_members=[None] * 6,
+            month_dates=month_dates,
+            effective_rules=effective_rules,
+            staffing_data=staffing_data,
+        )
+
+        self.assertEqual(data.group_balance_violation_vars, [])
+        self.assertEqual(data.objective_score, 0)
+
+    def test_same_condition_day_count_spread_allows_one_and_penalizes_two(self):
+        for counts, expected_violation in (((4, 5, 4), 0), ((4, 6, 4), 1)):
+            with self.subTest(counts=counts):
+                month_dates = [date(2026, 2, day) for day in range(1, 4)]
+                model = cp_model.CpModel()
+                actual_counts = {}
+                for target_date, count in zip(month_dates, counts):
+                    count_var = model.NewIntVar(0, 6, f"count_{target_date}")
+                    model.Add(count_var == count)
+                    actual_counts[target_date] = count_var
+                rule = SimpleNamespace(
+                    required_day_staff=4, required_night_staff=0,
+                    required_leader_staff=0, min_ability_level=None,
+                    min_ability_level_staff_count=None,
+                )
+                data = shift_generator._build_day_count_balance_objective(
+                    model=model,
+                    staff_members=[None] * 6,
+                    month_dates=month_dates,
+                    effective_rules={target_date: rule for target_date in month_dates},
+                    staffing_data=shift_generator.StaffingObjectiveData(
+                        actual_day_count_vars=actual_counts
+                    ),
+                )
+                model.Minimize(data.objective_score)
+                solver = cp_model.CpSolver()
+                self.assertIn(
+                    solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE)
+                )
+                self.assertEqual(
+                    solver.Value(data.max_group_balance_violation),
+                    expected_violation,
+                )
+                self.assertEqual(
+                    solver.Value(data.total_group_balance_violation),
+                    expected_violation,
+                )
+
+    def test_later_phase_cannot_worsen_fixed_earlier_objective(self):
+        model = cp_model.CpModel()
+        choose_worse_total = model.NewBoolVar("choose_worse_total")
+        total_shortage = 1 + choose_worse_total
+        later_objective = 1 - choose_worse_total
+
+        first = shift_generator._solve_and_fix_objective(
+            model=model,
+            objective=total_shortage,
+            phase_name="total_day_shortage",
+            max_time_seconds=1,
+        )
+        second = shift_generator._solve_and_fix_objective(
+            model=model,
+            objective=later_objective,
+            phase_name="max_day_shortage",
+            max_time_seconds=1,
+        )
+
+        self.assertEqual(first.objective_value, 1)
+        self.assertEqual(second.solver.Value(choose_worse_total), 0)
+        self.assertEqual(second.solver.Value(total_shortage), 1)
+
+    def test_equal_total_shortage_prefers_smaller_maximum_shortage(self):
+        model = cp_model.CpModel()
+        spread_shortage = model.NewBoolVar("spread_shortage")
+        shortages = [
+            2 - spread_shortage,
+            spread_shortage,
+            0,
+        ]
+        maximum = model.NewIntVar(0, 2, "maximum_shortage")
+        model.AddMaxEquality(maximum, shortages)
+
+        shift_generator._solve_and_fix_objective(
+            model=model,
+            objective=sum(shortages),
+            phase_name="total_day_shortage",
+            max_time_seconds=1,
+        )
+        result = shift_generator._solve_and_fix_objective(
+            model=model,
+            objective=maximum,
+            phase_name="max_day_shortage",
+            max_time_seconds=1,
+        )
+
+        self.assertEqual(result.objective_value, 1)
+        self.assertEqual(result.solver.Value(spread_shortage), 1)
+
+    def test_day_count_balance_cannot_increase_fixed_day_excess(self):
+        model = cp_model.CpModel()
+        add_unneeded_days = model.NewBoolVar("add_unneeded_days")
+        total_excess = add_unneeded_days * 2
+        balance_violation = 1 - add_unneeded_days
+
+        shift_generator._solve_and_fix_objective(
+            model=model,
+            objective=total_excess,
+            phase_name="total_day_excess",
+            max_time_seconds=1,
+        )
+        result = shift_generator._solve_and_fix_objective(
+            model=model,
+            objective=balance_violation,
+            phase_name="day_count_balance",
+            max_time_seconds=1,
+        )
+
+        self.assertEqual(result.solver.Value(total_excess), 0)
+        self.assertEqual(result.solver.Value(balance_violation), 1)
+
+    def test_required_leader_and_qualified_staff_shortages_are_optimized(self):
+        self.create_rule(
+            required_day_staff=2,
+            required_night_staff=0,
+            required_leader_staff=1,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        leader = self.create_staff_member(name="リーダー")
+        leader.role = StaffMember.RoleChoices.LEADER
+        leader.ability_level = 2
+        leader.save(update_fields=["role", "ability_level"])
+        qualified = self.create_staff_member(name="能力者")
+        qualified.ability_level = 5
+        qualified.save(update_fields=["ability_level"])
+        WeekdayShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            day_of_week=0,
+            min_ability_level=5,
+            min_ability_level_staff_count=1,
+        )
+
+        summary = generate_shift(self.shift_plan).optimization_summary
+
+        self.assertEqual(summary.leader_shortage_total, 0)
+        self.assertEqual(summary.qualified_staff_shortage_total, 0)
+
+    def test_ability_phase_balances_totals_instead_of_staff_average(self):
+        staff_members = []
+        for name, level in (("高", 5), ("中", 4), ("低", 1)):
+            staff = self.create_staff_member(name=name)
+            staff.ability_level = level
+            staff.save(update_fields=["ability_level"])
+            staff_members.append(staff)
+        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
+        model = cp_model.CpModel()
+        shift_vars = {}
+        for staff in staff_members:
+            for target_date in month_dates:
+                day_var = model.NewBoolVar(f"day_{staff.id}_{target_date}")
+                night_var = model.NewBoolVar(f"night_{staff.id}_{target_date}")
+                model.Add(night_var == 0)
+                shift_vars[(staff.id, target_date)] = {
+                    ShiftResult.ShiftTypeChoices.DAY: day_var,
+                    ShiftResult.ShiftTypeChoices.NIGHT: night_var,
+                }
+            model.Add(sum(
+                shift_vars[(staff.id, target_date)][ShiftResult.ShiftTypeChoices.DAY]
+                for target_date in month_dates
+            ) == 1)
+        model.Add(sum(
+            shift_vars[(staff.id, month_dates[0])][ShiftResult.ShiftTypeChoices.DAY]
+            for staff in staff_members
+        ) == 2)
+        model.Add(sum(
+            shift_vars[(staff.id, month_dates[1])][ShiftResult.ShiftTypeChoices.DAY]
+            for staff in staff_members
+        ) == 1)
+        rule = SimpleNamespace(
+            required_day_staff=1, required_night_staff=0,
+            required_leader_staff=0, min_ability_level=None,
+            min_ability_level_staff_count=None,
+        )
+        data = shift_generator._build_ability_total_balance_objective(
+            model=model,
+            staff_members=staff_members,
+            month_dates=month_dates,
+            shift_vars=shift_vars,
+            effective_rules={target_date: rule for target_date in month_dates},
+        )
+
+        model.Minimize(data.objective_score)
+        solver = cp_model.CpSolver()
+        self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
+
+        self.assertEqual(
+            solver.Value(data.day_ability_total_vars[month_dates[0]]), 5
+        )
+        self.assertEqual(
+            solver.Value(data.day_ability_total_vars[month_dates[1]]), 5
+        )
+        self.assertEqual(solver.Value(data.max_day_range), 0)
+
+    def test_summary_records_every_optimization_phase_status(self):
+        self.create_rule(
+            required_day_staff=1, required_night_staff=0,
+            off_days_per_staff=0, max_consecutive_work_days=31,
+        )
+        self.create_staff_member(name="フェーズ確認")
+
+        summary = generate_shift(self.shift_plan).optimization_summary
+        expected_phases = set(shift_generator.PHASE_TIME_LIMITS)
+
+        self.assertEqual(set(summary.phase_statuses), expected_phases)
+        self.assertEqual(set(summary.phase_optimal_flags), expected_phases)
+        self.assertTrue(
+            all(status in {"OPTIMAL", "FEASIBLE"} for status in summary.phase_statuses.values())
+        )
+        self.assertTrue(
+            all(isinstance(optimal, bool) for optimal in summary.phase_optimal_flags.values())
+        )
+
+    def test_ability_balance_uses_same_condition_daily_totals(self):
         self.create_rule(
             required_day_staff=2, required_night_staff=0, off_days_per_staff=14,
             max_consecutive_work_days=31,
@@ -1758,9 +2005,10 @@ class ShiftSoftOptimizationTests(TestCase):
             staff_member.save(update_fields=["ability_level"])
 
         summary = generate_shift(self.shift_plan).optimization_summary
-        self.assertEqual(summary.semi_hard_score, 0)
-        self.assertEqual(summary.ability_balance_penalty, 0)
-        self.assertGreaterEqual(summary.soft_score, 0)
+        self.assertEqual(summary.total_day_shortage, 0)
+        self.assertEqual(summary.max_day_ability_total_range, 0)
+        self.assertEqual(summary.total_day_ability_total_range, 0)
+        self.assertFalse(hasattr(shift_generator, "_add_ability_balance_objective"))
 
     def test_long_streak_penalty_includes_previous_month_work(self):
         self.create_rule(
@@ -1794,7 +2042,7 @@ class ShiftSoftOptimizationTests(TestCase):
             )
 
         summary = generate_shift(self.shift_plan).optimization_summary
-        self.assertEqual(summary.semi_hard_score, 0)
+        self.assertEqual(summary.total_day_shortage, 0)
         self.assertGreaterEqual(summary.long_streak_penalty, LONG_STREAK_WEIGHTS["at_max"])
 
 
