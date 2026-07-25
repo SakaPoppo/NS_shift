@@ -54,7 +54,6 @@ SEMI_HARD_WEIGHTS = {
 
 SOFT_CONSTRAINT_WEIGHTS = {
     "ability_balance": 60,
-    "day_shift_balance": 30,
     "long_consecutive_work": 20,
 }
 LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
@@ -108,8 +107,6 @@ class ShiftOptimizationSummary:
     soft_score: int
     night_shift_count_min: int | None
     night_shift_count_max: int | None
-    day_shift_count_min: int | None
-    day_shift_count_max: int | None
     long_streak_penalty: int
     ability_balance_penalty: int
     semi_hard_optimal: bool
@@ -138,12 +135,24 @@ class SoftObjectiveData:
     weighted_terms: list = field(default_factory=list)
     night_min: object | None = None
     night_max: object | None = None
-    day_min: object | None = None
-    day_max: object | None = None
     long_streak_terms: list = field(default_factory=list)
     ability_terms: list = field(default_factory=list)
     night_count_vars: dict[int, object] = field(default_factory=dict)
     night_balance_violation: object | None = None
+
+
+@dataclass
+class StaffingObjectiveData:
+    """日別の必要日勤人数に対する不足・超過をまとめて保持する。"""
+
+    weighted_terms: list = field(default_factory=list)
+    day_shortage_vars: dict[date, object] = field(default_factory=dict)
+    day_excess_vars: dict[date, object] = field(default_factory=dict)
+    total_day_shortage: object | None = None
+    total_day_excess: object | None = None
+    max_day_shortage: object | None = None
+    max_day_excess: object | None = None
+
 
 @dataclass(frozen=True)
 class GenerationContext:
@@ -206,15 +215,14 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
     )
 
     semi_hard_terms = []
-    semi_hard_terms.extend(
-        _add_staffing_semi_hard_constraints(
-            model=model,
-            staff_members=context.staff_members,
-            month_dates=context.month_dates,
-            shift_vars=shift_vars,
-            effective_rules=context.effective_rules,
-        )
+    staffing_data = _add_staffing_semi_hard_constraints(
+        model=model,
+        staff_members=context.staff_members,
+        month_dates=context.month_dates,
+        shift_vars=shift_vars,
+        effective_rules=context.effective_rules,
     )
+    semi_hard_terms.extend(staffing_data.weighted_terms)
     semi_hard_terms.extend(
         _add_max_consecutive_semi_hard_constraints(
             model=model,
@@ -755,10 +763,10 @@ def _add_staffing_semi_hard_constraints(
     month_dates,
     shift_vars,
     effective_rules,
-):
-    """必要人数の不足・超過を表す IntVar を作り、目的関数へ渡す。"""
+) -> StaffingObjectiveData:
+    """各日の必要人数を基準に不足・超過を作り、集計データとして返す。"""
 
-    semi_hard_terms = []
+    data = StaffingObjectiveData()
     max_count = len(staff_members)
 
     for target_date in month_dates:
@@ -778,14 +786,22 @@ def _add_staffing_semi_hard_constraints(
         # 夜勤人数は安全上の必須条件なので、不足・超過を許容しない。
         model.Add(actual_night_staff == rule.required_night_staff)
 
-        semi_hard_terms.extend(
+        data.day_shortage_vars[target_date] = day_shortage
+        data.day_excess_vars[target_date] = day_excess
+        data.weighted_terms.extend(
             [
                 day_shortage * SEMI_HARD_WEIGHTS[ShiftGenerationViolationType.DAY_SHORTAGE],
                 day_excess * SEMI_HARD_WEIGHTS[ShiftGenerationViolationType.DAY_EXCESS],
             ]
         )
 
-    return semi_hard_terms
+    data.total_day_shortage = sum(data.day_shortage_vars.values())
+    data.total_day_excess = sum(data.day_excess_vars.values())
+    data.max_day_shortage = model.NewIntVar(0, max_count, "max_day_shortage")
+    data.max_day_excess = model.NewIntVar(0, max_count, "max_day_excess")
+    model.AddMaxEquality(data.max_day_shortage, list(data.day_shortage_vars.values()))
+    model.AddMaxEquality(data.max_day_excess, list(data.day_excess_vars.values()))
+    return data
 
 
 def _add_max_consecutive_semi_hard_constraints(
@@ -844,26 +860,6 @@ def _work_term(shift_vars, fixed_assignments, staff_member_id, target_date):
         + shift_vars[cell_key][ShiftResult.ShiftTypeChoices.NIGHT]
         + shift_vars[cell_key][ShiftResult.ShiftTypeChoices.AFTER_NIGHT]
     )
-
-
-def _add_shift_count_balance_objective(
-    *, model, staff_members, month_dates, shift_vars, shift_type, name
-):
-    if len(staff_members) <= 1:
-        return None, None, []
-    count_vars = []
-    for staff_member in staff_members:
-        count_var = model.NewIntVar(0, len(month_dates), f"{name}_count_{staff_member.id}")
-        model.Add(count_var == sum(
-            shift_vars[(staff_member.id, target_date)][shift_type]
-            for target_date in month_dates
-        ))
-        count_vars.append(count_var)
-    minimum = model.NewIntVar(0, len(month_dates), f"{name}_count_min")
-    maximum = model.NewIntVar(0, len(month_dates), f"{name}_count_max")
-    model.AddMinEquality(minimum, count_vars)
-    model.AddMaxEquality(maximum, count_vars)
-    return minimum, maximum, [maximum - minimum]
 
 
 def _add_night_count_balance_semi_hard_constraint(
@@ -972,11 +968,6 @@ def _build_soft_objective(
     data.night_max = night_max
     data.night_count_vars = night_count_vars
     data.night_balance_violation = night_balance_violation
-    data.day_min, data.day_max, day_terms = _add_shift_count_balance_objective(
-        model=model, staff_members=staff_members, month_dates=month_dates,
-        shift_vars=shift_vars, shift_type=ShiftResult.ShiftTypeChoices.DAY,
-        name="day",
-    )
     data.long_streak_terms = _add_long_consecutive_work_objective(
         model=model, staff_members=staff_members, month_dates=month_dates,
         shift_vars=shift_vars, fixed_assignments=fixed_assignments,
@@ -997,9 +988,6 @@ def _build_soft_objective(
     )
     data.weighted_terms.extend(
         term * SOFT_CONSTRAINT_WEIGHTS["ability_balance"] for term in data.ability_terms
-    )
-    data.weighted_terms.extend(
-        term * SOFT_CONSTRAINT_WEIGHTS["day_shift_balance"] for term in day_terms
     )
     data.weighted_terms.extend(
         term * SOFT_CONSTRAINT_WEIGHTS["long_consecutive_work"]
@@ -1023,12 +1011,6 @@ def _build_optimization_summary(
         ),
         night_shift_count_max=(
             _solver_value(solver, soft_data.night_max) if soft_data.night_max is not None else None
-        ),
-        day_shift_count_min=(
-            _solver_value(solver, soft_data.day_min) if soft_data.day_min is not None else None
-        ),
-        day_shift_count_max=(
-            _solver_value(solver, soft_data.day_max) if soft_data.day_max is not None else None
         ),
         long_streak_penalty=sum(
             _solver_value(solver, term) for term in soft_data.long_streak_terms
