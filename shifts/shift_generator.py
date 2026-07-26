@@ -4,11 +4,14 @@ DB読み込み、OR-Tools最適化、結果整形、保存の各責務を順番�
 """
 
 from django.db import transaction
-from django.db.models import Q
 
-from .models import ShiftPlan, ShiftResult
+from .models import ShiftPlan
 from .shift_generation.context import load_generation_context
 from .shift_generation.optimization import optimize_shift
+from .shift_generation.persistence import (
+    persist_generated_shift,
+    save_generated_shift_results,
+)
 from .shift_generation.results import (
     _build_generated_shifts,
     _build_generation_violations,
@@ -74,43 +77,5 @@ def generate_and_save_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
 
     with transaction.atomic():
         result = generate_shift(shift_plan)
-        save_generated_shift_results(shift_plan, result)
-        shift_plan.status = ShiftPlan.StatusChoices.GENERATED
-        shift_plan.save(update_fields=["status", "updated_at"])
+        persist_generated_shift(shift_plan, result)
         return result
-
-
-def save_generated_shift_results(
-    shift_plan: ShiftPlan, result: ShiftGenerationResult
-) -> None:
-    """未ロックの自動生成勤務を置き換え、生成結果を一括保存する。"""
-
-    fixed_result_keys = {
-        (shift_result.staff_member_id, shift_result.date)
-        for shift_result in ShiftResult.objects.filter(
-            shift_plan=shift_plan,
-        ).filter(
-            Q(input_type=ShiftResult.InputTypeChoices.MANUAL) | Q(is_locked=True)
-        )
-    }
-
-    ShiftResult.objects.filter(
-        shift_plan=shift_plan,
-        input_type=ShiftResult.InputTypeChoices.GENERATED,
-        is_locked=False,
-    ).delete()
-
-    create_targets = [
-        ShiftResult(
-            shift_plan=shift_plan,
-            staff_member_id=generated_shift.staff_member_id,
-            date=generated_shift.date,
-            shift_type=generated_shift.shift_type,
-            input_type=ShiftResult.InputTypeChoices.GENERATED,
-            is_locked=False,
-        )
-        for generated_shift in result.shifts
-        if (generated_shift.staff_member_id, generated_shift.date)
-        not in fixed_result_keys
-    ]
-    ShiftResult.objects.bulk_create(create_targets)

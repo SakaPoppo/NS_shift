@@ -2198,7 +2198,10 @@ class ShiftGenerationPersistenceTests(TestCase):
     def test_generate_and_save_shift_rolls_back_when_bulk_create_fails(self):
         self.create_rule()
 
-        with patch("shifts.shift_generator.ShiftResult.objects.bulk_create", side_effect=RuntimeError("boom")):
+        with patch(
+            "shifts.shift_generation.persistence.ShiftResult.objects.bulk_create",
+            side_effect=RuntimeError("boom"),
+        ):
             with self.assertRaises(RuntimeError):
                 generate_and_save_shift(self.shift_plan)
 
