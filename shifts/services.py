@@ -46,7 +46,6 @@ class EffectiveShiftRule:
     required_leader_staff: int
     min_ability_level: int | None
     min_ability_level_staff_count: int | None
-    off_days_per_staff: int
     max_consecutive_work_days: int
     night_shift_next_day_off: bool
 
@@ -86,7 +85,6 @@ def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
         required_leader_staff=resolve("required_leader_staff", shift_rule.required_leader_staff),
         min_ability_level=resolve("min_ability_level", None),
         min_ability_level_staff_count=resolve("min_ability_level_staff_count", None),
-        off_days_per_staff=shift_rule.off_days_per_staff,
         max_consecutive_work_days=shift_rule.max_consecutive_work_days,
         night_shift_next_day_off=shift_rule.night_shift_next_day_off,
     )
