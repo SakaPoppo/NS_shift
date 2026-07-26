@@ -19,10 +19,10 @@ from .shift_generator import (
     ShiftGenerationViolation,
     ShiftGenerationViolationType,
     _add_staffing_semi_hard_constraints,
-    _build_night_count_imbalance_violation,
     generate_and_save_shift,
     generate_shift,
 )
+from .shift_generation.results import _build_night_count_imbalance_violation
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
     build_shift_carryovers,
@@ -1689,7 +1689,6 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(solver.Value(data.total_day_shortage), 0)
         self.assertEqual(solver.Value(data.total_day_excess), 0)
         self.assertEqual(solver.Value(data.max_day_shortage), 0)
-        self.assertEqual(solver.Value(data.max_day_excess), 0)
 
     def test_staffing_data_exposes_daily_totals_and_maximum_deviations(self):
         staff_members = [
@@ -1745,7 +1744,6 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(solver.Value(data.total_day_shortage), 1)
         self.assertEqual(solver.Value(data.total_day_excess), 1)
         self.assertEqual(solver.Value(data.max_day_shortage), 1)
-        self.assertEqual(solver.Value(data.max_day_excess), 1)
 
     def test_different_effective_conditions_are_not_balanced_together(self):
         month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
