@@ -140,6 +140,21 @@ class OptimizationPhaseResult:
 
 
 @dataclass(frozen=True)
+class ShiftOptimizationOutput:
+    """最適化層から結果組み立て層へ渡す、求解済みデータ。"""
+
+    solver: object
+    solver_status: str
+    shift_vars: dict
+    staffing_data: StaffingObjectiveData
+    safety_data: SafetyObjectiveData
+    staffing_balance_data: StaffingBalanceData
+    ability_balance_data: AbilityBalanceData
+    long_streak_terms: list
+    phase_results: list[OptimizationPhaseResult]
+
+
+@dataclass(frozen=True)
 class GenerationContext:
     shift_rule: object
     month_dates: list[date]

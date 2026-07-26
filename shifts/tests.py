@@ -10,19 +10,22 @@ from ortools.sat.python import cp_model
 
 from staff.models import StaffMember, StaffRegularDayOff
 
-from . import shift_generator
+from .shift_generation import optimization as shift_optimization
 from .forms import ShiftPlanCreateForm, ShiftRuleForm
 from .shift_generator import (
-    LONG_STREAK_WEIGHTS,
     ShiftGenerationError,
     ShiftGenerationResult,
     ShiftGenerationViolation,
     ShiftGenerationViolationType,
-    _add_staffing_semi_hard_constraints,
     generate_and_save_shift,
     generate_shift,
 )
+from .shift_generation.optimization import (
+    LONG_STREAK_WEIGHTS,
+    _add_staffing_semi_hard_constraints,
+)
 from .shift_generation.results import _build_night_count_imbalance_violation
+from .shift_generation.types import StaffingObjectiveData
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
     build_shift_carryovers,
@@ -1618,11 +1621,11 @@ class ShiftSoftOptimizationTests(TestCase):
         summary = generate_shift(self.shift_plan).optimization_summary
         self.assertEqual(summary.total_day_shortage, 0)
         self.assertTrue(all(summary.phase_optimal_flags.values()))
-        self.assertFalse(hasattr(shift_generator, "SOFT_CONSTRAINT_WEIGHTS"))
+        self.assertFalse(hasattr(shift_optimization, "SOFT_CONSTRAINT_WEIGHTS"))
         self.assertFalse(hasattr(summary, "day_shift_count_min"))
         self.assertFalse(hasattr(summary, "day_shift_count_max"))
         self.assertFalse(
-            hasattr(shift_generator, "_add_shift_count_balance_objective")
+            hasattr(shift_optimization, "_add_shift_count_balance_objective")
         )
 
     def test_staffing_data_uses_each_dates_required_day_count(self):
@@ -1753,7 +1756,7 @@ class ShiftSoftOptimizationTests(TestCase):
             count_var = model.NewIntVar(0, 6, f"count_{target_date}")
             model.Add(count_var == count)
             actual_counts[target_date] = count_var
-        staffing_data = shift_generator.StaffingObjectiveData(
+        staffing_data = StaffingObjectiveData(
             actual_day_count_vars=actual_counts
         )
         effective_rules = {
@@ -1769,7 +1772,7 @@ class ShiftSoftOptimizationTests(TestCase):
             ),
         }
 
-        data = shift_generator._build_day_count_balance_objective(
+        data = shift_optimization._build_day_count_balance_objective(
             model=model,
             staff_members=[None] * 6,
             month_dates=month_dates,
@@ -1795,12 +1798,12 @@ class ShiftSoftOptimizationTests(TestCase):
                     required_leader_staff=0, min_ability_level=None,
                     min_ability_level_staff_count=None,
                 )
-                data = shift_generator._build_day_count_balance_objective(
+                data = shift_optimization._build_day_count_balance_objective(
                     model=model,
                     staff_members=[None] * 6,
                     month_dates=month_dates,
                     effective_rules={target_date: rule for target_date in month_dates},
-                    staffing_data=shift_generator.StaffingObjectiveData(
+                    staffing_data=StaffingObjectiveData(
                         actual_day_count_vars=actual_counts
                     ),
                 )
@@ -1824,13 +1827,13 @@ class ShiftSoftOptimizationTests(TestCase):
         total_shortage = 1 + choose_worse_total
         later_objective = 1 - choose_worse_total
 
-        first = shift_generator._solve_and_fix_objective(
+        first = shift_optimization._solve_and_fix_objective(
             model=model,
             objective=total_shortage,
             phase_name="total_day_shortage",
             max_time_seconds=1,
         )
-        second = shift_generator._solve_and_fix_objective(
+        second = shift_optimization._solve_and_fix_objective(
             model=model,
             objective=later_objective,
             phase_name="max_day_shortage",
@@ -1852,13 +1855,13 @@ class ShiftSoftOptimizationTests(TestCase):
         maximum = model.NewIntVar(0, 2, "maximum_shortage")
         model.AddMaxEquality(maximum, shortages)
 
-        shift_generator._solve_and_fix_objective(
+        shift_optimization._solve_and_fix_objective(
             model=model,
             objective=sum(shortages),
             phase_name="total_day_shortage",
             max_time_seconds=1,
         )
-        result = shift_generator._solve_and_fix_objective(
+        result = shift_optimization._solve_and_fix_objective(
             model=model,
             objective=maximum,
             phase_name="max_day_shortage",
@@ -1874,13 +1877,13 @@ class ShiftSoftOptimizationTests(TestCase):
         total_excess = add_unneeded_days * 2
         balance_violation = 1 - add_unneeded_days
 
-        shift_generator._solve_and_fix_objective(
+        shift_optimization._solve_and_fix_objective(
             model=model,
             objective=total_excess,
             phase_name="total_day_excess",
             max_time_seconds=1,
         )
-        result = shift_generator._solve_and_fix_objective(
+        result = shift_optimization._solve_and_fix_objective(
             model=model,
             objective=balance_violation,
             phase_name="day_count_balance",
@@ -1953,7 +1956,7 @@ class ShiftSoftOptimizationTests(TestCase):
             required_leader_staff=0, min_ability_level=None,
             min_ability_level_staff_count=None,
         )
-        data = shift_generator._build_ability_total_balance_objective(
+        data = shift_optimization._build_ability_total_balance_objective(
             model=model,
             staff_members=staff_members,
             month_dates=month_dates,
@@ -1981,7 +1984,7 @@ class ShiftSoftOptimizationTests(TestCase):
         self.create_staff_member(name="フェーズ確認")
 
         summary = generate_shift(self.shift_plan).optimization_summary
-        expected_phases = set(shift_generator.PHASE_TIME_LIMITS)
+        expected_phases = set(shift_optimization.PHASE_TIME_LIMITS)
 
         self.assertEqual(set(summary.phase_statuses), expected_phases)
         self.assertEqual(set(summary.phase_optimal_flags), expected_phases)
@@ -2006,7 +2009,9 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(summary.total_day_shortage, 0)
         self.assertEqual(summary.max_day_ability_total_range, 0)
         self.assertEqual(summary.total_day_ability_total_range, 0)
-        self.assertFalse(hasattr(shift_generator, "_add_ability_balance_objective"))
+        self.assertFalse(
+            hasattr(shift_optimization, "_add_ability_balance_objective")
+        )
 
     def test_long_streak_penalty_includes_previous_month_work(self):
         self.create_rule(
