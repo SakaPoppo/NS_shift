@@ -1,6 +1,3 @@
-import calendar
-from datetime import date
-
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
@@ -23,6 +20,7 @@ from .services import (
     MonthBoundaryConflictError,
     build_shift_carryovers,
     get_japanese_holiday_dates,
+    get_month_dates,
     get_previous_month_year_and_month,
     sync_month_boundary_assignments,
     sync_next_month_boundary_assignments,
@@ -92,11 +90,6 @@ BASE_FIXED_SOURCE_LABELS = {
     "month_boundary": "前月勤務の引き継ぎ",
 }
 WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
-
-
-def get_month_dates(year, month):
-    last_day = calendar.monthrange(year, month)[1]
-    return [date(year, month, day) for day in range(1, last_day + 1)]
 
 
 def build_day_headers(month_dates, holiday_dates=frozenset()):
