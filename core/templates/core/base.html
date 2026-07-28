@@ -44,7 +44,7 @@
     <div class="flex min-h-screen flex-col">
       <!-- 全ページ共通の固定ヘッダー -->
       <header class="fixed inset-x-0 top-0 z-50 h-16 border-b border-base-200 bg-base-100/95 backdrop-blur-sm">
-        <div class="navbar mx-auto h-full w-full max-w-[1280px] px-5 sm:px-8 lg:px-10">
+        <div class="navbar mx-auto h-full w-full max-w-[1280px] px-5">
           <div class="flex-1">
             <a class="text-[1.4rem] font-extrabold tracking-tight text-brand-500 sm:text-[1.55rem]" href="{% url 'core:top_page' %}">
               Ns Shift
@@ -79,9 +79,8 @@
         </div>
       </header>
 
-      <!-- 各ページ固有の中身を差し込む領域
-          ヘッダー下とフッター上の共通余白はここで 16 に統一する -->
-      <main class="flex-1 pt-16 pb-16">
+      <!-- 未ログイン時はヘッダーとフッターの間で本文を中央に置き、上下の距離を揃える -->
+      <main class="flex-1 pb-8 {% if request.user.is_authenticated %}pt-16{% else %}flex flex-col justify-center pt-24{% endif %}">
         {% if messages %}
           <div class="mx-auto w-full max-w-[1280px] px-5 pt-5 sm:px-8 lg:px-10">
             <div class="space-y-3">

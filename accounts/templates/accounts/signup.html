@@ -6,9 +6,8 @@
   <section class="mx-auto flex w-full max-w-[1280px] items-center justify-center px-5 sm:px-8 lg:px-10">
     <div class="ns-page-panel-strong w-full max-w-xl p-6 sm:p-8">
       <div class="space-y-6">
-        <div class="space-y-2 text-center">
+        <div class="text-center">
           <h1 class="text-3xl font-extrabold text-slate-900">新規登録</h1>
-          <p class="text-sm font-medium text-slate-500">Ns Shift のアカウントを作成します</p>
         </div>
 
         {% if form.non_field_errors %}
@@ -23,7 +22,6 @@
               <span class="label-text font-bold text-slate-700">{{ form.username.label }}</span>
               <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
             </label>
-            <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">ログイン時に使用するユーザー名を入力してください。</span></div>
             {{ form.username }}
             {% for error in form.username.errors %}
               <div class="label justify-start px-0 pt-1">
@@ -37,7 +35,6 @@
               <span class="label-text font-bold text-slate-700">{{ form.email.label }}</span>
               <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
             </label>
-            <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">必要な場合のみ、連絡用のメールアドレスを入力してください。</span></div>
             {{ form.email }}
             {% for error in form.email.errors %}
               <div class="label justify-start px-0 pt-1">
@@ -51,7 +48,6 @@
               <span class="label-text font-bold text-slate-700">{{ form.password1.label }}</span>
               <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
             </label>
-            <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">安全にログインできるパスワードを設定してください。</span></div>
             {{ form.password1 }}
             {% for error in form.password1.errors %}
               <div class="label justify-start px-0 pt-1">
@@ -65,7 +61,6 @@
               <span class="label-text font-bold text-slate-700">{{ form.password2.label }}</span>
               <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
             </label>
-            <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">確認のため、同じパスワードをもう一度入力してください。</span></div>
             {{ form.password2 }}
             {% for error in form.password2.errors %}
               <div class="label justify-start px-0 pt-1">
