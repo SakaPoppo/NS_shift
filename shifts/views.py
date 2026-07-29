@@ -1,7 +1,9 @@
+import csv
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views import View
@@ -456,6 +458,10 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             "staff_count": len(staff_members),
             "weekday_rule_count": shift_plan.weekday_rules.count(),
             "date_rule_count": shift_plan.date_rules.count(),
+            "can_export_csv": shift_plan.status in {
+                ShiftPlan.StatusChoices.GENERATED,
+                ShiftPlan.StatusChoices.CONFIRMED,
+            },
             "missing_previous_staff_members": [
                 staff_member for staff_member in staff_members
                 if staff_member.id not in carryover_staff_ids
@@ -915,6 +921,44 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             messages.success(request, "シフトを保存しました。")
 
         return HttpResponseRedirect(self.get_edit_url(shift_plan))
+
+
+class ShiftPlanCsvExportView(UserShiftPlanMixin, View):
+    """編集画面と同じ表示内容をCSV形式で出力する。"""
+
+    def get(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        context = self.build_edit_context(shift_plan)
+        day_headers = context["day_headers"]
+        staff_rows = context["staff_rows"]
+
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = (
+            f'attachment; filename="ns_shift_'
+            f'{shift_plan.year}_{shift_plan.month:02d}.csv"'
+        )
+
+        # Excelで開いた場合も日本語が文字化けしないよう、UTF-8 BOMを先頭に付ける。
+        response.write("\ufeff")
+        writer = csv.writer(response, lineterminator="\r\n")
+        writer.writerow(
+            ["スタッフ"]
+            + [
+                f'{header["date"].day}({header["weekday_label"]})'
+                for header in day_headers
+            ]
+        )
+
+        for row in staff_rows:
+            writer.writerow(
+                [row["staff_member"].name]
+                + [
+                    cell["display_label"] if cell["value"] else ""
+                    for cell in row["cells"]
+                ]
+            )
+
+        return response
 
 
 class ShiftPlanDeleteView(UserShiftPlanMixin, View):

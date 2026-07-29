@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     ShiftPlanCreateView,
+    ShiftPlanCsvExportView,
     ShiftPlanDeleteView,
     ShiftPlanEditView,
     ShiftPlanListView,
@@ -19,4 +20,5 @@ urlpatterns = [
     path("<int:pk>/conditions/", ShiftRuleEditView.as_view(), name="conditions"),
     path("<int:pk>/edit/", ShiftPlanEditView.as_view(), name="edit"),
     path("<int:pk>/delete/", ShiftPlanDeleteView.as_view(), name="delete"),
+    path("<int:pk>/export/csv/", ShiftPlanCsvExportView.as_view(), name="export_csv"),
 ]

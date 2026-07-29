@@ -1,10 +1,11 @@
+import csv
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from ortools.sat.python import cp_model
 
@@ -36,7 +37,11 @@ from .services import (
     get_usable_previous_shift_plan,
     sync_month_boundary_assignments,
 )
-from .views import build_day_headers, build_shift_plan_grid
+from .views import (
+    ShiftPlanCsvExportView,
+    build_day_headers,
+    build_shift_plan_grid,
+)
 
 
 class ShiftPlanModelTests(TestCase):
@@ -53,6 +58,72 @@ class ShiftPlanModelTests(TestCase):
 
         self.assertEqual(shift_plan.display_title, "2026年7月 シフト表")
         self.assertEqual(str(shift_plan), "2026年7月 シフト表")
+
+
+class ShiftPlanCsvExportViewTests(TestCase):
+    def test_csv_uses_edit_grid_labels_and_download_filename(self):
+        user = get_user_model().objects.create_user(
+            username="csv-export-user",
+            password="password123",
+        )
+        shift_plan = ShiftPlan.objects.create(user=user, year=2026, month=1)
+        staff_member = StaffMember.objects.create(
+            user=user,
+            name="佐藤 花子",
+            gender=StaffMember.GenderChoices.FEMALE,
+        )
+        ShiftResult.objects.create(
+            shift_plan=shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 1, 1),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        )
+        request = RequestFactory().get("/shifts/csv/")
+        request.user = user
+
+        response = ShiftPlanCsvExportView.as_view()(request, pk=shift_plan.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertEqual(
+            response["Content-Disposition"],
+            'attachment; filename="ns_shift_2026_01.csv"',
+        )
+        rows = list(
+            csv.reader(response.content.decode("utf-8-sig").splitlines())
+        )
+        self.assertEqual(rows[0][0:2], ["スタッフ", "1(木)"])
+        self.assertEqual(rows[1][0:2], ["佐藤 花子", "日"])
+
+    def test_edit_page_shows_csv_button_only_for_exportable_statuses(self):
+        user = get_user_model().objects.create_user(
+            username="csv-button-user",
+            password="password123",
+        )
+        shift_plan = ShiftPlan.objects.create(user=user, year=2026, month=2)
+        ShiftRule.objects.create(
+            shift_plan=shift_plan,
+            off_days_per_staff=8,
+            max_consecutive_work_days=5,
+        )
+        self.client.force_login(user)
+        edit_url = reverse("shifts:edit", kwargs={"pk": shift_plan.pk})
+
+        for status, should_display in (
+            (ShiftPlan.StatusChoices.DRAFT, False),
+            (ShiftPlan.StatusChoices.GENERATED, True),
+            (ShiftPlan.StatusChoices.CONFIRMED, True),
+        ):
+            with self.subTest(status=status):
+                shift_plan.status = status
+                shift_plan.save(update_fields=["status", "updated_at"])
+                response = self.client.get(edit_url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["can_export_csv"], should_display)
+                if should_display:
+                    self.assertContains(response, "CSVダウンロード")
+                else:
+                    self.assertNotContains(response, "CSVダウンロード")
 
 
 class ShiftResultModelTests(TestCase):
