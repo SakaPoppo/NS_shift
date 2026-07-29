@@ -1,6 +1,7 @@
 databases:
   - name: ns-shift-db
     plan: free
+    region: singapore
     databaseName: ns_shift
     user: ns_shift
 
@@ -9,8 +10,9 @@ services:
     plan: free
     name: ns-shift-web
     runtime: python
-    buildCommand: "./build.sh build"
-    startCommand: "./build.sh start"
+    region: singapore
+    buildCommand: "bash ./build.sh build"
+    startCommand: "bash ./build.sh start"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -19,4 +21,4 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: WEB_CONCURRENCY
-        value: "4"
+        value: "1"
