@@ -117,6 +117,14 @@
                 >
                   シフト生成
                 </button>
+                {% if can_export_csv %}
+                  <a
+                    href="{% url 'shifts:export_csv' shift_plan.pk %}"
+                    class="btn btn-outline h-10 min-h-10 whitespace-nowrap rounded-lg px-4 text-sm"
+                  >
+                    CSVダウンロード
+                  </a>
+                {% endif %}
                 <details class="dropdown dropdown-end">
                   <summary class="btn btn-error btn-outline h-10 min-h-10 rounded-lg px-4 text-sm">
                     リセット
