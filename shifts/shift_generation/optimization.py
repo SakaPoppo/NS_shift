@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from ortools.sat.python import cp_model
 
 from staff.models import StaffMember
@@ -31,16 +33,19 @@ from .types import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
 CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
-    "total_day_shortage": 12,
-    "max_day_shortage": 8,
-    "safety": 12,
-    "total_day_excess": 8,
-    "day_count_balance": 8,
-    "ability_balance": 8,
-    "long_streak": 10,
+    "total_day_shortage": 25,
+    "max_day_shortage": 10,
+    "safety": 15,
+    "total_day_excess": 10,
+    "day_count_balance": 10,
+    "ability_balance": 10,
+    "long_streak": 15,
 }
 
 
@@ -175,6 +180,13 @@ def _solve_and_fix_objective(
     solver = _new_solver(max_time_seconds)
     status = solver.Solve(model)
     status_name = solver.StatusName(status)
+    logger.info(
+        "shift optimization phase=%s status=%s elapsed=%.3fs limit=%ss",
+        phase_name,
+        status_name,
+        solver.WallTime(),
+        max_time_seconds,
+    )
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise ShiftGenerationError(_build_solver_error_message(status_name))
     objective_value = int(round(solver.ObjectiveValue()))

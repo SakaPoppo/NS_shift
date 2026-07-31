@@ -52,6 +52,23 @@ render_external_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
 if render_external_url and render_external_url not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(render_external_url)
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "shifts.shift_generation.optimization": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
 INSTALLED_APPS = [
     "accounts",
     "staff",

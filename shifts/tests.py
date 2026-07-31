@@ -1915,6 +1915,25 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(second.solver.Value(choose_worse_total), 0)
         self.assertEqual(second.solver.Value(total_shortage), 1)
 
+    def test_optimization_phase_logs_elapsed_time_and_limit(self):
+        model = cp_model.CpModel()
+        objective = model.NewIntVar(0, 1, "logged_objective")
+
+        with self.assertLogs(
+            "shifts.shift_generation.optimization", level="INFO"
+        ) as captured_logs:
+            shift_optimization._solve_and_fix_objective(
+                model=model,
+                objective=objective,
+                phase_name="total_day_shortage",
+                max_time_seconds=1,
+            )
+
+        self.assertRegex(
+            captured_logs.output[0],
+            r"phase=total_day_shortage status=OPTIMAL elapsed=\d+\.\d{3}s limit=1s",
+        )
+
     def test_equal_total_shortage_prefers_smaller_maximum_shortage(self):
         model = cp_model.CpModel()
         spread_shortage = model.NewBoolVar("spread_shortage")
