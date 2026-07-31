@@ -96,6 +96,9 @@ TEMPLATES = [
     },
 ]
 
+# シフト表はスタッフ数×日数分の入力欄を一度に送信するため、Django標準の1,000件より余裕を持たせる。
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 5000
+
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
