@@ -5,6 +5,9 @@ from django.core.exceptions import ValidationError
 
 
 User = get_user_model()
+REGISTRATION_UNAVAILABLE_MESSAGE = (
+    "入力内容では登録できませんでした。内容を変更してもう一度お試しください。"
+)
 
 
 class SignUpForm(UserCreationForm):
@@ -13,11 +16,21 @@ class SignUpForm(UserCreationForm):
     UserCreationForm に含まれない email の必須入力と重複確認を追加する。
     """
 
-    email = forms.EmailField(label="メールアドレス", max_length=254)
+    email = forms.EmailField(
+        label="メールアドレス",
+        max_length=254,
+        required=True,
+        error_messages={"required": "メールアドレスを入力してください。"},
+    )
 
     class Meta(UserCreationForm.Meta):
         model = User
         fields = ("username", "email", "password1", "password2")
+        error_messages = {
+            "username": {
+                "unique": REGISTRATION_UNAVAILABLE_MESSAGE,
+            },
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -38,7 +51,7 @@ class SignUpForm(UserCreationForm):
         # 大文字小文字だけ違うメールアドレスも同一とみなし、重複登録を防ぐ。
         email = self.cleaned_data["email"].strip()
         if User.objects.filter(email__iexact=email).exists():
-            raise ValidationError("このメールアドレスはすでに登録されています。")
+            raise ValidationError(REGISTRATION_UNAVAILABLE_MESSAGE)
         return email
 
     def save(self, commit=True):
