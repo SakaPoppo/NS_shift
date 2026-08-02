@@ -24,3 +24,7 @@ services:
         value: "1"
       - key: GUNICORN_TIMEOUT
         value: "120"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "ns-shift.com,www.ns-shift.com"
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        value: "https://ns-shift.com,https://www.ns-shift.com"
