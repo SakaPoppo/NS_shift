@@ -42,17 +42,14 @@ def _build_optimization_summary(
     return ShiftOptimizationSummary(
         total_day_shortage=_solver_value(solver, staffing_data.total_day_shortage),
         max_day_shortage=_solver_value(solver, staffing_data.max_day_shortage),
-        leader_shortage_total=sum(
-            _solver_value(solver, var)
-            for var in safety_data.leader_shortage_vars.values()
+        leader_shortage_total=_solver_value(
+            solver, safety_data.leader_shortage_total
         ),
-        qualified_staff_shortage_total=sum(
-            _solver_value(solver, var)
-            for var in safety_data.qualified_staff_shortage_vars.values()
+        qualified_staff_shortage_total=_solver_value(
+            solver, safety_data.qualified_staff_shortage_total
         ),
-        max_consecutive_violation_count=sum(
-            _solver_value(solver, var)
-            for var in safety_data.consecutive_violation_vars
+        max_consecutive_violation_count=_solver_value(
+            solver, safety_data.consecutive_violation_count
         ),
         night_shift_count_min=(
             _solver_value(solver, safety_data.night_count_min)

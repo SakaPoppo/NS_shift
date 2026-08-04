@@ -102,11 +102,24 @@ class SafetyObjectiveData:
     leader_shortage_vars: dict[date, object] = field(default_factory=dict)
     qualified_staff_shortage_vars: dict[date, object] = field(default_factory=dict)
     consecutive_violation_vars: list = field(default_factory=list)
+    leader_shortage_total: object | None = None
+    qualified_staff_shortage_total: object | None = None
+    staffing_safety_score: object | None = None
+    consecutive_violation_count: object | None = None
     night_count_min: object | None = None
     night_count_max: object | None = None
     night_count_vars: dict[int, object] = field(default_factory=dict)
     night_balance_violation: object | None = None
     objective_score: object | None = None
+
+
+@dataclass(frozen=True)
+class OptimizationPhaseDefinition:
+    """1回の求解で評価する目的と時間制限をまとめた定義。"""
+
+    name: str
+    objective: object
+    max_time_seconds: int
 
 
 @dataclass
