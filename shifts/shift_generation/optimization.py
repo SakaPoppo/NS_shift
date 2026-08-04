@@ -24,6 +24,7 @@ from .types import (
     GENERATABLE_SHIFT_TYPES,
     AbilityBalanceData,
     GenerationContext,
+    OptimizationPhaseDefinition,
     OptimizationPhaseResult,
     SafetyObjectiveData,
     ShiftGenerationError,
@@ -129,24 +130,22 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         previous_consecutive_work_days=context.previous_consecutive_work_days,
     )
 
-    # 優先順位どおりに最良値を固定するため、後続フェーズが前の評価を悪化させない。
-    phase_objectives = [
-        ("total_day_shortage", staffing_data.total_day_shortage),
-        ("max_day_shortage", staffing_data.max_day_shortage),
-        ("safety", safety_data.objective_score),
-        ("total_day_excess", staffing_data.total_day_excess),
-        ("day_count_balance", staffing_balance_data.objective_score),
-        ("ability_balance", ability_balance_data.objective_score),
-        ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
-    ]
+    phase_definitions = _build_phase_definitions(
+        staffing_data=staffing_data,
+        safety_data=safety_data,
+        staffing_balance_data=staffing_balance_data,
+        ability_balance_data=ability_balance_data,
+        long_streak_terms=long_streak_terms,
+    )
+    # リスト順に最良値を固定し、後続フェーズが前の評価を悪化させない。
     phase_results = [
         _solve_and_fix_objective(
             model=model,
-            objective=objective,
-            phase_name=phase_name,
-            max_time_seconds=PHASE_TIME_LIMITS[phase_name],
+            objective=phase.objective,
+            phase_name=phase.name,
+            max_time_seconds=phase.max_time_seconds,
         )
-        for phase_name, objective in phase_objectives
+        for phase in phase_definitions
     ]
     solver = phase_results[-1].solver
     solver_status = phase_results[-1].status
@@ -162,6 +161,35 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         long_streak_terms=long_streak_terms,
         phase_results=phase_results,
     )
+
+
+def _build_phase_definitions(
+    *,
+    staffing_data,
+    safety_data,
+    staffing_balance_data,
+    ability_balance_data,
+    long_streak_terms,
+) -> list[OptimizationPhaseDefinition]:
+    """現在の優先順位どおりに、複数フェーズの定義を一か所で作る。"""
+
+    objectives = [
+        ("total_day_shortage", staffing_data.total_day_shortage),
+        ("max_day_shortage", staffing_data.max_day_shortage),
+        ("safety", safety_data.objective_score),
+        ("total_day_excess", staffing_data.total_day_excess),
+        ("day_count_balance", staffing_balance_data.objective_score),
+        ("ability_balance", ability_balance_data.objective_score),
+        ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
+    ]
+    return [
+        OptimizationPhaseDefinition(
+            name=name,
+            objective=objective,
+            max_time_seconds=PHASE_TIME_LIMITS[name],
+        )
+        for name, objective in objectives
+    ]
 
 
 def _new_solver(max_time_seconds: int) -> cp_model.CpSolver:
@@ -616,19 +644,26 @@ def _build_safety_objective(
         month_dates=month_dates,
         shift_vars=shift_vars,
     )
-    staffing_shortage = (
-        sum(data.leader_shortage_vars.values())
-        + sum(data.qualified_staff_shortage_vars.values())
+    data.leader_shortage_total = sum(data.leader_shortage_vars.values())
+    data.qualified_staff_shortage_total = sum(
+        data.qualified_staff_shortage_vars.values()
     )
-    consecutive_violations = sum(data.consecutive_violation_vars)
+    # 現在の生成結果を維持するため、今回は人員配置の2項目を従来どおり単純合計する。
+    data.staffing_safety_score = (
+        data.leader_shortage_total + data.qualified_staff_shortage_total
+    )
+    data.consecutive_violation_count = sum(data.consecutive_violation_vars)
     night_violation = (
         data.night_balance_violation
         if data.night_balance_violation is not None
         else 0
     )
     data.objective_score = _build_lexicographic_score([
-        (staffing_shortage, len(month_dates) * max_count * 2),
-        (consecutive_violations, len(data.consecutive_violation_vars)),
+        (data.staffing_safety_score, len(month_dates) * max_count * 2),
+        (
+            data.consecutive_violation_count,
+            len(data.consecutive_violation_vars),
+        ),
         (night_violation, len(month_dates)),
     ])
     return data

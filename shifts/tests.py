@@ -2010,6 +2010,129 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(summary.leader_shortage_total, 0)
         self.assertEqual(summary.qualified_staff_shortage_total, 0)
 
+    def test_safety_data_exposes_individual_aggregate_values(self):
+        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
+        leader = self.create_staff_member(name="集計リーダー")
+        leader.role = StaffMember.RoleChoices.LEADER
+        leader.ability_level = 5
+        leader.save(update_fields=["role", "ability_level"])
+        night_staff = self.create_staff_member(name="集計夜勤者")
+        staff_members = [leader, night_staff]
+        model = cp_model.CpModel()
+        shift_vars = {}
+        for staff_member in staff_members:
+            for target_date in month_dates:
+                day_vars = {
+                    shift_type: model.NewBoolVar(
+                        f"safety_{staff_member.id}_{target_date}_{shift_type}"
+                    )
+                    for shift_type in (
+                        ShiftResult.ShiftTypeChoices.DAY,
+                        ShiftResult.ShiftTypeChoices.NIGHT,
+                        ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                        ShiftResult.ShiftTypeChoices.OFF,
+                    )
+                }
+                model.Add(sum(day_vars.values()) == 1)
+                shift_vars[(staff_member.id, target_date)] = day_vars
+
+        for target_date in month_dates:
+            model.Add(
+                shift_vars[(leader.id, target_date)][
+                    ShiftResult.ShiftTypeChoices.DAY
+                ]
+                == 1
+            )
+        model.Add(
+            shift_vars[(night_staff.id, month_dates[0])][
+                ShiftResult.ShiftTypeChoices.NIGHT
+            ]
+            == 1
+        )
+        model.Add(
+            shift_vars[(night_staff.id, month_dates[1])][
+                ShiftResult.ShiftTypeChoices.OFF
+            ]
+            == 1
+        )
+        rule = SimpleNamespace(
+            required_leader_staff=1,
+            min_ability_level=5,
+            min_ability_level_staff_count=1,
+        )
+
+        data = shift_optimization._build_safety_objective(
+            model=model,
+            staff_members=staff_members,
+            month_dates=month_dates,
+            shift_vars=shift_vars,
+            fixed_assignments={},
+            effective_rules={target_date: rule for target_date in month_dates},
+            max_consecutive_work_days=1,
+            previous_consecutive_work_days={},
+        )
+        model.Minimize(data.objective_score)
+        solver = cp_model.CpSolver()
+        self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
+
+        self.assertEqual(solver.Value(data.leader_shortage_total), 0)
+        self.assertEqual(solver.Value(data.qualified_staff_shortage_total), 0)
+        self.assertEqual(solver.Value(data.staffing_safety_score), 0)
+        self.assertEqual(solver.Value(data.consecutive_violation_count), 1)
+        self.assertEqual(solver.Value(data.night_balance_violation), 0)
+
+    def test_safety_score_keeps_staffing_then_consecutive_then_night_priority(self):
+        model = cp_model.CpModel()
+        staffing_shortage = model.NewBoolVar("staffing_shortage_choice")
+        consecutive_violation = model.NewBoolVar("consecutive_violation_choice")
+        night_violation = model.NewBoolVar("night_violation_choice")
+        model.Add(
+            staffing_shortage + consecutive_violation + night_violation == 1
+        )
+        objective = shift_optimization._build_lexicographic_score([
+            (staffing_shortage, 1),
+            (consecutive_violation, 1),
+            (night_violation, 1),
+        ])
+        model.Minimize(objective)
+        solver = cp_model.CpSolver()
+
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+        self.assertEqual(solver.Value(staffing_shortage), 0)
+        self.assertEqual(solver.Value(consecutive_violation), 0)
+        self.assertEqual(solver.Value(night_violation), 1)
+
+    def test_phase_definitions_keep_current_order_and_time_limits(self):
+        phase_definitions = shift_optimization._build_phase_definitions(
+            staffing_data=StaffingObjectiveData(
+                total_day_shortage=1,
+                max_day_shortage=2,
+                total_day_excess=3,
+            ),
+            safety_data=SimpleNamespace(objective_score=4),
+            staffing_balance_data=SimpleNamespace(objective_score=5),
+            ability_balance_data=SimpleNamespace(objective_score=6),
+            long_streak_terms=[7],
+        )
+
+        self.assertEqual(
+            [phase.name for phase in phase_definitions],
+            [
+                "total_day_shortage",
+                "max_day_shortage",
+                "safety",
+                "total_day_excess",
+                "day_count_balance",
+                "ability_balance",
+                "long_streak",
+            ],
+        )
+        self.assertTrue(all(
+            phase.max_time_seconds
+            == shift_optimization.PHASE_TIME_LIMITS[phase.name]
+            for phase in phase_definitions
+        ))
+
     def test_ability_phase_balances_totals_instead_of_staff_average(self):
         staff_members = []
         for name, level in (("高", 5), ("中", 4), ("低", 1)):
