@@ -2113,6 +2113,7 @@ class ShiftSoftOptimizationTests(TestCase):
             staffing_balance_data=SimpleNamespace(objective_score=5),
             ability_balance_data=SimpleNamespace(objective_score=6),
             long_streak_terms=[7],
+            staff_count=20,
         )
 
         self.assertEqual(
@@ -2132,6 +2133,192 @@ class ShiftSoftOptimizationTests(TestCase):
             == shift_optimization.PHASE_TIME_LIMITS[phase.name]
             for phase in phase_definitions
         ))
+
+    def test_shift_solution_hints_clear_then_include_every_shift_variable(self):
+        shift_vars = {
+            (1, date(2026, 2, 1)): {"day": object(), "night": object()},
+            (2, date(2026, 2, 2)): {"day": object(), "off": object()},
+        }
+        all_vars = [
+            shift_var
+            for day_vars in shift_vars.values()
+            for shift_var in day_vars.values()
+        ]
+        hint_values = {
+            shift_var: index % 2
+            for index, shift_var in enumerate(all_vars)
+        }
+        events = []
+
+        class HintModel:
+            def ClearHints(self):
+                events.append(("clear",))
+
+            def AddHint(self, shift_var, value):
+                events.append(("add", shift_var, value))
+
+        class HintSolver:
+            def Value(self, shift_var):
+                return hint_values[shift_var]
+
+        shift_optimization._add_shift_solution_hints(
+            model=HintModel(),
+            shift_vars=shift_vars,
+            solver=HintSolver(),
+        )
+
+        self.assertEqual(events[0], ("clear",))
+        self.assertEqual(
+            events[1:],
+            [
+                ("add", shift_var, hint_values[shift_var])
+                for shift_var in all_vars
+            ],
+        )
+
+    def test_phase_loop_hints_only_after_success_and_returns_last_solver(self):
+        solvers = [object(), object(), object()]
+        results = [
+            SimpleNamespace(name="first", status="FEASIBLE", solver=solvers[0]),
+            SimpleNamespace(name="second", status="OPTIMAL", solver=solvers[1]),
+            SimpleNamespace(name="third", status="OPTIMAL", solver=solvers[2]),
+        ]
+        phases = [
+            SimpleNamespace(name=result.name, objective=index, max_time_seconds=1)
+            for index, result in enumerate(results)
+        ]
+
+        with (
+            patch.object(
+                shift_optimization,
+                "_solve_and_fix_objective",
+                side_effect=results,
+            ),
+            patch.object(
+                shift_optimization,
+                "_add_shift_solution_hints",
+            ) as add_hints,
+        ):
+            phase_results, solver, status = (
+                shift_optimization._run_optimization_phases(
+                    model=object(),
+                    shift_vars={"shifts": "only"},
+                    phase_definitions=phases,
+                )
+            )
+
+        self.assertEqual(phase_results, results)
+        self.assertIs(solver, solvers[-1])
+        self.assertEqual(status, "OPTIMAL")
+        self.assertEqual(add_hints.call_count, 2)
+        self.assertIs(add_hints.call_args_list[0].kwargs["solver"], solvers[0])
+        self.assertIs(add_hints.call_args_list[1].kwargs["solver"], solvers[1])
+
+    def test_failed_phase_does_not_become_hint_source(self):
+        successful_solver = object()
+        first_result = SimpleNamespace(
+            name="first", status="OPTIMAL", solver=successful_solver
+        )
+        phases = [
+            SimpleNamespace(name="first", objective=1, max_time_seconds=1),
+            SimpleNamespace(name="failed", objective=2, max_time_seconds=1),
+            SimpleNamespace(name="unreached", objective=3, max_time_seconds=1),
+        ]
+
+        with (
+            patch.object(
+                shift_optimization,
+                "_solve_and_fix_objective",
+                side_effect=[
+                    first_result,
+                    ShiftGenerationError("UNKNOWN"),
+                ],
+            ),
+            patch.object(
+                shift_optimization,
+                "_add_shift_solution_hints",
+            ) as add_hints,
+        ):
+            with self.assertRaises(ShiftGenerationError):
+                shift_optimization._run_optimization_phases(
+                    model=object(),
+                    shift_vars={},
+                    phase_definitions=phases,
+                )
+
+        add_hints.assert_called_once()
+        self.assertIs(add_hints.call_args.kwargs["solver"], successful_solver)
+
+    def test_empty_phase_definitions_raise_explicit_error(self):
+        with self.assertRaisesRegex(
+            ShiftGenerationError, "最適化フェーズが定義されていません"
+        ):
+            shift_optimization._run_optimization_phases(
+                model=object(), shift_vars={}, phase_definitions=[]
+            )
+
+    def test_solver_time_scale_boundaries(self):
+        expected_scales = [
+            (0, 1.00),
+            (1, 1.00),
+            (20, 1.00),
+            (21, 1.25),
+            (30, 1.25),
+            (31, 1.50),
+            (40, 1.50),
+            (41, 1.75),
+            (100, 1.75),
+        ]
+
+        for staff_count, expected_scale in expected_scales:
+            with self.subTest(staff_count=staff_count):
+                self.assertAlmostEqual(
+                    shift_optimization._calculate_solver_time_scale(staff_count),
+                    expected_scale,
+                )
+
+    def test_phase_time_limit_rounds_up(self):
+        cases = [
+            (25, 1.00, 25),
+            (25, 1.25, 32),
+            (25, 1.50, 38),
+            (25, 1.75, 44),
+            (10, 1.25, 13),
+            (15, 1.50, 23),
+        ]
+
+        for base_seconds, time_scale, expected_seconds in cases:
+            with self.subTest(base_seconds=base_seconds, time_scale=time_scale):
+                self.assertEqual(
+                    shift_optimization._calculate_phase_time_limit(
+                        base_seconds=base_seconds,
+                        time_scale=time_scale,
+                    ),
+                    expected_seconds,
+                )
+
+    def test_phase_definitions_scale_all_limits_for_forty_staff(self):
+        phase_definitions = shift_optimization._build_phase_definitions(
+            staffing_data=StaffingObjectiveData(
+                total_day_shortage=1,
+                max_day_shortage=2,
+                total_day_excess=3,
+            ),
+            safety_data=SimpleNamespace(objective_score=4),
+            staffing_balance_data=SimpleNamespace(objective_score=5),
+            ability_balance_data=SimpleNamespace(objective_score=6),
+            long_streak_terms=[7],
+            staff_count=40,
+        )
+
+        self.assertEqual(
+            [phase.max_time_seconds for phase in phase_definitions],
+            [38, 15, 23, 15, 15, 15, 23],
+        )
+        self.assertEqual(
+            [phase.name for phase in phase_definitions],
+            list(shift_optimization.PHASE_TIME_LIMITS),
+        )
 
     def test_ability_phase_balances_totals_instead_of_staff_average(self):
         staff_members = []
