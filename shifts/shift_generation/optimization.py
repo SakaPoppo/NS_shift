@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from ortools.sat.python import cp_model
 
@@ -48,6 +49,10 @@ PHASE_TIME_LIMITS = {
     "ability_balance": 10,
     "long_streak": 15,
 }
+BASE_STAFF_COUNT = 20
+STAFF_COUNT_STEP = 10
+TIME_SCALE_PER_STEP = 0.25
+MAX_TIME_SCALE = 1.75
 
 
 def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
@@ -136,19 +141,24 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         staffing_balance_data=staffing_balance_data,
         ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
+        staff_count=len(context.staff_members),
     )
-    # リスト順に最良値を固定し、後続フェーズが前の評価を悪化させない。
-    phase_results = [
-        _solve_and_fix_objective(
-            model=model,
-            objective=phase.objective,
-            phase_name=phase.name,
-            max_time_seconds=phase.max_time_seconds,
-        )
-        for phase in phase_definitions
-    ]
-    solver = phase_results[-1].solver
-    solver_status = phase_results[-1].status
+    time_scale = _calculate_solver_time_scale(len(context.staff_members))
+    logger.info(
+        "shift optimization configuration "
+        "staff_count=%s time_scale=%.2f phase_limits=%s",
+        len(context.staff_members),
+        time_scale,
+        {
+            phase.name: phase.max_time_seconds
+            for phase in phase_definitions
+        },
+    )
+    phase_results, solver, solver_status = _run_optimization_phases(
+        model=model,
+        shift_vars=shift_vars,
+        phase_definitions=phase_definitions,
+    )
 
     return ShiftOptimizationOutput(
         solver=solver,
@@ -165,14 +175,16 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
 
 def _build_phase_definitions(
     *,
-    staffing_data,
-    safety_data,
-    staffing_balance_data,
-    ability_balance_data,
-    long_streak_terms,
+    staffing_data: StaffingObjectiveData,
+    safety_data: SafetyObjectiveData,
+    staffing_balance_data: StaffingBalanceData,
+    ability_balance_data: AbilityBalanceData,
+    long_streak_terms: list,
+    staff_count: int,
 ) -> list[OptimizationPhaseDefinition]:
-    """現在の優先順位どおりに、複数フェーズの定義を一か所で作る。"""
+    """現在の優先順位とスタッフ数に応じた制限時間でフェーズを作る。"""
 
+    time_scale = _calculate_solver_time_scale(staff_count)
     objectives = [
         ("total_day_shortage", staffing_data.total_day_shortage),
         ("max_day_shortage", staffing_data.max_day_shortage),
@@ -186,10 +198,87 @@ def _build_phase_definitions(
         OptimizationPhaseDefinition(
             name=name,
             objective=objective,
-            max_time_seconds=PHASE_TIME_LIMITS[name],
+            max_time_seconds=_calculate_phase_time_limit(
+                base_seconds=PHASE_TIME_LIMITS[name],
+                time_scale=time_scale,
+            ),
         )
         for name, objective in objectives
     ]
+
+
+def _calculate_solver_time_scale(staff_count: int) -> float:
+    """20人を基準に10人単位で時間を延長し、1.75倍を上限とする。"""
+
+    if staff_count <= BASE_STAFF_COUNT:
+        return 1.0
+    extra_steps = math.ceil(
+        (staff_count - BASE_STAFF_COUNT) / STAFF_COUNT_STEP
+    )
+    return min(
+        1.0 + extra_steps * TIME_SCALE_PER_STEP,
+        MAX_TIME_SCALE,
+    )
+
+
+def _calculate_phase_time_limit(*, base_seconds: int, time_scale: float) -> int:
+    """倍率適用後の秒数を切り上げ、最低1秒を保証する。"""
+
+    return max(1, math.ceil(base_seconds * time_scale))
+
+
+def _add_shift_solution_hints(*, model, shift_vars: dict, solver) -> None:
+    """直前の有効解に含まれるシフト配置だけを次の探索へ渡す。"""
+
+    model.ClearHints()
+    for day_vars in shift_vars.values():
+        for shift_var in day_vars.values():
+            model.AddHint(shift_var, solver.Value(shift_var))
+
+
+def _run_optimization_phases(
+    *,
+    model,
+    shift_vars: dict,
+    phase_definitions: list[OptimizationPhaseDefinition],
+) -> tuple[list[OptimizationPhaseResult], object, str]:
+    """フェーズを順に解き、直前の有効な配置を次フェーズへ引き継ぐ。"""
+
+    if not phase_definitions:
+        raise ShiftGenerationError("最適化フェーズが定義されていません。")
+
+    phase_results = []
+    last_successful_solver = None
+    last_successful_status = None
+    last_successful_phase_name = None
+
+    for phase in phase_definitions:
+        if last_successful_solver is not None:
+            _add_shift_solution_hints(
+                model=model,
+                shift_vars=shift_vars,
+                solver=last_successful_solver,
+            )
+        result = _solve_and_fix_objective(
+            model=model,
+            objective=phase.objective,
+            phase_name=phase.name,
+            max_time_seconds=phase.max_time_seconds,
+        )
+        phase_results.append(result)
+        last_successful_solver = result.solver
+        last_successful_status = result.status
+        last_successful_phase_name = result.name
+
+    if last_successful_solver is None or last_successful_status is None:
+        raise ShiftGenerationError("有効な最適化結果を取得できませんでした。")
+
+    logger.info(
+        "shift optimization completed last_successful_phase=%s status=%s",
+        last_successful_phase_name,
+        last_successful_status,
+    )
+    return phase_results, last_successful_solver, last_successful_status
 
 
 def _new_solver(max_time_seconds: int) -> cp_model.CpSolver:

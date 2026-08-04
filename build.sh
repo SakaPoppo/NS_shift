@@ -16,7 +16,7 @@ case "${1:-}" in
       -k uvicorn.workers.UvicornWorker \
       --bind "0.0.0.0:${PORT:-10000}" \
       --workers "${WEB_CONCURRENCY:-1}" \
-      --timeout "${GUNICORN_TIMEOUT:-120}"
+      --timeout "${GUNICORN_TIMEOUT:-210}"
     ;;
   *)
     echo "usage: $0 {build|start}"

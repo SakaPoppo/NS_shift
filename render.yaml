@@ -23,7 +23,7 @@ services:
       - key: WEB_CONCURRENCY
         value: "1"
       - key: GUNICORN_TIMEOUT
-        value: "120"
+        value: "210"
       - key: DJANGO_ALLOWED_HOSTS
         value: "ns-shift.com,www.ns-shift.com"
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
