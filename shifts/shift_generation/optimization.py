@@ -1,10 +1,11 @@
-"""OR-Toolsの制約モデル構築と複数フェーズ最適化。 
+"""OR-Toolsの制約モデル構築と複数フェーズ最適化。
 
 ハード制約に加えて以下を追加している。
 
+- 必要リーダー人数・必要能力スタッフ人数のハード制約
+- 最大連勤数のハード制約
 - 必要日勤人数のセミハード制約
-- 最大連勤数のセミハード制約
-- 月間夜勤回数差のセミハード制約
+- 月間夜勤回数差などの公平性目的関数
 """
 
 from __future__ import annotations
@@ -17,17 +18,14 @@ from ortools.sat.python import cp_model
 from staff.models import StaffMember
 
 from ..models import ShiftResult
-from ..services import (
-    OFF_LIKE_SHIFT_TYPES,
-    WORKLIKE_SHIFT_TYPES,
-)
+from ..services import WORKLIKE_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     AbilityBalanceData,
     GenerationContext,
+    NightCountBalanceData,
     OptimizationPhaseDefinition,
     OptimizationPhaseResult,
-    SafetyObjectiveData,
     ShiftGenerationError,
     ShiftOptimizationOutput,
     StaffingBalanceData,
@@ -43,8 +41,8 @@ CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
     "total_day_shortage": 25,
     "max_day_shortage": 10,
-    "safety": 15,
     "total_day_excess": 10,
+    "night_count_balance": 10,
     "day_count_balance": 10,
     "ability_balance": 10,
     "long_streak": 15,
@@ -101,15 +99,27 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         shift_vars=shift_vars,
         effective_rules=context.effective_rules,
     )
-    safety_data = _build_safety_objective(
+    _add_staffing_safety_constraints(
+        model=model,
+        staff_members=context.staff_members,
+        month_dates=context.month_dates,
+        shift_vars=shift_vars,
+        effective_rules=context.effective_rules,
+    )
+    _add_max_consecutive_work_constraints(
         model=model,
         staff_members=context.staff_members,
         month_dates=context.month_dates,
         shift_vars=shift_vars,
         fixed_assignments=context.fixed_assignments,
-        effective_rules=context.effective_rules,
         max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
         previous_consecutive_work_days=context.previous_consecutive_work_days,
+    )
+    night_count_balance_data = _build_night_count_balance_objective(
+        model=model,
+        staff_members=context.staff_members,
+        month_dates=context.month_dates,
+        shift_vars=shift_vars,
     )
     staffing_balance_data = _build_day_count_balance_objective(
         model=model,
@@ -137,7 +147,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
 
     phase_definitions = _build_phase_definitions(
         staffing_data=staffing_data,
-        safety_data=safety_data,
+        night_count_balance_data=night_count_balance_data,
         staffing_balance_data=staffing_balance_data,
         ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
@@ -165,7 +175,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         solver_status=solver_status,
         shift_vars=shift_vars,
         staffing_data=staffing_data,
-        safety_data=safety_data,
+        night_count_balance_data=night_count_balance_data,
         staffing_balance_data=staffing_balance_data,
         ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
@@ -176,7 +186,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
 def _build_phase_definitions(
     *,
     staffing_data: StaffingObjectiveData,
-    safety_data: SafetyObjectiveData,
+    night_count_balance_data: NightCountBalanceData,
     staffing_balance_data: StaffingBalanceData,
     ability_balance_data: AbilityBalanceData,
     long_streak_terms: list,
@@ -188,8 +198,8 @@ def _build_phase_definitions(
     objectives = [
         ("total_day_shortage", staffing_data.total_day_shortage),
         ("max_day_shortage", staffing_data.max_day_shortage),
-        ("safety", safety_data.objective_score),
         ("total_day_excess", staffing_data.total_day_excess),
+        ("night_count_balance", night_count_balance_data.objective_score),
         ("day_count_balance", staffing_balance_data.objective_score),
         ("ability_balance", ability_balance_data.objective_score),
         ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
@@ -511,7 +521,49 @@ def _add_staffing_semi_hard_constraints(
     return data
 
 
-def _add_max_consecutive_semi_hard_constraints(
+def _add_staffing_safety_constraints(
+    *,
+    model,
+    staff_members,
+    month_dates,
+    shift_vars,
+    effective_rules,
+) -> None:
+    """日ごとのリーダー人数・能力条件を必須制約として追加する。"""
+
+    leaders = [
+        staff
+        for staff in staff_members
+        if staff.role == StaffMember.RoleChoices.LEADER
+    ]
+    for target_date in month_dates:
+        rule = effective_rules[target_date]
+        actual_leaders = sum(
+            shift_vars[(staff.id, target_date)][
+                ShiftResult.ShiftTypeChoices.DAY
+            ]
+            for staff in leaders
+        )
+        model.Add(actual_leaders >= rule.required_leader_staff)
+
+        if (
+            rule.min_ability_level is None
+            or rule.min_ability_level_staff_count is None
+        ):
+            continue
+        actual_qualified_staff = sum(
+            shift_vars[(staff.id, target_date)][
+                ShiftResult.ShiftTypeChoices.DAY
+            ]
+            for staff in staff_members
+            if staff.ability_level >= rule.min_ability_level
+        )
+        model.Add(
+            actual_qualified_staff >= rule.min_ability_level_staff_count
+        )
+
+
+def _add_max_consecutive_work_constraints(
     *,
     model,
     staff_members,
@@ -520,42 +572,36 @@ def _add_max_consecutive_semi_hard_constraints(
     fixed_assignments,
     max_consecutive_work_days,
     previous_consecutive_work_days,
-):
-    """最大連勤数を超える長さのウィンドウへ違反 BoolVar を立てる。"""
+) -> None:
+    """前月からの勤務も含め、最大連勤数を超える配置を禁止する。"""
 
-    semi_hard_terms = []
     window_size = max_consecutive_work_days + 1
     for staff_member in staff_members:
-        prefix_count = min(previous_consecutive_work_days.get(staff_member.id, 0), window_size - 1)
+        prefix_count = min(
+            previous_consecutive_work_days.get(staff_member.id, 0),
+            max_consecutive_work_days,
+        )
         timeline = [None] * prefix_count + month_dates
         for start_index in range(0, len(timeline) - window_size + 1):
-            work_terms = []
-            for current_date in timeline[start_index : start_index + window_size]:
-                if current_date is None:
-                    work_terms.append(1)
-                    continue
-                cell_key = (staff_member.id, current_date)
-                fixed_shift_type = fixed_assignments.get(cell_key)
-                if fixed_shift_type is None:
-                    work_terms.append(
-                        shift_vars[cell_key][ShiftResult.ShiftTypeChoices.DAY]
-                        + shift_vars[cell_key][ShiftResult.ShiftTypeChoices.NIGHT]
-                        + shift_vars[cell_key][ShiftResult.ShiftTypeChoices.AFTER_NIGHT]
-                    )
-                else:
-                    work_terms.append(int(fixed_shift_type in WORKLIKE_SHIFT_TYPES))
+            work_terms = [
+                1
+                if current_date is None
+                else _work_term(
+                    shift_vars,
+                    fixed_assignments,
+                    staff_member.id,
+                    current_date,
+                )
+                for current_date in timeline[
+                    start_index : start_index + window_size
+                ]
+            ]
 
-            violation_var = model.NewBoolVar(
-                f"consecutive_violation_{staff_member.id}_{start_index}"
-            )
-            model.Add(sum(work_terms) <= max_consecutive_work_days + violation_var)
-            semi_hard_terms.append(violation_var)
-
-    return semi_hard_terms
+            model.Add(sum(work_terms) <= max_consecutive_work_days)
 
 
 def _work_term(shift_vars, fixed_assignments, staff_member_id, target_date):
-    """セミハード・ソフト双方で同じ勤務日定義を使用する。"""
+    """最大連勤制約と長期連勤評価で同じ勤務日定義を使用する。"""
     cell_key = (staff_member_id, target_date)
     fixed_shift_type = fixed_assignments.get(cell_key)
     if fixed_shift_type is not None:
@@ -567,27 +613,45 @@ def _work_term(shift_vars, fixed_assignments, staff_member_id, target_date):
     )
 
 
-def _add_night_count_balance_semi_hard_constraint(
+def _build_night_count_balance_objective(
     *, model, staff_members, month_dates, shift_vars
-):
+) -> NightCountBalanceData:
+    """夜勤可能スタッフ間で許容差1回を超えた夜勤回数差を返す。"""
+
+    data = NightCountBalanceData()
     eligible_staff = [staff for staff in staff_members if staff.can_night_shift]
     if len(eligible_staff) <= 1:
-        return None, None, {}, None
-    count_vars = {}
+        data.night_balance_violation = 0
+        data.objective_score = 0
+        return data
     for staff_member in eligible_staff:
         count_var = model.NewIntVar(0, len(month_dates), f"night_count_{staff_member.id}")
         model.Add(count_var == sum(
             shift_vars[(staff_member.id, target_date)][ShiftResult.ShiftTypeChoices.NIGHT]
             for target_date in month_dates
         ))
-        count_vars[staff_member.id] = count_var
-    minimum = model.NewIntVar(0, len(month_dates), "night_count_min")
-    maximum = model.NewIntVar(0, len(month_dates), "night_count_max")
-    model.AddMinEquality(minimum, list(count_vars.values()))
-    model.AddMaxEquality(maximum, list(count_vars.values()))
-    violation = model.NewIntVar(0, len(month_dates), "night_balance_violation")
-    model.Add(violation >= maximum - minimum - 1)
-    return minimum, maximum, count_vars, violation
+        data.night_count_vars[staff_member.id] = count_var
+    data.night_count_min = model.NewIntVar(
+        0, len(month_dates), "night_count_min"
+    )
+    data.night_count_max = model.NewIntVar(
+        0, len(month_dates), "night_count_max"
+    )
+    model.AddMinEquality(
+        data.night_count_min, list(data.night_count_vars.values())
+    )
+    model.AddMaxEquality(
+        data.night_count_max, list(data.night_count_vars.values())
+    )
+    data.night_balance_violation = model.NewIntVar(
+        0, len(month_dates), "night_balance_violation"
+    )
+    model.Add(
+        data.night_balance_violation
+        >= data.night_count_max - data.night_count_min - 1
+    )
+    data.objective_score = data.night_balance_violation
+    return data
 
 
 def _add_long_consecutive_work_objective(
@@ -661,101 +725,6 @@ def _group_dates_by_staffing_condition(month_dates, effective_rules):
         key = _build_staffing_condition_key(effective_rules[target_date])
         groups.setdefault(key, []).append(target_date)
     return groups
-
-
-def _build_safety_objective(
-    *,
-    model,
-    staff_members,
-    month_dates,
-    shift_vars,
-    fixed_assignments,
-    effective_rules,
-    max_consecutive_work_days,
-    previous_consecutive_work_days,
-):
-    data = SafetyObjectiveData()
-    max_count = len(staff_members)
-    leaders = [
-        staff for staff in staff_members
-        if staff.role == StaffMember.RoleChoices.LEADER
-    ]
-    for target_date in month_dates:
-        rule = effective_rules[target_date]
-        leader_shortage = model.NewIntVar(
-            0, max_count, f"leader_shortage_{target_date.isoformat()}"
-        )
-        actual_leaders = sum(
-            shift_vars[(staff.id, target_date)][ShiftResult.ShiftTypeChoices.DAY]
-            for staff in leaders
-        )
-        model.Add(actual_leaders + leader_shortage >= rule.required_leader_staff)
-        data.leader_shortage_vars[target_date] = leader_shortage
-
-        if (
-            rule.min_ability_level is not None
-            and rule.min_ability_level_staff_count is not None
-        ):
-            qualified_staff = [
-                staff for staff in staff_members
-                if staff.ability_level >= rule.min_ability_level
-            ]
-            qualified_shortage = model.NewIntVar(
-                0, max_count, f"qualified_shortage_{target_date.isoformat()}"
-            )
-            actual_qualified = sum(
-                shift_vars[(staff.id, target_date)][ShiftResult.ShiftTypeChoices.DAY]
-                for staff in qualified_staff
-            )
-            model.Add(
-                actual_qualified + qualified_shortage
-                >= rule.min_ability_level_staff_count
-            )
-            data.qualified_staff_shortage_vars[target_date] = qualified_shortage
-
-    data.consecutive_violation_vars = _add_max_consecutive_semi_hard_constraints(
-        model=model,
-        staff_members=staff_members,
-        month_dates=month_dates,
-        shift_vars=shift_vars,
-        fixed_assignments=fixed_assignments,
-        max_consecutive_work_days=max_consecutive_work_days,
-        previous_consecutive_work_days=previous_consecutive_work_days,
-    )
-    (
-        data.night_count_min,
-        data.night_count_max,
-        data.night_count_vars,
-        data.night_balance_violation,
-    ) = _add_night_count_balance_semi_hard_constraint(
-        model=model,
-        staff_members=staff_members,
-        month_dates=month_dates,
-        shift_vars=shift_vars,
-    )
-    data.leader_shortage_total = sum(data.leader_shortage_vars.values())
-    data.qualified_staff_shortage_total = sum(
-        data.qualified_staff_shortage_vars.values()
-    )
-    # 現在の生成結果を維持するため、今回は人員配置の2項目を従来どおり単純合計する。
-    data.staffing_safety_score = (
-        data.leader_shortage_total + data.qualified_staff_shortage_total
-    )
-    data.consecutive_violation_count = sum(data.consecutive_violation_vars)
-    night_violation = (
-        data.night_balance_violation
-        if data.night_balance_violation is not None
-        else 0
-    )
-    data.objective_score = _build_lexicographic_score([
-        (data.staffing_safety_score, len(month_dates) * max_count * 2),
-        (
-            data.consecutive_violation_count,
-            len(data.consecutive_violation_vars),
-        ),
-        (night_violation, len(month_dates)),
-    ])
-    return data
 
 
 def _build_day_count_balance_objective(

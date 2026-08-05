@@ -379,7 +379,7 @@ class DateShiftRuleForm(forms.Form):
         required=False,
         coerce=int,
         empty_value=None,
-        choices=(("", "レベルを選択してください"), *StaffMember.AbilityLevelChoices.choices),
+        choices=(("", ""), *StaffMember.AbilityLevelChoices.choices),
     )
     min_ability_level_staff_count = forms.IntegerField(
         label="必要人数",

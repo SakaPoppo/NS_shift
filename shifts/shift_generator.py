@@ -48,13 +48,15 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
         night_shift_counts={
             staff_id: _solver_value(optimization.solver, count_var)
-            for staff_id, count_var in optimization.safety_data.night_count_vars.items()
+            for staff_id, count_var in (
+                optimization.night_count_balance_data.night_count_vars.items()
+            )
         },
     )
     optimization_summary = _build_optimization_summary(
         solver=optimization.solver,
         staffing_data=optimization.staffing_data,
-        safety_data=optimization.safety_data,
+        night_count_balance_data=optimization.night_count_balance_data,
         staffing_balance_data=optimization.staffing_balance_data,
         ability_balance_data=optimization.ability_balance_data,
         long_streak_terms=optimization.long_streak_terms,
