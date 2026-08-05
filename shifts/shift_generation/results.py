@@ -33,7 +33,7 @@ def _build_optimization_summary(
     *,
     solver,
     staffing_data,
-    safety_data,
+    night_count_balance_data,
     staffing_balance_data,
     ability_balance_data,
     long_streak_terms,
@@ -42,27 +42,21 @@ def _build_optimization_summary(
     return ShiftOptimizationSummary(
         total_day_shortage=_solver_value(solver, staffing_data.total_day_shortage),
         max_day_shortage=_solver_value(solver, staffing_data.max_day_shortage),
-        leader_shortage_total=_solver_value(
-            solver, safety_data.leader_shortage_total
-        ),
-        qualified_staff_shortage_total=_solver_value(
-            solver, safety_data.qualified_staff_shortage_total
-        ),
-        max_consecutive_violation_count=_solver_value(
-            solver, safety_data.consecutive_violation_count
-        ),
+        leader_shortage_total=0,
+        qualified_staff_shortage_total=0,
+        max_consecutive_violation_count=0,
         night_shift_count_min=(
-            _solver_value(solver, safety_data.night_count_min)
-            if safety_data.night_count_min is not None
+            _solver_value(solver, night_count_balance_data.night_count_min)
+            if night_count_balance_data.night_count_min is not None
             else None
         ),
         night_shift_count_max=(
-            _solver_value(solver, safety_data.night_count_max)
-            if safety_data.night_count_max is not None
+            _solver_value(solver, night_count_balance_data.night_count_max)
+            if night_count_balance_data.night_count_max is not None
             else None
         ),
         night_count_imbalance_violation=_solver_value(
-            solver, safety_data.night_balance_violation
+            solver, night_count_balance_data.night_balance_violation
         ),
         total_day_excess=_solver_value(solver, staffing_data.total_day_excess),
         max_day_count_balance_violation=_solver_value(
@@ -92,7 +86,9 @@ def _build_optimization_summary(
         },
         night_shift_counts={
             staff_id: _solver_value(solver, count_var)
-            for staff_id, count_var in safety_data.night_count_vars.items()
+            for staff_id, count_var in (
+                night_count_balance_data.night_count_vars.items()
+            )
         },
     )
 

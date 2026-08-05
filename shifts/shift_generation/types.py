@@ -98,14 +98,9 @@ class StaffingObjectiveData:
 
 
 @dataclass
-class SafetyObjectiveData:
-    leader_shortage_vars: dict[date, object] = field(default_factory=dict)
-    qualified_staff_shortage_vars: dict[date, object] = field(default_factory=dict)
-    consecutive_violation_vars: list = field(default_factory=list)
-    leader_shortage_total: object | None = None
-    qualified_staff_shortage_total: object | None = None
-    staffing_safety_score: object | None = None
-    consecutive_violation_count: object | None = None
+class NightCountBalanceData:
+    """夜勤可能スタッフ間の月間夜勤回数差を最適化するためのデータ。"""
+
     night_count_min: object | None = None
     night_count_max: object | None = None
     night_count_vars: dict[int, object] = field(default_factory=dict)
@@ -160,7 +155,7 @@ class ShiftOptimizationOutput:
     solver_status: str
     shift_vars: dict
     staffing_data: StaffingObjectiveData
-    safety_data: SafetyObjectiveData
+    night_count_balance_data: NightCountBalanceData
     staffing_balance_data: StaffingBalanceData
     ability_balance_data: AbilityBalanceData
     long_streak_terms: list

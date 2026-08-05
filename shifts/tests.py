@@ -29,6 +29,7 @@ from .shift_generation.results import _build_night_count_imbalance_violation
 from .shift_generation.types import StaffingObjectiveData
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
+    WORKLIKE_SHIFT_TYPES,
     build_shift_carryovers,
     calculate_previous_consecutive_work_days,
     get_effective_rule_for_date,
@@ -1197,6 +1198,25 @@ class ShiftGeneratorTests(TestCase):
             for generated_shift in shifts
         }
 
+    def assert_max_consecutive_work_days(
+        self, *, shifts, staff_members, max_consecutive_work_days
+    ):
+        shift_map = self.build_shift_map(shifts)
+        for staff_member in staff_members:
+            consecutive_work_days = 0
+            for target_date in get_month_dates(
+                self.shift_plan.year, self.shift_plan.month
+            ):
+                if shift_map[(staff_member.id, target_date)] in WORKLIKE_SHIFT_TYPES:
+                    consecutive_work_days += 1
+                else:
+                    consecutive_work_days = 0
+                self.assertLessEqual(
+                    consecutive_work_days,
+                    max_consecutive_work_days,
+                    f"{staff_member.name} の {target_date} までの連勤が上限を超えています。",
+                )
+
     def test_generate_shift_returns_all_days_and_exact_off_days(self):
         self.create_rule()
         staff_member = self.create_staff_member()
@@ -1391,7 +1411,12 @@ class ShiftGeneratorTests(TestCase):
             generate_shift(self.shift_plan)
 
     def test_generate_shift_matches_day_staff_requirement_when_feasible(self):
-        self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=0)
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
         staff_member = self.create_staff_member()
 
         result = generate_shift(self.shift_plan)
@@ -1415,7 +1440,12 @@ class ShiftGeneratorTests(TestCase):
         )
 
     def test_generate_shift_returns_day_shortage_violation_when_requirement_is_unreachable(self):
-        self.create_rule(required_day_staff=2, required_night_staff=0, off_days_per_staff=0)
+        self.create_rule(
+            required_day_staff=2,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
         self.create_staff_member()
 
         result = generate_shift(self.shift_plan)
@@ -1434,6 +1464,7 @@ class ShiftGeneratorTests(TestCase):
             required_day_staff=0,
             required_night_staff=1,
             off_days_per_staff=0,
+            max_consecutive_work_days=31,
             night_shift_next_day_off=False,
         )
         self.create_staff_member()
@@ -1442,7 +1473,12 @@ class ShiftGeneratorTests(TestCase):
             generate_shift(self.shift_plan)
 
     def test_generate_shift_does_not_warn_for_day_excess(self):
-        self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=0)
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
         self.create_staff_member()
         WeekdayShiftRule.objects.create(
             shift_plan=self.shift_plan,
@@ -1460,7 +1496,12 @@ class ShiftGeneratorTests(TestCase):
         )
 
     def test_generate_shift_applies_date_rule_before_weekday_rule_for_day_requirement(self):
-        self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=0)
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
         for index in range(3):
             self.create_staff_member(name=f"スタッフ{index + 1}")
         WeekdayShiftRule.objects.create(
@@ -1519,22 +1560,100 @@ class ShiftGeneratorTests(TestCase):
             for shift in result.shifts
         ), 2)
 
-    def test_generate_shift_returns_max_consecutive_work_violation(self):
-        self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=0)
-        self.create_staff_member()
+    def test_generate_shift_rejects_unreachable_required_leader_staff(self):
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            required_leader_staff=1,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        self.create_staff_member(name="一般スタッフ")
+
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
+
+    def test_generate_shift_rejects_unreachable_qualified_staff_requirement(self):
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        staff_member = self.create_staff_member(name="能力不足スタッフ")
+        staff_member.ability_level = 4
+        staff_member.save(update_fields=["ability_level"])
+        WeekdayShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            day_of_week=0,
+            min_ability_level=5,
+            min_ability_level_staff_count=1,
+        )
+
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
+
+    def test_generate_shift_skips_ability_constraint_when_either_field_is_none(self):
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        staff_member = self.create_staff_member(name="能力条件未設定スタッフ")
+        staff_member.ability_level = 1
+        staff_member.save(update_fields=["ability_level"])
+        weekday_rule = WeekdayShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            day_of_week=0,
+        )
+
+        for min_ability_level, required_count in ((5, None), (None, 1)):
+            with self.subTest(
+                min_ability_level=min_ability_level,
+                min_ability_level_staff_count=required_count,
+            ):
+                weekday_rule.min_ability_level = min_ability_level
+                weekday_rule.min_ability_level_staff_count = required_count
+                weekday_rule.save(
+                    update_fields=[
+                        "min_ability_level",
+                        "min_ability_level_staff_count",
+                    ]
+                )
+
+                result = generate_shift(self.shift_plan)
+
+                self.assertEqual(result.status, "success")
+
+    def test_generated_shifts_never_exceed_max_consecutive_work_days(self):
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=8,
+            max_consecutive_work_days=5,
+        )
+        staff_members = [
+            self.create_staff_member(name="連勤確認A"),
+            self.create_staff_member(name="連勤確認B"),
+        ]
 
         result = generate_shift(self.shift_plan)
 
-        self.assertTrue(
-            any(
-                violation.violation_type == ShiftGenerationViolationType.MAX_CONSECUTIVE_WORK
-                and violation.start_date == date(2026, 7, 1)
-                and violation.end_date == date(2026, 7, 31)
-                for violation in result.violations
-            )
+        self.assert_max_consecutive_work_days(
+            shifts=result.shifts,
+            staff_members=staff_members,
+            max_consecutive_work_days=5,
         )
 
-    def test_training_is_counted_as_work_for_consecutive_violation(self):
+    def test_generate_shift_rejects_unavoidable_max_consecutive_work(self):
+        self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=0)
+        self.create_staff_member()
+
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
+
+    def test_fixed_training_is_counted_as_work_for_max_consecutive_constraint(self):
         self.create_rule(required_day_staff=1, required_night_staff=0, off_days_per_staff=2)
         staff_member = self.create_staff_member()
         for target_date, shift_type in (
@@ -1550,16 +1669,57 @@ class ShiftGeneratorTests(TestCase):
                 input_type=ShiftResult.InputTypeChoices.MANUAL,
             )
 
-        result = generate_shift(self.shift_plan)
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
 
-        self.assertTrue(
-            any(
-                violation.violation_type == ShiftGenerationViolationType.MAX_CONSECUTIVE_WORK
-                and violation.start_date == date(2026, 7, 7)
-                and violation.end_date == date(2026, 7, 12)
-                for violation in result.violations
-            )
+    def test_previous_month_streak_forces_first_day_off(self):
+        self.create_rule(
+            required_day_staff=0,
+            required_night_staff=0,
+            off_days_per_staff=6,
+            max_consecutive_work_days=5,
         )
+        staff_member = self.create_staff_member(name="月跨ぎ連勤スタッフ")
+        ShiftCarryover.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            previous_consecutive_work_days=5,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 1))],
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+
+    def test_all_fixed_worklike_shift_types_count_toward_max_consecutive_constraint(self):
+        staff_member = self.create_staff_member(name="固定勤務スタッフ")
+        month_dates = [date(2026, 7, day) for day in range(1, 7)]
+
+        for shift_type in WORKLIKE_SHIFT_TYPES:
+            with self.subTest(shift_type=shift_type):
+                model = cp_model.CpModel()
+                shift_optimization._add_max_consecutive_work_constraints(
+                    model=model,
+                    staff_members=[staff_member],
+                    month_dates=month_dates,
+                    shift_vars={},
+                    fixed_assignments={
+                        (staff_member.id, target_date): shift_type
+                        for target_date in month_dates
+                    },
+                    max_consecutive_work_days=5,
+                    previous_consecutive_work_days={},
+                )
+
+                self.assertEqual(
+                    cp_model.CpSolver().Solve(model),
+                    cp_model.INFEASIBLE,
+                )
 
     def test_special_leave_breaks_consecutive_work_violation(self):
         self.create_rule(
@@ -1983,7 +2143,7 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(result.solver.Value(total_excess), 0)
         self.assertEqual(result.solver.Value(balance_violation), 1)
 
-    def test_required_leader_and_qualified_staff_shortages_are_optimized(self):
+    def test_required_leader_and_qualified_staff_hard_constraints_are_satisfied(self):
         self.create_rule(
             required_day_staff=2,
             required_night_staff=0,
@@ -2005,111 +2165,104 @@ class ShiftSoftOptimizationTests(TestCase):
             min_ability_level_staff_count=1,
         )
 
-        summary = generate_shift(self.shift_plan).optimization_summary
+        result = generate_shift(self.shift_plan)
+        summary = result.optimization_summary
+        shift_map = {
+            (shift.staff_member_id, shift.date): shift.shift_type
+            for shift in result.shifts
+        }
 
         self.assertEqual(summary.leader_shortage_total, 0)
         self.assertEqual(summary.qualified_staff_shortage_total, 0)
+        self.assertEqual(summary.max_consecutive_violation_count, 0)
+        self.assertTrue(all(
+            shift_map[(leader.id, target_date)]
+            == ShiftResult.ShiftTypeChoices.DAY
+            for target_date in get_month_dates(2026, 2)
+        ))
+        self.assertTrue(all(
+            shift_map[(qualified.id, target_date)]
+            == ShiftResult.ShiftTypeChoices.DAY
+            for target_date in get_month_dates(2026, 2)
+            if target_date.weekday() == 0
+        ))
 
-    def test_safety_data_exposes_individual_aggregate_values(self):
+    def test_night_count_balance_data_exposes_individual_aggregate_values(self):
         month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
-        leader = self.create_staff_member(name="集計リーダー")
-        leader.role = StaffMember.RoleChoices.LEADER
-        leader.ability_level = 5
-        leader.save(update_fields=["role", "ability_level"])
-        night_staff = self.create_staff_member(name="集計夜勤者")
-        staff_members = [leader, night_staff]
+        first_staff = self.create_staff_member(name="集計夜勤者A")
+        second_staff = self.create_staff_member(name="集計夜勤者B")
+        staff_members = [first_staff, second_staff]
         model = cp_model.CpModel()
         shift_vars = {}
         for staff_member in staff_members:
             for target_date in month_dates:
-                day_vars = {
-                    shift_type: model.NewBoolVar(
-                        f"safety_{staff_member.id}_{target_date}_{shift_type}"
-                    )
-                    for shift_type in (
-                        ShiftResult.ShiftTypeChoices.DAY,
-                        ShiftResult.ShiftTypeChoices.NIGHT,
-                        ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
-                        ShiftResult.ShiftTypeChoices.OFF,
+                shift_vars[(staff_member.id, target_date)] = {
+                    ShiftResult.ShiftTypeChoices.NIGHT: model.NewBoolVar(
+                        f"night_{staff_member.id}_{target_date}"
                     )
                 }
-                model.Add(sum(day_vars.values()) == 1)
-                shift_vars[(staff_member.id, target_date)] = day_vars
-
         for target_date in month_dates:
             model.Add(
-                shift_vars[(leader.id, target_date)][
-                    ShiftResult.ShiftTypeChoices.DAY
+                shift_vars[(first_staff.id, target_date)][
+                    ShiftResult.ShiftTypeChoices.NIGHT
                 ]
                 == 1
             )
-        model.Add(
-            shift_vars[(night_staff.id, month_dates[0])][
-                ShiftResult.ShiftTypeChoices.NIGHT
-            ]
-            == 1
-        )
-        model.Add(
-            shift_vars[(night_staff.id, month_dates[1])][
-                ShiftResult.ShiftTypeChoices.OFF
-            ]
-            == 1
-        )
-        rule = SimpleNamespace(
-            required_leader_staff=1,
-            min_ability_level=5,
-            min_ability_level_staff_count=1,
-        )
+            model.Add(
+                shift_vars[(second_staff.id, target_date)][
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ]
+                == 0
+            )
 
-        data = shift_optimization._build_safety_objective(
+        data = shift_optimization._build_night_count_balance_objective(
             model=model,
             staff_members=staff_members,
             month_dates=month_dates,
             shift_vars=shift_vars,
-            fixed_assignments={},
-            effective_rules={target_date: rule for target_date in month_dates},
-            max_consecutive_work_days=1,
-            previous_consecutive_work_days={},
         )
         model.Minimize(data.objective_score)
         solver = cp_model.CpSolver()
         self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
 
-        self.assertEqual(solver.Value(data.leader_shortage_total), 0)
-        self.assertEqual(solver.Value(data.qualified_staff_shortage_total), 0)
-        self.assertEqual(solver.Value(data.staffing_safety_score), 0)
-        self.assertEqual(solver.Value(data.consecutive_violation_count), 1)
-        self.assertEqual(solver.Value(data.night_balance_violation), 0)
+        self.assertEqual(solver.Value(data.night_count_vars[first_staff.id]), 2)
+        self.assertEqual(solver.Value(data.night_count_vars[second_staff.id]), 0)
+        self.assertEqual(solver.Value(data.night_count_min), 0)
+        self.assertEqual(solver.Value(data.night_count_max), 2)
+        self.assertEqual(solver.Value(data.night_balance_violation), 1)
+        self.assertEqual(solver.Value(data.objective_score), 1)
 
-    def test_safety_score_keeps_staffing_then_consecutive_then_night_priority(self):
+    def test_night_count_balance_objective_is_zero_for_one_eligible_staff(self):
         model = cp_model.CpModel()
-        staffing_shortage = model.NewBoolVar("staffing_shortage_choice")
-        consecutive_violation = model.NewBoolVar("consecutive_violation_choice")
-        night_violation = model.NewBoolVar("night_violation_choice")
-        model.Add(
-            staffing_shortage + consecutive_violation + night_violation == 1
+        staff_member = self.create_staff_member(name="単独夜勤者")
+        target_date = date(2026, 2, 1)
+        data = shift_optimization._build_night_count_balance_objective(
+            model=model,
+            staff_members=[staff_member],
+            month_dates=[target_date],
+            shift_vars={
+                (staff_member.id, target_date): {
+                    ShiftResult.ShiftTypeChoices.NIGHT: model.NewBoolVar(
+                        "single_night"
+                    )
+                }
+            },
         )
-        objective = shift_optimization._build_lexicographic_score([
-            (staffing_shortage, 1),
-            (consecutive_violation, 1),
-            (night_violation, 1),
-        ])
-        model.Minimize(objective)
-        solver = cp_model.CpSolver()
 
-        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
-        self.assertEqual(solver.Value(staffing_shortage), 0)
-        self.assertEqual(solver.Value(consecutive_violation), 0)
-        self.assertEqual(solver.Value(night_violation), 1)
+        self.assertIsNone(data.night_count_min)
+        self.assertIsNone(data.night_count_max)
+        self.assertEqual(data.night_count_vars, {})
+        self.assertEqual(data.night_balance_violation, 0)
+        self.assertEqual(data.objective_score, 0)
 
-    def test_phase_definitions_keep_current_order_and_time_limits(self):
+    def test_phase_definitions_keep_required_order_and_time_limits(self):
         phase_definitions = shift_optimization._build_phase_definitions(
             staffing_data=StaffingObjectiveData(
                 total_day_shortage=1,
                 max_day_shortage=2,
                 total_day_excess=3,
             ),
-            safety_data=SimpleNamespace(objective_score=4),
+            night_count_balance_data=SimpleNamespace(objective_score=4),
             staffing_balance_data=SimpleNamespace(objective_score=5),
             ability_balance_data=SimpleNamespace(objective_score=6),
             long_streak_terms=[7],
@@ -2121,8 +2274,8 @@ class ShiftSoftOptimizationTests(TestCase):
             [
                 "total_day_shortage",
                 "max_day_shortage",
-                "safety",
                 "total_day_excess",
+                "night_count_balance",
                 "day_count_balance",
                 "ability_balance",
                 "long_streak",
@@ -2304,7 +2457,7 @@ class ShiftSoftOptimizationTests(TestCase):
                 max_day_shortage=2,
                 total_day_excess=3,
             ),
-            safety_data=SimpleNamespace(objective_score=4),
+            night_count_balance_data=SimpleNamespace(objective_score=4),
             staffing_balance_data=SimpleNamespace(objective_score=5),
             ability_balance_data=SimpleNamespace(objective_score=6),
             long_streak_terms=[7],
@@ -2313,7 +2466,7 @@ class ShiftSoftOptimizationTests(TestCase):
 
         self.assertEqual(
             [phase.max_time_seconds for phase in phase_definitions],
-            [38, 15, 23, 15, 15, 15, 23],
+            [38, 15, 15, 15, 15, 15, 23],
         )
         self.assertEqual(
             [phase.name for phase in phase_definitions],
@@ -2388,6 +2541,8 @@ class ShiftSoftOptimizationTests(TestCase):
 
         self.assertEqual(set(summary.phase_statuses), expected_phases)
         self.assertEqual(set(summary.phase_optimal_flags), expected_phases)
+        self.assertIn("night_count_balance", summary.phase_statuses)
+        self.assertNotIn("safety", summary.phase_statuses)
         self.assertTrue(
             all(status in {"OPTIMAL", "FEASIBLE"} for status in summary.phase_statuses.values())
         )
@@ -2472,7 +2627,7 @@ class ShiftGenerationPersistenceTests(TestCase):
             "required_night_staff": 0,
             "required_leader_staff": 0,
             "off_days_per_staff": 0,
-            "max_consecutive_work_days": 5,
+            "max_consecutive_work_days": 31,
             "night_shift_next_day_off": True,
         }
         data.update(overrides)
