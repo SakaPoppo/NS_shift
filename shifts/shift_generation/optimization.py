@@ -4,7 +4,7 @@
 
 - 必要リーダー人数・必要能力スタッフ人数のハード制約
 - 最大連勤数のハード制約
-- 必要日勤人数のセミハード制約
+- 必要人数との差分を基準に日勤枠を一括均等化する目的関数
 - 月間夜勤回数差などの公平性目的関数
 """
 
@@ -22,14 +22,13 @@ from ..services import WORKLIKE_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     AbilityBalanceData,
+    DayStaffingBalanceData,
     GenerationContext,
     NightCountBalanceData,
     OptimizationPhaseDefinition,
     OptimizationPhaseResult,
     ShiftGenerationError,
     ShiftOptimizationOutput,
-    StaffingBalanceData,
-    StaffingObjectiveData,
 )
 
 
@@ -39,13 +38,10 @@ logger = logging.getLogger(__name__)
 LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
 CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
-    "total_day_shortage": 25,
-    "max_day_shortage": 10,
-    "total_day_excess": 10,
-    "night_count_balance": 10,
-    "day_count_balance": 10,
-    "ability_balance": 10,
+    "day_staffing_balance": 40,
     "long_streak": 15,
+    "night_count_balance": 10,
+    "ability_balance": 10,
 }
 BASE_STAFF_COUNT = 20
 STAFF_COUNT_STEP = 10
@@ -92,7 +88,14 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         effective_off_days=context.effective_off_days,
     )
 
-    staffing_data = _add_staffing_semi_hard_constraints(
+    _add_required_night_staff_constraints(
+        model=model,
+        staff_members=context.staff_members,
+        month_dates=context.month_dates,
+        shift_vars=shift_vars,
+        effective_rules=context.effective_rules,
+    )
+    day_staffing_balance_data = _build_day_staffing_balance_data(
         model=model,
         staff_members=context.staff_members,
         month_dates=context.month_dates,
@@ -121,13 +124,6 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         month_dates=context.month_dates,
         shift_vars=shift_vars,
     )
-    staffing_balance_data = _build_day_count_balance_objective(
-        model=model,
-        staff_members=context.staff_members,
-        month_dates=context.month_dates,
-        effective_rules=context.effective_rules,
-        staffing_data=staffing_data,
-    )
     ability_balance_data = _build_ability_total_balance_objective(
         model=model,
         staff_members=context.staff_members,
@@ -146,9 +142,8 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
     )
 
     phase_definitions = _build_phase_definitions(
-        staffing_data=staffing_data,
+        day_staffing_balance_data=day_staffing_balance_data,
         night_count_balance_data=night_count_balance_data,
-        staffing_balance_data=staffing_balance_data,
         ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
         staff_count=len(context.staff_members),
@@ -174,9 +169,8 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         solver=solver,
         solver_status=solver_status,
         shift_vars=shift_vars,
-        staffing_data=staffing_data,
+        day_staffing_balance_data=day_staffing_balance_data,
         night_count_balance_data=night_count_balance_data,
-        staffing_balance_data=staffing_balance_data,
         ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
         phase_results=phase_results,
@@ -185,9 +179,8 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
 
 def _build_phase_definitions(
     *,
-    staffing_data: StaffingObjectiveData,
+    day_staffing_balance_data: DayStaffingBalanceData,
     night_count_balance_data: NightCountBalanceData,
-    staffing_balance_data: StaffingBalanceData,
     ability_balance_data: AbilityBalanceData,
     long_streak_terms: list,
     staff_count: int,
@@ -196,13 +189,13 @@ def _build_phase_definitions(
 
     time_scale = _calculate_solver_time_scale(staff_count)
     objectives = [
-        ("total_day_shortage", staffing_data.total_day_shortage),
-        ("max_day_shortage", staffing_data.max_day_shortage),
-        ("total_day_excess", staffing_data.total_day_excess),
-        ("night_count_balance", night_count_balance_data.objective_score),
-        ("day_count_balance", staffing_balance_data.objective_score),
-        ("ability_balance", ability_balance_data.objective_score),
+        (
+            "day_staffing_balance",
+            day_staffing_balance_data.objective_score,
+        ),
         ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
+        ("night_count_balance", night_count_balance_data.objective_score),
+        ("ability_balance", ability_balance_data.objective_score),
     ]
     return [
         OptimizationPhaseDefinition(
@@ -477,47 +470,131 @@ def _add_monthly_off_day_constraints(
         )
 
 
-def _add_staffing_semi_hard_constraints(
+def _add_required_night_staff_constraints(
     *,
     model,
     staff_members,
     month_dates,
     shift_vars,
     effective_rules,
-) -> StaffingObjectiveData:
-    """各日の必要人数を基準に不足・超過を作り、集計データとして返す。"""
-
-    data = StaffingObjectiveData()
-    max_count = len(staff_members)
+) -> None:
+    """日ごとの必要夜勤人数を必須制約として追加する。"""
 
     for target_date in month_dates:
-        actual_day_staff = model.NewIntVar(
+        actual_night_staff = sum(
+            shift_vars[(staff_member.id, target_date)][
+                ShiftResult.ShiftTypeChoices.NIGHT
+            ]
+            for staff_member in staff_members
+        )
+        model.Add(
+            actual_night_staff
+            == effective_rules[target_date].required_night_staff
+        )
+
+
+def _build_day_staffing_balance_data(
+    *,
+    model,
+    staff_members,
+    month_dates,
+    shift_vars,
+    effective_rules,
+) -> DayStaffingBalanceData:
+    """必要人数との差分と、月全体の差分幅・互換集計を構築する。"""
+
+    data = DayStaffingBalanceData()
+    max_count = len(staff_members)
+    delta_lower_bounds = []
+    delta_upper_bounds = []
+
+    for target_date in month_dates:
+        actual_day_count = model.NewIntVar(
             0, max_count, f"actual_day_count_{target_date.isoformat()}"
         )
-        model.Add(actual_day_staff == sum(
-            shift_vars[(staff_member.id, target_date)][ShiftResult.ShiftTypeChoices.DAY]
-            for staff_member in staff_members
-        ))
-        actual_night_staff = sum(
-            shift_vars[(staff_member.id, target_date)][ShiftResult.ShiftTypeChoices.NIGHT]
-            for staff_member in staff_members
+        model.Add(
+            actual_day_count
+            == sum(
+                shift_vars[(staff_member.id, target_date)][
+                    ShiftResult.ShiftTypeChoices.DAY
+                ]
+                for staff_member in staff_members
+            )
         )
-        rule = effective_rules[target_date]
+        required_day_count = effective_rules[target_date].required_day_staff
+        delta_lower_bound = -required_day_count
+        delta_upper_bound = max_count - required_day_count
+        delta_var = model.NewIntVar(
+            delta_lower_bound,
+            delta_upper_bound,
+            f"day_staffing_delta_{target_date.isoformat()}",
+        )
+        model.Add(delta_var == actual_day_count - required_day_count)
 
-        day_shortage = model.NewIntVar(0, max_count, f"day_shortage_{target_date.isoformat()}")
-        day_excess = model.NewIntVar(0, max_count, f"day_excess_{target_date.isoformat()}")
-        model.Add(actual_day_staff + day_shortage - day_excess == rule.required_day_staff)
-        # 夜勤人数は安全上の必須条件なので、不足・超過を許容しない。
-        model.Add(actual_night_staff == rule.required_night_staff)
+        day_shortage = model.NewIntVar(
+            0,
+            max(required_day_count, 0),
+            f"day_shortage_{target_date.isoformat()}",
+        )
+        model.AddMaxEquality(day_shortage, [-delta_var, 0])
+        day_excess = model.NewIntVar(
+            0,
+            max(delta_upper_bound, 0),
+            f"day_excess_{target_date.isoformat()}",
+        )
+        model.AddMaxEquality(day_excess, [delta_var, 0])
 
-        data.actual_day_count_vars[target_date] = actual_day_staff
+        data.actual_day_count_vars[target_date] = actual_day_count
+        data.required_day_counts[target_date] = required_day_count
+        data.day_staffing_delta_vars[target_date] = delta_var
         data.day_shortage_vars[target_date] = day_shortage
         data.day_excess_vars[target_date] = day_excess
+        delta_lower_bounds.append(delta_lower_bound)
+        delta_upper_bounds.append(delta_upper_bound)
 
+    minimum_delta_lower_bound = min(delta_lower_bounds)
+    minimum_delta_upper_bound = min(delta_upper_bounds)
+    maximum_delta_lower_bound = max(delta_lower_bounds)
+    maximum_delta_upper_bound = max(delta_upper_bounds)
+    data.minimum_delta = model.NewIntVar(
+        minimum_delta_lower_bound,
+        minimum_delta_upper_bound,
+        "minimum_day_staffing_delta",
+    )
+    data.maximum_delta = model.NewIntVar(
+        maximum_delta_lower_bound,
+        maximum_delta_upper_bound,
+        "maximum_day_staffing_delta",
+    )
+    model.AddMinEquality(
+        data.minimum_delta,
+        list(data.day_staffing_delta_vars.values()),
+    )
+    model.AddMaxEquality(
+        data.maximum_delta,
+        list(data.day_staffing_delta_vars.values()),
+    )
+    data.delta_range = model.NewIntVar(
+        0,
+        maximum_delta_upper_bound - minimum_delta_lower_bound,
+        "day_staffing_delta_range",
+    )
+    model.Add(data.delta_range == data.maximum_delta - data.minimum_delta)
+
+    data.total_actual_day_count = sum(data.actual_day_count_vars.values())
+    data.total_required_day_count = sum(data.required_day_counts.values())
+    data.total_delta = (
+        data.total_actual_day_count - data.total_required_day_count
+    )
     data.total_day_shortage = sum(data.day_shortage_vars.values())
     data.total_day_excess = sum(data.day_excess_vars.values())
-    data.max_day_shortage = model.NewIntVar(0, max_count, "max_day_shortage")
+    data.max_day_shortage = model.NewIntVar(
+        0,
+        max(max(data.required_day_counts.values()), 0),
+        "max_day_shortage",
+    )
     model.AddMaxEquality(data.max_day_shortage, list(data.day_shortage_vars.values()))
+    data.objective_score = data.delta_range
     return data
 
 
@@ -725,49 +802,6 @@ def _group_dates_by_staffing_condition(month_dates, effective_rules):
         key = _build_staffing_condition_key(effective_rules[target_date])
         groups.setdefault(key, []).append(target_date)
     return groups
-
-
-def _build_day_count_balance_objective(
-    *, model, staff_members, month_dates, effective_rules, staffing_data
-):
-    data = StaffingBalanceData()
-    max_count = len(staff_members)
-    groups = _group_dates_by_staffing_condition(month_dates, effective_rules)
-    for group_index, dates in enumerate(groups.values()):
-        if len(dates) < 2:
-            continue
-        minimum = model.NewIntVar(0, max_count, f"group_day_min_{group_index}")
-        maximum = model.NewIntVar(0, max_count, f"group_day_max_{group_index}")
-        model.AddMinEquality(
-            minimum, [staffing_data.actual_day_count_vars[target_date] for target_date in dates]
-        )
-        model.AddMaxEquality(
-            maximum, [staffing_data.actual_day_count_vars[target_date] for target_date in dates]
-        )
-        violation = model.NewIntVar(
-            0, max_count, f"group_day_balance_violation_{group_index}"
-        )
-        model.Add(violation >= maximum - minimum - 1)
-        data.group_balance_violation_vars.append(violation)
-
-    if data.group_balance_violation_vars:
-        data.max_group_balance_violation = model.NewIntVar(
-            0, max_count, "max_group_day_balance_violation"
-        )
-        model.AddMaxEquality(
-            data.max_group_balance_violation, data.group_balance_violation_vars
-        )
-        data.total_group_balance_violation = sum(data.group_balance_violation_vars)
-        total_upper = len(data.group_balance_violation_vars) * max_count
-        data.objective_score = _build_lexicographic_score([
-            (data.max_group_balance_violation, max_count),
-            (data.total_group_balance_violation, total_upper),
-        ])
-    else:
-        data.max_group_balance_violation = 0
-        data.total_group_balance_violation = 0
-        data.objective_score = 0
-    return data
 
 
 def _add_group_ability_ranges(
