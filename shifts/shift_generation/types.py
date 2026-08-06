@@ -88,13 +88,24 @@ class ShiftGenerationResult:
 
 
 @dataclass
-class StaffingObjectiveData:
+class DayStaffingBalanceData:
+    """必要人数との差分を基準に月内の日勤枠を均等化するデータ。"""
+
     actual_day_count_vars: dict[date, object] = field(default_factory=dict)
+    required_day_counts: dict[date, int] = field(default_factory=dict)
+    day_staffing_delta_vars: dict[date, object] = field(default_factory=dict)
+    minimum_delta: object | None = None
+    maximum_delta: object | None = None
+    delta_range: object | None = None
+    total_actual_day_count: object | None = None
+    total_required_day_count: int = 0
+    total_delta: object | None = None
     day_shortage_vars: dict[date, object] = field(default_factory=dict)
     day_excess_vars: dict[date, object] = field(default_factory=dict)
     total_day_shortage: object | None = None
     total_day_excess: object | None = None
     max_day_shortage: object | None = None
+    objective_score: object | None = None
 
 
 @dataclass
@@ -115,14 +126,6 @@ class OptimizationPhaseDefinition:
     name: str
     objective: object
     max_time_seconds: int
-
-
-@dataclass
-class StaffingBalanceData:
-    group_balance_violation_vars: list = field(default_factory=list)
-    max_group_balance_violation: object | None = None
-    total_group_balance_violation: object | None = None
-    objective_score: object | None = None
 
 
 @dataclass
@@ -154,9 +157,8 @@ class ShiftOptimizationOutput:
     solver: object
     solver_status: str
     shift_vars: dict
-    staffing_data: StaffingObjectiveData
+    day_staffing_balance_data: DayStaffingBalanceData
     night_count_balance_data: NightCountBalanceData
-    staffing_balance_data: StaffingBalanceData
     ability_balance_data: AbilityBalanceData
     long_streak_terms: list
     phase_results: list[OptimizationPhaseResult]

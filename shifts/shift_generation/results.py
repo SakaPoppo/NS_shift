@@ -32,16 +32,23 @@ def _solver_value(solver, expression) -> int:
 def _build_optimization_summary(
     *,
     solver,
-    staffing_data,
+    day_staffing_balance_data,
     night_count_balance_data,
-    staffing_balance_data,
     ability_balance_data,
     long_streak_terms,
     phase_results,
 ):
+    day_count_balance_violation = max(
+        _solver_value(solver, day_staffing_balance_data.delta_range) - 1,
+        0,
+    )
     return ShiftOptimizationSummary(
-        total_day_shortage=_solver_value(solver, staffing_data.total_day_shortage),
-        max_day_shortage=_solver_value(solver, staffing_data.max_day_shortage),
+        total_day_shortage=_solver_value(
+            solver, day_staffing_balance_data.total_day_shortage
+        ),
+        max_day_shortage=_solver_value(
+            solver, day_staffing_balance_data.max_day_shortage
+        ),
         leader_shortage_total=0,
         qualified_staff_shortage_total=0,
         max_consecutive_violation_count=0,
@@ -58,13 +65,11 @@ def _build_optimization_summary(
         night_count_imbalance_violation=_solver_value(
             solver, night_count_balance_data.night_balance_violation
         ),
-        total_day_excess=_solver_value(solver, staffing_data.total_day_excess),
-        max_day_count_balance_violation=_solver_value(
-            solver, staffing_balance_data.max_group_balance_violation
+        total_day_excess=_solver_value(
+            solver, day_staffing_balance_data.total_day_excess
         ),
-        total_day_count_balance_violation=_solver_value(
-            solver, staffing_balance_data.total_group_balance_violation
-        ),
+        max_day_count_balance_violation=day_count_balance_violation,
+        total_day_count_balance_violation=day_count_balance_violation,
         max_day_ability_total_range=_solver_value(
             solver, ability_balance_data.max_day_range
         ),
