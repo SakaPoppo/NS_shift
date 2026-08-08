@@ -16,7 +16,7 @@ from .shift_generation.results import (
     _build_generated_shifts,
     _build_generation_violations,
     _build_optimization_summary,
-    _solver_value,
+    build_day_staffing_adjustment_message,
     format_generation_violation_messages,
 )
 from .shift_generation.types import (
@@ -40,19 +40,6 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         shift_vars=optimization.shift_vars,
         fixed_assignments=context.fixed_assignments,
     )
-    violations = _build_generation_violations(
-        shifts=shifts,
-        staff_members=context.staff_members,
-        month_dates=context.month_dates,
-        effective_rules=context.effective_rules,
-        max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
-        night_shift_counts={
-            staff_id: _solver_value(optimization.solver, count_var)
-            for staff_id, count_var in (
-                optimization.night_count_balance_data.night_count_vars.items()
-            )
-        },
-    )
     optimization_summary = _build_optimization_summary(
         solver=optimization.solver,
         day_staffing_balance_data=optimization.day_staffing_balance_data,
@@ -60,6 +47,17 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         ability_balance_data=optimization.ability_balance_data,
         long_streak_terms=optimization.long_streak_terms,
         phase_results=optimization.phase_results,
+    )
+    violations = _build_generation_violations(
+        optimization_summary=optimization_summary,
+    )
+    day_staffing_adjustment_message = (
+        build_day_staffing_adjustment_message(
+            optimization_summary=optimization_summary,
+            required_day_counts=(
+                optimization.day_staffing_balance_data.required_day_counts.values()
+            ),
+        )
     )
 
     return ShiftGenerationResult(
@@ -70,6 +68,7 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         staff_count=len(context.staff_members),
         target_day_count=len(context.month_dates),
         optimization_summary=optimization_summary,
+        day_staffing_adjustment_message=day_staffing_adjustment_message,
     )
 
 

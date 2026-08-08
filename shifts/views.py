@@ -900,15 +900,20 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 )
                 return render(request, self.template_name, context)
 
+            messages.success(request, "シフトを生成しました。")
+            if generation_result.day_staffing_adjustment_message:
+                messages.info(
+                    request,
+                    generation_result.day_staffing_adjustment_message,
+                )
             if generation_result.has_violations:
-                warning_lines = format_generation_violation_messages(generation_result.violations)
+                warning_lines = format_generation_violation_messages(
+                    generation_result.violations
+                )
                 messages.warning(
                     request,
-                    "シフトを生成しましたが、一部の条件を満たせませんでした。 "
-                    + " ".join(warning_lines),
+                    " ".join(warning_lines),
                 )
-            else:
-                messages.success(request, "シフトを生成しました。")
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
         with transaction.atomic():
