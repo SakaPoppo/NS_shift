@@ -17,12 +17,10 @@ GENERATABLE_SHIFT_TYPES = (
 
 
 class ShiftGenerationViolationType:
-    """画面表示・テスト・目的関数で共有する違反種別。"""
+    """生成後の警告表示とテストで共有する違反種別。"""
 
-    DAY_SHORTAGE = "day_shortage"
-    DAY_EXCESS = "day_excess"
+    DAY_STAFFING_IMBALANCE = "day_staffing_imbalance"
     NIGHT_COUNT_IMBALANCE = "night_count_imbalance"
-    MAX_CONSECUTIVE_WORK = "max_consecutive_work"
 
 
 @dataclass(frozen=True)
@@ -51,6 +49,13 @@ class ShiftGenerationViolation:
 
 @dataclass(frozen=True)
 class ShiftOptimizationSummary:
+    total_actual_day_count: int
+    total_required_day_count: int
+    minimum_day_staffing_delta: int
+    maximum_day_staffing_delta: int
+    day_staffing_delta_range: int
+    minimum_actual_day_count: int
+    maximum_actual_day_count: int
     total_day_shortage: int
     max_day_shortage: int
     leader_shortage_total: int
@@ -81,6 +86,7 @@ class ShiftGenerationResult:
     staff_count: int = 0
     target_day_count: int = 0
     optimization_summary: ShiftOptimizationSummary | None = None
+    day_staffing_adjustment_message: str | None = None
 
     @property
     def has_violations(self) -> bool:

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from ..models import ShiftResult
-from ..services import WORKLIKE_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     GeneratedShift,
     ShiftGenerationViolation,
     ShiftGenerationViolationType,
     ShiftOptimizationSummary,
+)
+
+
+DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX = (
+    "設定した必要日勤数ではシフト最適化ができなかったため、"
 )
 
 
@@ -25,6 +31,70 @@ def format_generation_violation_messages(
     return lines
 
 
+def build_day_staffing_adjustment_message(
+    *,
+    optimization_summary: ShiftOptimizationSummary,
+    required_day_counts: Iterable[int],
+) -> str | None:
+    """必要日勤人数から調整した結果を、月全体で1件の通知にまとめる。"""
+
+    minimum_delta = optimization_summary.minimum_day_staffing_delta
+    maximum_delta = optimization_summary.maximum_day_staffing_delta
+    if minimum_delta == 0 and maximum_delta == 0:
+        return None
+
+    if len(set(required_day_counts)) == 1:
+        actual_count_range = _format_count_range(
+            optimization_summary.minimum_actual_day_count,
+            optimization_summary.maximum_actual_day_count,
+        )
+        return (
+            f"{DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX}"
+            f"日勤数：{actual_count_range}人で最適化を行なっています。"
+        )
+
+    delta_range = _format_day_staffing_delta_range(
+        minimum_delta,
+        maximum_delta,
+    )
+    range_suffix = "" if minimum_delta == maximum_delta else "の範囲"
+    return (
+        f"{DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX}"
+        f"各日の設定人数に対して{delta_range}人{range_suffix}で"
+        "最適化を行なっています。"
+    )
+
+
+def _format_count_range(minimum: int, maximum: int) -> str:
+    if minimum == maximum:
+        return str(minimum)
+    return f"{minimum}〜{maximum}"
+
+
+def _format_day_staffing_delta_range(minimum: int, maximum: int) -> str:
+    """差分の向きが自然に読めるよう、全角符号付きで整形する。"""
+
+    if minimum == maximum:
+        return _format_signed_count(minimum)
+    if minimum > 0:
+        return f"＋{minimum}〜{maximum}"
+    if maximum < 0:
+        return f"－{abs(maximum)}〜{abs(minimum)}"
+    if minimum == 0:
+        return f"0〜＋{maximum}"
+    if maximum == 0:
+        return f"－{abs(minimum)}〜0"
+    return f"－{abs(minimum)}〜＋{maximum}"
+
+
+def _format_signed_count(value: int) -> str:
+    if value > 0:
+        return f"＋{value}"
+    if value < 0:
+        return f"－{abs(value)}"
+    return "0"
+
+
 def _solver_value(solver, expression) -> int:
     return int(solver.Value(expression)) if expression is not None else 0
 
@@ -38,11 +108,32 @@ def _build_optimization_summary(
     long_streak_terms,
     phase_results,
 ):
-    day_count_balance_violation = max(
-        _solver_value(solver, day_staffing_balance_data.delta_range) - 1,
-        0,
+    minimum_delta = _solver_value(
+        solver, day_staffing_balance_data.minimum_delta
     )
+    maximum_delta = _solver_value(
+        solver, day_staffing_balance_data.maximum_delta
+    )
+    delta_range = _solver_value(solver, day_staffing_balance_data.delta_range)
+    actual_day_counts = [
+        _solver_value(solver, actual_count_var)
+        for actual_count_var in (
+            day_staffing_balance_data.actual_day_count_vars.values()
+        )
+    ]
+    day_count_balance_violation = max(delta_range - 1, 0)
     return ShiftOptimizationSummary(
+        total_actual_day_count=_solver_value(
+            solver, day_staffing_balance_data.total_actual_day_count
+        ),
+        total_required_day_count=(
+            day_staffing_balance_data.total_required_day_count
+        ),
+        minimum_day_staffing_delta=minimum_delta,
+        maximum_day_staffing_delta=maximum_delta,
+        day_staffing_delta_range=delta_range,
+        minimum_actual_day_count=min(actual_day_counts, default=0),
+        maximum_actual_day_count=max(actual_day_counts, default=0),
         total_day_shortage=_solver_value(
             solver, day_staffing_balance_data.total_day_shortage
         ),
@@ -131,37 +222,46 @@ def _build_generated_shifts(
 
 def _build_generation_violations(
     *,
-    shifts,
-    staff_members,
-    month_dates,
-    effective_rules,
-    max_consecutive_work_days,
-    night_shift_counts,
-):
-    shift_map = {
-        (generated_shift.staff_member_id, generated_shift.date):
-        generated_shift.shift_type
-        for generated_shift in shifts
-    }
+    optimization_summary: ShiftOptimizationSummary,
+) -> list[ShiftGenerationViolation]:
     violations = []
     violations.extend(
-        _build_staffing_violations(
-            shift_map=shift_map,
-            staff_members=staff_members,
-            month_dates=month_dates,
-            effective_rules=effective_rules,
-        )
+        _build_day_staffing_imbalance_violation(optimization_summary)
     )
     violations.extend(
-        _build_consecutive_work_violations(
-            shift_map=shift_map,
-            staff_members=staff_members,
-            month_dates=month_dates,
-            max_consecutive_work_days=max_consecutive_work_days,
+        _build_night_count_imbalance_violation(
+            optimization_summary.night_shift_counts
         )
     )
-    violations.extend(_build_night_count_imbalance_violation(night_shift_counts))
     return violations
+
+
+def _build_day_staffing_imbalance_violation(
+    optimization_summary: ShiftOptimizationSummary,
+) -> list[ShiftGenerationViolation]:
+    difference = optimization_summary.day_staffing_delta_range
+    if difference <= 1:
+        return []
+    return [
+        ShiftGenerationViolation(
+            violation_type=(
+                ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
+            ),
+            message=(
+                "固定勤務や勤務条件の影響により、日勤人数を均等に配置できませんでした。"
+                "可能な範囲で均等化しています。"
+            ),
+            minimum_count=(
+                optimization_summary.minimum_day_staffing_delta
+            ),
+            maximum_count=(
+                optimization_summary.maximum_day_staffing_delta
+            ),
+            count_difference=difference,
+            allowed_difference=1,
+            amount=difference - 1,
+        )
+    ]
 
 
 def _build_night_count_imbalance_violation(night_shift_counts):
@@ -184,96 +284,5 @@ def _build_night_count_imbalance_violation(night_shift_counts):
             count_difference=difference,
             allowed_difference=1,
             amount=difference - 1,
-        )
-    ]
-
-
-def _build_staffing_violations(
-    *, shift_map, staff_members, month_dates, effective_rules
-):
-    violations = []
-    for target_date in month_dates:
-        actual_day_count = sum(
-            1
-            for staff_member in staff_members
-            if shift_map[(staff_member.id, target_date)]
-            == ShiftResult.ShiftTypeChoices.DAY
-        )
-        rule = effective_rules[target_date]
-        if actual_day_count < rule.required_day_staff:
-            amount = rule.required_day_staff - actual_day_count
-            violations.append(
-                ShiftGenerationViolation(
-                    violation_type=ShiftGenerationViolationType.DAY_SHORTAGE,
-                    message=(
-                        f"{target_date.month}月{target_date.day}日の日勤が{amount}人不足しています。"
-                        f" 必要人数：{rule.required_day_staff}人 / 実際の人数：{actual_day_count}人"
-                    ),
-                    date=target_date,
-                    required_count=rule.required_day_staff,
-                    actual_count=actual_day_count,
-                    amount=amount,
-                )
-            )
-    return violations
-
-
-def _build_consecutive_work_violations(
-    *, shift_map, staff_members, month_dates, max_consecutive_work_days
-):
-    violations = []
-    for staff_member in staff_members:
-        run_start = None
-        run_end = None
-        for current_date in month_dates:
-            shift_type = shift_map[(staff_member.id, current_date)]
-            if shift_type in WORKLIKE_SHIFT_TYPES:
-                if run_start is None:
-                    run_start = current_date
-                run_end = current_date
-                continue
-            if run_start is not None:
-                violations.extend(
-                    _build_single_consecutive_violation(
-                        staff_member=staff_member,
-                        run_start=run_start,
-                        run_end=run_end,
-                        max_consecutive_work_days=max_consecutive_work_days,
-                    )
-                )
-                run_start = None
-                run_end = None
-        if run_start is not None:
-            violations.extend(
-                _build_single_consecutive_violation(
-                    staff_member=staff_member,
-                    run_start=run_start,
-                    run_end=run_end,
-                    max_consecutive_work_days=max_consecutive_work_days,
-                )
-            )
-    return violations
-
-
-def _build_single_consecutive_violation(
-    *, staff_member, run_start, run_end, max_consecutive_work_days
-):
-    consecutive_days = run_end.toordinal() - run_start.toordinal() + 1
-    if consecutive_days <= max_consecutive_work_days:
-        return []
-    return [
-        ShiftGenerationViolation(
-            violation_type=ShiftGenerationViolationType.MAX_CONSECUTIVE_WORK,
-            message=(
-                f"{staff_member.name}さんに最大連勤数を超える勤務があります。"
-                f" {run_start.month}月{run_start.day}日から{run_end.month}月{run_end.day}日まで"
-                f"{consecutive_days}連勤です。 最大連勤数：{max_consecutive_work_days}日"
-            ),
-            staff_member_id=staff_member.id,
-            amount=consecutive_days - max_consecutive_work_days,
-            required_count=max_consecutive_work_days,
-            actual_count=consecutive_days,
-            start_date=run_start,
-            end_date=run_end,
         )
     ]
