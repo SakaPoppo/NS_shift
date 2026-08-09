@@ -55,7 +55,7 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         build_day_staffing_adjustment_message(
             optimization_summary=optimization_summary,
             required_day_counts=(
-                optimization.day_staffing_balance_data.required_day_counts.values()
+                optimization_summary.required_day_counts.values()
             ),
         )
     )
