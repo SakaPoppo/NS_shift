@@ -501,7 +501,7 @@ def _build_day_staffing_balance_data(
     shift_vars,
     effective_rules,
 ) -> DayStaffingBalanceData:
-    """必要人数との差分と、月全体の差分幅・互換集計を構築する。"""
+    """必要人数との差分と、月全体の差分幅・集計を構築する。"""
 
     data = DayStaffingBalanceData()
     max_count = len(staff_members)
@@ -531,24 +531,9 @@ def _build_day_staffing_balance_data(
         )
         model.Add(delta_var == actual_day_count - required_day_count)
 
-        day_shortage = model.NewIntVar(
-            0,
-            max(required_day_count, 0),
-            f"day_shortage_{target_date.isoformat()}",
-        )
-        model.AddMaxEquality(day_shortage, [-delta_var, 0])
-        day_excess = model.NewIntVar(
-            0,
-            max(delta_upper_bound, 0),
-            f"day_excess_{target_date.isoformat()}",
-        )
-        model.AddMaxEquality(day_excess, [delta_var, 0])
-
         data.actual_day_count_vars[target_date] = actual_day_count
         data.required_day_counts[target_date] = required_day_count
         data.day_staffing_delta_vars[target_date] = delta_var
-        data.day_shortage_vars[target_date] = day_shortage
-        data.day_excess_vars[target_date] = day_excess
         delta_lower_bounds.append(delta_lower_bound)
         delta_upper_bounds.append(delta_upper_bound)
 
@@ -586,14 +571,6 @@ def _build_day_staffing_balance_data(
     data.total_delta = (
         data.total_actual_day_count - data.total_required_day_count
     )
-    data.total_day_shortage = sum(data.day_shortage_vars.values())
-    data.total_day_excess = sum(data.day_excess_vars.values())
-    data.max_day_shortage = model.NewIntVar(
-        0,
-        max(max(data.required_day_counts.values()), 0),
-        "max_day_shortage",
-    )
-    model.AddMaxEquality(data.max_day_shortage, list(data.day_shortage_vars.values()))
     data.objective_score = data.delta_range
     return data
 

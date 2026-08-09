@@ -1,4 +1,5 @@
 import csv
+from dataclasses import fields
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -31,7 +32,10 @@ from .shift_generation.results import (
     _build_night_count_imbalance_violation,
     build_day_staffing_adjustment_message,
 )
-from .shift_generation.types import DayStaffingBalanceData
+from .shift_generation.types import (
+    DayStaffingBalanceData,
+    ShiftOptimizationSummary,
+)
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
     WORKLIKE_SHIFT_TYPES,
@@ -1455,10 +1459,14 @@ class ShiftGeneratorTests(TestCase):
         self.create_staff_member()
 
         result = generate_shift(self.shift_plan)
+        summary = result.optimization_summary
+        shortages = [
+            max(-delta, 0) for delta in summary.day_staffing_deltas.values()
+        ]
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.optimization_summary.total_day_shortage, 62)
-        self.assertEqual(result.optimization_summary.max_day_shortage, 2)
+        self.assertEqual(sum(shortages), 62)
+        self.assertEqual(max(shortages), 2)
         self.assertEqual(result.violations, [])
         self.assertFalse(result.has_violations)
         self.assertEqual(
@@ -1496,10 +1504,14 @@ class ShiftGeneratorTests(TestCase):
         )
 
         result = generate_shift(self.shift_plan)
+        total_excess = sum(
+            max(delta, 0)
+            for delta in result.optimization_summary.day_staffing_deltas.values()
+        )
 
         self.assertEqual(result.violations, [])
         self.assertFalse(result.has_violations)
-        self.assertGreater(result.optimization_summary.total_day_excess, 0)
+        self.assertGreater(total_excess, 0)
         self.assertEqual(
             result.day_staffing_adjustment_message,
             "設定した必要日勤数ではシフト最適化ができなかったため、"
@@ -1846,6 +1858,126 @@ class ShiftSoftOptimizationTests(TestCase):
             maximum_actual_day_count=maximum_actual,
         )
 
+    def test_day_staffing_balance_data_keeps_current_optimization_fields(self):
+        self.assertEqual(
+            {item.name for item in fields(DayStaffingBalanceData)},
+            {
+                "actual_day_count_vars",
+                "required_day_counts",
+                "day_staffing_delta_vars",
+                "minimum_delta",
+                "maximum_delta",
+                "delta_range",
+                "total_actual_day_count",
+                "total_required_day_count",
+                "total_delta",
+                "objective_score",
+            },
+        )
+
+    def test_optimization_summary_keeps_current_result_fields(self):
+        self.assertEqual(
+            {item.name for item in fields(ShiftOptimizationSummary)},
+            {
+                "total_actual_day_count",
+                "total_required_day_count",
+                "minimum_day_staffing_delta",
+                "maximum_day_staffing_delta",
+                "day_staffing_delta_range",
+                "minimum_actual_day_count",
+                "maximum_actual_day_count",
+                "actual_day_counts",
+                "required_day_counts",
+                "day_staffing_deltas",
+                "night_shift_count_min",
+                "night_shift_count_max",
+                "night_count_imbalance_violation",
+                "max_day_ability_total_range",
+                "total_day_ability_total_range",
+                "max_night_ability_total_range",
+                "total_night_ability_total_range",
+                "long_streak_penalty",
+                "phase_statuses",
+                "phase_optimal_flags",
+                "night_shift_counts",
+            },
+        )
+
+    def test_optimization_summary_keeps_solved_daily_staffing_values(self):
+        model, _, month_dates, data = self.build_day_staffing_model(
+            required_counts=[6, 6, 8],
+            staff_count=10,
+        )
+        for target_date, actual_count in zip(month_dates, [5, 6, 10]):
+            model.Add(data.actual_day_count_vars[target_date] == actual_count)
+        solver = cp_model.CpSolver()
+
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+
+        summary = shift_results._build_optimization_summary(
+            solver=solver,
+            day_staffing_balance_data=data,
+            night_count_balance_data=SimpleNamespace(
+                night_count_min=None,
+                night_count_max=None,
+                night_balance_violation=None,
+                night_count_vars={},
+            ),
+            ability_balance_data=SimpleNamespace(
+                max_day_range=None,
+                total_day_range=None,
+                max_night_range=None,
+                total_night_range=None,
+            ),
+            long_streak_terms=[],
+            phase_results=[],
+        )
+
+        self.assertEqual(
+            summary.required_day_counts,
+            dict(zip(month_dates, [6, 6, 8])),
+        )
+        self.assertEqual(
+            summary.actual_day_counts,
+            dict(zip(month_dates, [5, 6, 10])),
+        )
+        self.assertEqual(
+            summary.day_staffing_deltas,
+            dict(zip(month_dates, [-1, 0, 2])),
+        )
+        self.assertIsNot(
+            summary.required_day_counts,
+            data.required_day_counts,
+        )
+        self.assertTrue(
+            all(
+                isinstance(value, int)
+                for daily_values in (
+                    summary.required_day_counts,
+                    summary.actual_day_counts,
+                    summary.day_staffing_deltas,
+                )
+                for value in daily_values.values()
+            )
+        )
+        self.assertEqual(summary.total_actual_day_count, 21)
+        self.assertEqual(summary.total_required_day_count, 20)
+        self.assertEqual(summary.minimum_day_staffing_delta, -1)
+        self.assertEqual(summary.maximum_day_staffing_delta, 2)
+        self.assertEqual(summary.day_staffing_delta_range, 3)
+        self.assertEqual(summary.minimum_actual_day_count, 5)
+        self.assertEqual(summary.maximum_actual_day_count, 10)
+
+    def test_day_shortage_can_be_derived_from_delta(self):
+        delta = -2
+
+        self.assertEqual(max(-delta, 0), 2)
+
+    def test_day_excess_can_be_derived_from_delta(self):
+        delta = 3
+
+        self.assertEqual(max(delta, 0), 3)
+
     def test_day_staffing_adjustment_message_is_none_when_every_day_matches(self):
         summary = self.build_day_staffing_summary(
             minimum_delta=0,
@@ -2154,13 +2286,20 @@ class ShiftSoftOptimizationTests(TestCase):
         actual_counts = [
             solver.Value(data.actual_day_count_vars[d]) for d in month_dates
         ]
+        deltas = [
+            solver.Value(data.day_staffing_delta_vars[d])
+            for d in month_dates
+        ]
+        shortages = [max(-delta, 0) for delta in deltas]
+        excesses = [max(delta, 0) for delta in deltas]
         self.assertEqual(sorted(actual_counts), [4, 4, 5, 5])
+        self.assertEqual(sorted(deltas), [-2, -2, -1, -1])
         self.assertEqual(solver.Value(data.delta_range), 1)
-        self.assertEqual(solver.Value(data.total_day_shortage), 6)
-        self.assertEqual(solver.Value(data.total_day_excess), 0)
-        self.assertEqual(solver.Value(data.max_day_shortage), 2)
+        self.assertEqual(sum(shortages), 6)
+        self.assertEqual(sum(excesses), 0)
+        self.assertEqual(max(shortages), 2)
 
-    def test_day_staffing_data_calculates_exact_deltas_and_aggregates(self):
+    def test_day_staffing_data_calculates_exact_source_values_and_totals(self):
         model, _, month_dates, data = self.build_day_staffing_model(
             required_counts=[4, 3, 2],
             staff_count=5,
@@ -2175,23 +2314,12 @@ class ShiftSoftOptimizationTests(TestCase):
             [solver.Value(data.day_staffing_delta_vars[d]) for d in month_dates],
             [-2, 0, 3],
         )
-        self.assertEqual(
-            [solver.Value(data.day_shortage_vars[d]) for d in month_dates],
-            [2, 0, 0],
-        )
-        self.assertEqual(
-            [solver.Value(data.day_excess_vars[d]) for d in month_dates],
-            [0, 0, 3],
-        )
         self.assertEqual(solver.Value(data.minimum_delta), -2)
         self.assertEqual(solver.Value(data.maximum_delta), 3)
         self.assertEqual(solver.Value(data.delta_range), 5)
         self.assertEqual(solver.Value(data.total_actual_day_count), 10)
         self.assertEqual(data.total_required_day_count, 9)
         self.assertEqual(solver.Value(data.total_delta), 1)
-        self.assertEqual(solver.Value(data.total_day_shortage), 2)
-        self.assertEqual(solver.Value(data.total_day_excess), 3)
-        self.assertEqual(solver.Value(data.max_day_shortage), 2)
 
     def test_different_required_counts_are_balanced_by_delta(self):
         model, _, month_dates, data = self.build_day_staffing_model(
@@ -2321,14 +2449,6 @@ class ShiftSoftOptimizationTests(TestCase):
                 if shift.date == fixed_date
             )
         )
-        self.assertEqual(
-            result.optimization_summary.max_day_count_balance_violation,
-            2,
-        )
-        self.assertEqual(
-            result.optimization_summary.total_day_count_balance_violation,
-            2,
-        )
         summary = result.optimization_summary
         self.assertEqual(summary.total_actual_day_count, 56)
         self.assertEqual(summary.total_required_day_count, 56)
@@ -2337,6 +2457,22 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(summary.day_staffing_delta_range, 3)
         self.assertEqual(summary.minimum_actual_day_count, 1)
         self.assertEqual(summary.maximum_actual_day_count, 4)
+        self.assertEqual(
+            set(summary.actual_day_counts),
+            set(summary.required_day_counts),
+        )
+        self.assertEqual(
+            set(summary.actual_day_counts),
+            set(summary.day_staffing_deltas),
+        )
+        self.assertTrue(
+            all(
+                summary.actual_day_counts[target_date]
+                - summary.required_day_counts[target_date]
+                == summary.day_staffing_deltas[target_date]
+                for target_date in summary.actual_day_counts
+            )
+        )
         day_staffing_violations = [
             violation
             for violation in result.violations
@@ -2358,10 +2494,9 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(
             solver.Value(data.day_staffing_delta_vars[month_dates[0]]), -3
         )
-        self.assertEqual(
-            solver.Value(data.day_shortage_vars[month_dates[0]]), 3
-        )
-        self.assertEqual(solver.Value(data.day_excess_vars[month_dates[0]]), 0)
+        delta = solver.Value(data.day_staffing_delta_vars[month_dates[0]])
+        self.assertEqual(max(-delta, 0), 3)
+        self.assertEqual(max(delta, 0), 0)
         self.assertEqual(solver.Value(data.delta_range), 0)
 
     def test_required_leader_and_qualified_staff_hard_constraints_are_satisfied(self):
@@ -2387,15 +2522,11 @@ class ShiftSoftOptimizationTests(TestCase):
         )
 
         result = generate_shift(self.shift_plan)
-        summary = result.optimization_summary
         shift_map = {
             (shift.staff_member_id, shift.date): shift.shift_type
             for shift in result.shifts
         }
 
-        self.assertEqual(summary.leader_shortage_total, 0)
-        self.assertEqual(summary.qualified_staff_shortage_total, 0)
-        self.assertEqual(summary.max_consecutive_violation_count, 0)
         self.assertTrue(all(
             shift_map[(leader.id, target_date)]
             == ShiftResult.ShiftTypeChoices.DAY
@@ -2495,14 +2626,6 @@ class ShiftSoftOptimizationTests(TestCase):
                 "night_count_balance",
                 "ability_balance",
             ],
-        )
-        self.assertTrue(
-            {
-                "total_day_shortage",
-                "max_day_shortage",
-                "total_day_excess",
-                "day_count_balance",
-            }.isdisjoint(phase.name for phase in phase_definitions)
         )
         self.assertTrue(all(
             phase.max_time_seconds
@@ -2800,14 +2923,6 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(set(summary.phase_optimal_flags), expected_phases)
         self.assertIn("day_staffing_balance", summary.phase_statuses)
         self.assertIn("night_count_balance", summary.phase_statuses)
-        for removed_phase in (
-            "total_day_shortage",
-            "max_day_shortage",
-            "total_day_excess",
-            "day_count_balance",
-            "safety",
-        ):
-            self.assertNotIn(removed_phase, summary.phase_statuses)
         self.assertTrue(
             all(status in {"OPTIMAL", "FEASIBLE"} for status in summary.phase_statuses.values())
         )
@@ -2826,7 +2941,6 @@ class ShiftSoftOptimizationTests(TestCase):
             staff_member.save(update_fields=["ability_level"])
 
         summary = generate_shift(self.shift_plan).optimization_summary
-        self.assertEqual(summary.total_day_shortage, 0)
         self.assertEqual(summary.max_day_ability_total_range, 0)
         self.assertEqual(summary.total_day_ability_total_range, 0)
         self.assertFalse(
@@ -2865,7 +2979,6 @@ class ShiftSoftOptimizationTests(TestCase):
             )
 
         summary = generate_shift(self.shift_plan).optimization_summary
-        self.assertEqual(summary.total_day_shortage, 0)
         self.assertGreaterEqual(summary.long_streak_penalty, LONG_STREAK_WEIGHTS["at_max"])
 
 

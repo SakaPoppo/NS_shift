@@ -56,17 +56,12 @@ class ShiftOptimizationSummary:
     day_staffing_delta_range: int
     minimum_actual_day_count: int
     maximum_actual_day_count: int
-    total_day_shortage: int
-    max_day_shortage: int
-    leader_shortage_total: int
-    qualified_staff_shortage_total: int
-    max_consecutive_violation_count: int
+    actual_day_counts: dict[date, int]
+    required_day_counts: dict[date, int]
+    day_staffing_deltas: dict[date, int]
     night_shift_count_min: int | None
     night_shift_count_max: int | None
     night_count_imbalance_violation: int
-    total_day_excess: int
-    max_day_count_balance_violation: int
-    total_day_count_balance_violation: int
     max_day_ability_total_range: int
     total_day_ability_total_range: int
     max_night_ability_total_range: int
@@ -106,11 +101,6 @@ class DayStaffingBalanceData:
     total_actual_day_count: object | None = None
     total_required_day_count: int = 0
     total_delta: object | None = None
-    day_shortage_vars: dict[date, object] = field(default_factory=dict)
-    day_excess_vars: dict[date, object] = field(default_factory=dict)
-    total_day_shortage: object | None = None
-    total_day_excess: object | None = None
-    max_day_shortage: object | None = None
     objective_score: object | None = None
 
 
