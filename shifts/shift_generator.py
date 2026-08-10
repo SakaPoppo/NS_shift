@@ -17,6 +17,7 @@ from .shift_generation.results import (
     _build_generation_violations,
     _build_optimization_summary,
     build_day_staffing_adjustment_message,
+    build_optimization_incomplete_message,
     format_generation_violation_messages,
 )
 from .shift_generation.types import (
@@ -59,6 +60,11 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
             ),
         )
     )
+    optimization_incomplete_message = (
+        build_optimization_incomplete_message(
+            optimization_summary=optimization_summary,
+        )
+    )
 
     return ShiftGenerationResult(
         status="success",
@@ -69,6 +75,7 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         target_day_count=len(context.month_dates),
         optimization_summary=optimization_summary,
         day_staffing_adjustment_message=day_staffing_adjustment_message,
+        optimization_incomplete_message=optimization_incomplete_message,
     )
 
 

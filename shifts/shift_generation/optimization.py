@@ -43,6 +43,8 @@ PHASE_TIME_LIMITS = {
     "night_count_balance": 10,
     "ability_balance": 10,
 }
+REQUIRED_OPTIMIZATION_PHASES = {"day_staffing_balance"}
+SUCCESSFUL_OPTIMIZATION_STATUSES = {"OPTIMAL", "FEASIBLE"}
 BASE_STAFF_COUNT = 20
 STAFF_COUNT_STEP = 10
 TIME_SCALE_PER_STEP = 0.25
@@ -254,8 +256,9 @@ def _run_optimization_phases(
     last_successful_solver = None
     last_successful_status = None
     last_successful_phase_name = None
+    completed_successful_phase_names = set()
 
-    for phase in phase_definitions:
+    for phase_index, phase in enumerate(phase_definitions):
         if last_successful_solver is not None:
             _add_shift_solution_hints(
                 model=model,
@@ -269,9 +272,44 @@ def _run_optimization_phases(
             max_time_seconds=phase.max_time_seconds,
         )
         phase_results.append(result)
+
+        if result.status == "UNKNOWN":
+            if (
+                last_successful_solver is None
+                or not REQUIRED_OPTIMIZATION_PHASES.issubset(
+                    completed_successful_phase_names
+                )
+            ):
+                raise ShiftGenerationError(
+                    _build_solver_error_message(result.status)
+                )
+            phase_results.extend(
+                OptimizationPhaseResult(
+                    name=remaining_phase.name,
+                    status="NOT_RUN",
+                    objective_value=None,
+                    optimal=False,
+                    solver=None,
+                )
+                for remaining_phase in phase_definitions[phase_index + 1 :]
+            )
+            logger.warning(
+                "shift optimization fallback stopped_phase=%s "
+                "last_successful_phase=%s status=%s",
+                phase.name,
+                last_successful_phase_name,
+                last_successful_status,
+            )
+            break
+
+        if result.status not in SUCCESSFUL_OPTIMIZATION_STATUSES:
+            raise ShiftGenerationError(
+                _build_solver_error_message(result.status)
+            )
         last_successful_solver = result.solver
         last_successful_status = result.status
         last_successful_phase_name = result.name
+        completed_successful_phase_names.add(result.name)
 
     if last_successful_solver is None or last_successful_status is None:
         raise ShiftGenerationError("有効な最適化結果を取得できませんでした。")
@@ -307,6 +345,15 @@ def _solve_and_fix_objective(
         solver.WallTime(),
         max_time_seconds,
     )
+    if status == cp_model.UNKNOWN:
+        model.ClearObjective()
+        return OptimizationPhaseResult(
+            name=phase_name,
+            status=status_name,
+            objective_value=None,
+            optimal=False,
+            solver=None,
+        )
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise ShiftGenerationError(_build_solver_error_message(status_name))
     objective_value = int(round(solver.ObjectiveValue()))

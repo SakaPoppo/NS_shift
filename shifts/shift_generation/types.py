@@ -82,6 +82,7 @@ class ShiftGenerationResult:
     target_day_count: int = 0
     optimization_summary: ShiftOptimizationSummary | None = None
     day_staffing_adjustment_message: str | None = None
+    optimization_incomplete_message: str | None = None
 
     @property
     def has_violations(self) -> bool:
@@ -141,9 +142,9 @@ class AbilityBalanceData:
 class OptimizationPhaseResult:
     name: str
     status: str
-    objective_value: int
+    objective_value: int | None
     optimal: bool
-    solver: object
+    solver: object | None
 
 
 @dataclass(frozen=True)
