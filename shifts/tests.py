@@ -2,7 +2,7 @@ import csv
 from dataclasses import fields
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
@@ -31,9 +31,11 @@ from .shift_generation.results import (
     _build_day_staffing_imbalance_violation,
     _build_night_count_imbalance_violation,
     build_day_staffing_adjustment_message,
+    build_optimization_incomplete_message,
 )
 from .shift_generation.types import (
     DayStaffingBalanceData,
+    OptimizationPhaseResult,
     ShiftOptimizationSummary,
 )
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule

@@ -15,6 +15,23 @@ from .types import (
 DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX = (
     "設定した必要日勤数ではシフト最適化ができなかったため、"
 )
+OPTIMIZATION_INCOMPLETE_MESSAGES = {
+    "long_streak": (
+        "処理時間の上限に達したため、"
+        "連勤配置・夜勤回数・能力配置の調整を完了できませんでした。"
+        "日勤人数の均等化まで完了したシフトを使用しています。"
+    ),
+    "night_count_balance": (
+        "処理時間の上限に達したため、"
+        "夜勤回数・能力配置の均等化を完了できませんでした。"
+        "それ以前の条件を反映したシフトを使用しています。"
+    ),
+    "ability_balance": (
+        "処理時間の上限に達したため、"
+        "能力配置の均等化を完了できませんでした。"
+        "それ以前の条件を反映したシフトを使用しています。"
+    ),
+}
 
 
 def format_generation_violation_messages(
@@ -63,6 +80,17 @@ def build_day_staffing_adjustment_message(
         f"各日の設定人数に対して{delta_range}人{range_suffix}で"
         "最適化を行なっています。"
     )
+
+
+def build_optimization_incomplete_message(
+    *, optimization_summary: ShiftOptimizationSummary
+) -> str | None:
+    """後半フェーズのUNKNOWNで採用した途中解について通知する。"""
+
+    for phase_name, message in OPTIMIZATION_INCOMPLETE_MESSAGES.items():
+        if optimization_summary.phase_statuses.get(phase_name) == "UNKNOWN":
+            return message
+    return None
 
 
 def _format_count_range(minimum: int, maximum: int) -> str:

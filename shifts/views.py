@@ -906,6 +906,11 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     request,
                     generation_result.day_staffing_adjustment_message,
                 )
+            if generation_result.optimization_incomplete_message:
+                messages.warning(
+                    request,
+                    generation_result.optimization_incomplete_message,
+                )
             if generation_result.has_violations:
                 warning_lines = format_generation_violation_messages(
                     generation_result.violations
