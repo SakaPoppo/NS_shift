@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 from ortools.sat.python import cp_model
 
@@ -34,6 +34,7 @@ from .shift_generation.results import (
     build_optimization_incomplete_message,
 )
 from .shift_generation.types import (
+    AbilityDistributionData,
     DayStaffingBalanceData,
     OptimizationPhaseResult,
     ShiftOptimizationSummary,
@@ -3504,6 +3505,336 @@ class ShiftSoftOptimizationTests(TestCase):
 
         summary = generate_shift(self.shift_plan).optimization_summary
         self.assertGreaterEqual(summary.long_streak_penalty, LONG_STREAK_WEIGHTS["at_max"])
+
+
+class AbilityDistributionObjectiveTests(SimpleTestCase):
+    target_date = date(2026, 2, 1)
+
+    def solve_distribution(
+        self,
+        *,
+        ability_levels,
+        assigned_indices=None,
+        assignments_by_date=None,
+        eligible_indices=None,
+        shift_type=ShiftResult.ShiftTypeChoices.DAY,
+    ):
+        staff_members = [
+            SimpleNamespace(id=index + 1, ability_level=ability_level)
+            for index, ability_level in enumerate(ability_levels)
+        ]
+        if eligible_indices is None:
+            eligible_indices = range(len(staff_members))
+        eligible_indices = tuple(eligible_indices)
+        eligible_staff = [
+            staff_members[index] for index in eligible_indices
+        ]
+        if assignments_by_date is None:
+            assignments_by_date = {
+                self.target_date: assigned_indices or [],
+            }
+        assignments_by_date = {
+            target_date: set(indices)
+            for target_date, indices in assignments_by_date.items()
+        }
+        model = cp_model.CpModel()
+        shift_vars = {}
+        for target_date, date_assignments in assignments_by_date.items():
+            for index, staff_member in enumerate(staff_members):
+                shift_var = model.NewBoolVar(
+                    f"shift_{staff_member.id}_{target_date}_{shift_type}"
+                )
+                model.Add(shift_var == int(index in date_assignments))
+                shift_vars[(staff_member.id, target_date)] = {
+                    shift_type: shift_var,
+                }
+
+        data = shift_optimization._build_ability_distribution_objective(
+            model=model,
+            month_dates=list(assignments_by_date),
+            shift_vars=shift_vars,
+            shift_type=shift_type,
+            eligible_staff=eligible_staff,
+        )
+        model.Minimize(data.objective_score)
+        solver = cp_model.CpSolver()
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+        self.assertIsInstance(data, AbilityDistributionData)
+        return solver, data
+
+    def threshold_values(self, solver, variables):
+        return tuple(
+            solver.Value(variables[(self.target_date, threshold)])
+            for threshold in shift_optimization.ABILITY_THRESHOLDS
+        )
+
+    def test_counts_staff_at_or_above_each_ability_threshold(self):
+        solver, data = self.solve_distribution(
+            ability_levels=[5, 4, 2],
+            assigned_indices=[0, 1, 2],
+        )
+
+        self.assertEqual(
+            data.thresholds,
+            shift_optimization.ABILITY_THRESHOLDS,
+        )
+        self.assertEqual(
+            self.threshold_values(solver, data.threshold_count_vars),
+            (2, 2, 1),
+        )
+
+    def test_distinguishes_distributions_with_the_same_ability_total(self):
+        ability_levels = [5, 1, 3, 3, 3]
+        first_solver, first_data = self.solve_distribution(
+            ability_levels=ability_levels,
+            assigned_indices=[0, 1],
+        )
+        second_solver, second_data = self.solve_distribution(
+            ability_levels=ability_levels,
+            assigned_indices=[2, 3],
+        )
+
+        self.assertEqual(sum(ability_levels[index] for index in (0, 1)), 6)
+        self.assertEqual(sum(ability_levels[index] for index in (2, 3)), 6)
+        self.assertEqual(
+            self.threshold_values(
+                first_solver, first_data.threshold_count_vars
+            ),
+            (1, 1, 1),
+        )
+        self.assertEqual(
+            self.threshold_values(
+                second_solver, second_data.threshold_count_vars
+            ),
+            (2, 0, 0),
+        )
+        self.assertNotEqual(
+            first_solver.Value(first_data.objective_score),
+            second_solver.Value(second_data.objective_score),
+        )
+
+    def test_proportional_distribution_has_zero_deviation(self):
+        solver, data = self.solve_distribution(
+            ability_levels=[4] * 5 + [2] * 5,
+            assigned_indices=[0, 5],
+        )
+
+        self.assertEqual(
+            solver.Value(data.deviation_vars[(self.target_date, 4)]),
+            0,
+        )
+        self.assertEqual(solver.Value(data.max_deviation), 0)
+        self.assertEqual(solver.Value(data.total_deviation), 0)
+        self.assertEqual(solver.Value(data.objective_score), 0)
+
+    def test_fractional_ideal_uses_equal_integer_deviations(self):
+        first_solver, first_data = self.solve_distribution(
+            ability_levels=[4] * 5 + [2] * 5,
+            assigned_indices=[0, 5, 6],
+        )
+        second_solver, second_data = self.solve_distribution(
+            ability_levels=[4] * 5 + [2] * 5,
+            assigned_indices=[0, 1, 5],
+        )
+
+        first_deviation = first_solver.Value(
+            first_data.deviation_vars[(self.target_date, 4)]
+        )
+        second_deviation = second_solver.Value(
+            second_data.deviation_vars[(self.target_date, 4)]
+        )
+        self.assertEqual(first_deviation, 5)
+        self.assertEqual(second_deviation, 5)
+        self.assertEqual(
+            first_solver.Value(first_data.objective_score),
+            second_solver.Value(second_data.objective_score),
+        )
+
+    def test_penalty_increases_as_distribution_moves_from_ideal(self):
+        assignments = (
+            [0, 1, 5, 6],
+            [0, 5, 6, 7],
+            [5, 6, 7, 8],
+        )
+        deviations = []
+        objective_scores = []
+        for assigned_indices in assignments:
+            solver, data = self.solve_distribution(
+                ability_levels=[4] * 5 + [2] * 5,
+                assigned_indices=assigned_indices,
+            )
+            deviations.append(
+                solver.Value(
+                    data.deviation_vars[(self.target_date, 4)]
+                )
+            )
+            objective_scores.append(solver.Value(data.objective_score))
+
+        self.assertEqual(deviations, [0, 10, 20])
+        self.assertLess(objective_scores[0], objective_scores[1])
+        self.assertLess(objective_scores[1], objective_scores[2])
+
+    def test_actual_shift_count_changes_the_proportional_target(self):
+        first_solver, first_data = self.solve_distribution(
+            ability_levels=[4] * 5 + [2] * 5,
+            assigned_indices=[0, 5, 6],
+        )
+        second_solver, second_data = self.solve_distribution(
+            ability_levels=[4] * 5 + [2] * 5,
+            assigned_indices=[0, 5, 6, 7, 8, 9],
+        )
+
+        self.assertEqual(
+            first_solver.Value(
+                first_data.actual_shift_count_vars[self.target_date]
+            ),
+            3,
+        )
+        self.assertEqual(
+            second_solver.Value(
+                second_data.actual_shift_count_vars[self.target_date]
+            ),
+            6,
+        )
+        self.assertEqual(
+            first_solver.Value(
+                first_data.threshold_count_vars[(self.target_date, 4)]
+            ),
+            1,
+        )
+        self.assertEqual(
+            second_solver.Value(
+                second_data.threshold_count_vars[(self.target_date, 4)]
+            ),
+            1,
+        )
+        self.assertEqual(
+            first_solver.Value(
+                first_data.deviation_vars[(self.target_date, 4)]
+            ),
+            5,
+        )
+        self.assertEqual(
+            second_solver.Value(
+                second_data.deviation_vars[(self.target_date, 4)]
+            ),
+            20,
+        )
+
+    def test_aggregates_every_date_and_threshold_lexicographically(self):
+        second_date = date(2026, 2, 2)
+        solver, data = self.solve_distribution(
+            ability_levels=[5, 4, 3, 2, 1],
+            assignments_by_date={
+                self.target_date: [0, 3],
+                second_date: [0, 1, 4],
+            },
+        )
+
+        expected_deviations = {
+            (self.target_date, 3): 1,
+            (self.target_date, 4): 1,
+            (self.target_date, 5): 3,
+            (second_date, 3): 1,
+            (second_date, 4): 4,
+            (second_date, 5): 2,
+        }
+        self.assertEqual(
+            {
+                key: solver.Value(variable)
+                for key, variable in data.deviation_vars.items()
+            },
+            expected_deviations,
+        )
+        self.assertEqual(solver.Value(data.max_deviation), 4)
+        self.assertEqual(solver.Value(data.total_deviation), 12)
+        self.assertEqual(solver.Value(data.objective_score), 144)
+
+    def test_eligible_population_can_be_changed_by_the_caller(self):
+        all_solver, all_data = self.solve_distribution(
+            ability_levels=[5, 1, 1, 1],
+            assigned_indices=[0, 1],
+            eligible_indices=[0, 1, 2, 3],
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        )
+        subset_solver, subset_data = self.solve_distribution(
+            ability_levels=[5, 1, 1, 1],
+            assigned_indices=[0, 1],
+            eligible_indices=[0, 1],
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        )
+
+        self.assertEqual(all_data.eligible_staff_count, 4)
+        self.assertEqual(subset_data.eligible_staff_count, 2)
+        self.assertEqual(all_data.eligible_above_counts[4], 1)
+        self.assertEqual(subset_data.eligible_above_counts[4], 1)
+        self.assertEqual(
+            all_solver.Value(
+                all_data.actual_shift_count_vars[self.target_date]
+            ),
+            2,
+        )
+        self.assertEqual(
+            subset_solver.Value(
+                subset_data.actual_shift_count_vars[self.target_date]
+            ),
+            2,
+        )
+        self.assertEqual(
+            all_solver.Value(
+                all_data.deviation_vars[(self.target_date, 4)]
+            ),
+            2,
+        )
+        self.assertEqual(
+            subset_solver.Value(
+                subset_data.deviation_vars[(self.target_date, 4)]
+            ),
+            0,
+        )
+
+    def test_builder_uses_the_supplied_shift_type(self):
+        solver, data = self.solve_distribution(
+            ability_levels=[5, 2, 1],
+            assigned_indices=[0, 1],
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+
+        self.assertEqual(data.shift_type, ShiftResult.ShiftTypeChoices.NIGHT)
+        self.assertEqual(
+            solver.Value(data.actual_shift_count_vars[self.target_date]),
+            2,
+        )
+        self.assertEqual(
+            self.threshold_values(solver, data.threshold_count_vars),
+            (1, 1, 1),
+        )
+        self.assertEqual(
+            self.threshold_values(solver, data.deviation_vars),
+            (1, 1, 1),
+        )
+
+    def test_empty_eligible_population_has_zero_distribution(self):
+        solver, data = self.solve_distribution(
+            ability_levels=[5],
+            assigned_indices=[],
+            eligible_indices=[],
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+
+        self.assertEqual(data.shift_type, ShiftResult.ShiftTypeChoices.NIGHT)
+        self.assertEqual(data.eligible_staff_count, 0)
+        self.assertEqual(
+            solver.Value(data.actual_shift_count_vars[self.target_date]),
+            0,
+        )
+        self.assertEqual(
+            self.threshold_values(solver, data.threshold_count_vars),
+            (0, 0, 0),
+        )
+        self.assertEqual(solver.Value(data.max_deviation), 0)
+        self.assertEqual(solver.Value(data.total_deviation), 0)
+        self.assertEqual(solver.Value(data.objective_score), 0)
 
 
 class ShiftGenerationPersistenceTests(TestCase):

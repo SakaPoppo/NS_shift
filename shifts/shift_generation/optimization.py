@@ -22,6 +22,7 @@ from ..services import OFF_LIKE_SHIFT_TYPES, WORKLIKE_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     AbilityBalanceData,
+    AbilityDistributionData,
     DayStaffingBalanceData,
     GenerationContext,
     NightCountBalanceData,
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
+ABILITY_THRESHOLDS = (3, 4, 5)
 CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
     "day_staffing_balance": 40,
@@ -893,6 +895,115 @@ def _build_lexicographic_score(components):
         score += expression * multiplier
         multiplier *= upper_bound + 1
     return score
+
+
+def _build_ability_distribution_objective(
+    *,
+    model,
+    month_dates,
+    shift_vars,
+    shift_type,
+    eligible_staff,
+):
+    """実勤務内の累積能力分布を、指定母集団の比率へ近づける。
+
+    eligible_staff には、対象勤務へ配置可能な全スタッフを渡す。
+    """
+
+    month_dates = list(month_dates)
+    eligible_staff = list(eligible_staff)
+    eligible_staff_count = len(eligible_staff)
+    data = AbilityDistributionData(
+        shift_type=shift_type,
+        thresholds=ABILITY_THRESHOLDS,
+        eligible_staff_count=eligible_staff_count,
+        eligible_above_counts={
+            threshold: sum(
+                staff.ability_level >= threshold
+                for staff in eligible_staff
+            )
+            for threshold in ABILITY_THRESHOLDS
+        },
+    )
+    deviation_upper_bounds = {
+        threshold: above_count * (eligible_staff_count - above_count)
+        for threshold, above_count in data.eligible_above_counts.items()
+    }
+
+    for target_date in month_dates:
+        actual_shift_count = model.NewIntVar(
+            0,
+            eligible_staff_count,
+            f"{shift_type}_actual_staff_count_{target_date.isoformat()}",
+        )
+        model.Add(
+            actual_shift_count
+            == sum(
+                shift_vars[(staff.id, target_date)][shift_type]
+                for staff in eligible_staff
+            )
+        )
+        data.actual_shift_count_vars[target_date] = actual_shift_count
+
+        for threshold in ABILITY_THRESHOLDS:
+            eligible_above_count = data.eligible_above_counts[threshold]
+            threshold_count = model.NewIntVar(
+                0,
+                eligible_above_count,
+                f"{shift_type}_ability_gte_{threshold}_count_"
+                f"{target_date.isoformat()}",
+            )
+            model.Add(
+                threshold_count
+                == sum(
+                    shift_vars[(staff.id, target_date)][shift_type]
+                    for staff in eligible_staff
+                    if staff.ability_level >= threshold
+                )
+            )
+            key = (target_date, threshold)
+            data.threshold_count_vars[key] = threshold_count
+
+            deviation = model.NewIntVar(
+                0,
+                deviation_upper_bounds[threshold],
+                f"{shift_type}_ability_gte_{threshold}_deviation_"
+                f"{target_date.isoformat()}",
+            )
+            model.AddAbsEquality(
+                deviation,
+                threshold_count * eligible_staff_count
+                - actual_shift_count * eligible_above_count,
+            )
+            data.deviation_vars[key] = deviation
+
+    max_deviation_upper_bound = max(
+        deviation_upper_bounds.values(), default=0
+    )
+    total_deviation_upper_bound = len(month_dates) * sum(
+        deviation_upper_bounds.values()
+    )
+    data.max_deviation = _add_max_or_zero(
+        model,
+        list(data.deviation_vars.values()),
+        max_deviation_upper_bound,
+        f"{shift_type}_ability_distribution_max_deviation",
+    )
+    data.total_deviation = model.NewIntVar(
+        0,
+        total_deviation_upper_bound,
+        f"{shift_type}_ability_distribution_total_deviation",
+    )
+    model.Add(
+        data.total_deviation == sum(data.deviation_vars.values())
+    )
+    data.objective_score = _build_lexicographic_score(
+        [
+            (data.max_deviation, max_deviation_upper_bound),
+            (data.total_deviation, total_deviation_upper_bound),
+        ]
+    )
+    return data
 
 
 def _build_staffing_condition_key(rule):
