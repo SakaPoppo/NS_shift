@@ -206,6 +206,22 @@ def _validate_fixed_assignments(
                     raise ShiftGenerationError(
                         f"{staff.name} の {target_date:%Y-%m-%d} の明けは、前日の固定勤務と整合しません。"
                     )
+            if (
+                fixed_shift_type == ShiftResult.ShiftTypeChoices.AFTER_NIGHT
+                and index == 0
+                and len(month_dates) >= 2
+                and not effective_rules[target_date].night_shift_next_day_off
+            ):
+                next_shift_type = fixed_assignments.get(
+                    (staff.id, month_dates[index + 1])
+                )
+                if next_shift_type is not None and next_shift_type not in (
+                    OFF_LIKE_SHIFT_TYPES
+                    | {ShiftResult.ShiftTypeChoices.NIGHT}
+                ):
+                    raise ShiftGenerationError(
+                        f"{staff.name} の {target_date:%Y-%m-%d} の明けは、翌日の固定勤務と整合しません。"
+                    )
             if fixed_shift_type != ShiftResult.ShiftTypeChoices.NIGHT:
                 continue
             if index + 1 >= len(month_dates):
@@ -234,9 +250,9 @@ def _validate_fixed_assignments(
                     raise ShiftGenerationError(
                         f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、2日後の固定勤務と整合しません。"
                     )
-            elif (
-                third_shift_type is not None
-                and third_shift_type != ShiftResult.ShiftTypeChoices.NIGHT
+            elif third_shift_type is not None and third_shift_type not in (
+                OFF_LIKE_SHIFT_TYPES
+                | {ShiftResult.ShiftTypeChoices.NIGHT}
             ):
                 raise ShiftGenerationError(
                     f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、2日後の固定勤務と整合しません。"

@@ -18,7 +18,7 @@ from ortools.sat.python import cp_model
 from staff.models import StaffMember
 
 from ..models import ShiftResult
-from ..services import WORKLIKE_SHIFT_TYPES
+from ..services import OFF_LIKE_SHIFT_TYPES, WORKLIKE_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     AbilityBalanceData,
@@ -73,7 +73,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         month_dates=context.month_dates,
         shift_vars=shift_vars,
     )
-    _add_night_pattern_constraints(
+    night_after_night_pattern_terms = _add_night_pattern_constraints(
         model=model,
         staff_members=context.staff_members,
         month_dates=context.month_dates,
@@ -125,6 +125,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         staff_members=context.staff_members,
         month_dates=context.month_dates,
         shift_vars=shift_vars,
+        night_after_night_pattern_terms=night_after_night_pattern_terms,
     )
     ability_balance_data = _build_ability_total_balance_objective(
         model=model,
@@ -438,9 +439,56 @@ def _add_night_pattern_constraints(
     fixed_assignments,
     effective_rules,
 ):
-    """夜勤→明け→その次の勤務、という連動制約を追加する。"""
+    """夜勤後の勤務を連動させ、False時の明け翌日夜勤を月1回に制限する。
+
+    False時に作成したパターン変数は、既存フェーズで回数を最小化するため返す。
+    """
+
+    night_after_night_pattern_terms = []
 
     for staff_member in staff_members:
+        staff_pattern_terms = []
+        first_date = month_dates[0]
+        first_key = (staff_member.id, first_date)
+        if (
+            len(month_dates) >= 2
+            and fixed_assignments.get(first_key)
+            == ShiftResult.ShiftTypeChoices.AFTER_NIGHT
+            and not effective_rules[first_date].night_shift_next_day_off
+        ):
+            second_date = month_dates[1]
+            second_key = (staff_member.id, second_date)
+            first_after_night_var = shift_vars[first_key][
+                ShiftResult.ShiftTypeChoices.AFTER_NIGHT
+            ]
+            second_fixed_shift_type = fixed_assignments.get(second_key)
+            if second_fixed_shift_type is not None:
+                if second_fixed_shift_type not in (
+                    OFF_LIKE_SHIFT_TYPES
+                    | {ShiftResult.ShiftTypeChoices.NIGHT}
+                ):
+                    model.Add(first_after_night_var == 0)
+            else:
+                model.Add(
+                    first_after_night_var
+                    <= shift_vars[second_key][ShiftResult.ShiftTypeChoices.OFF]
+                    + shift_vars[second_key][ShiftResult.ShiftTypeChoices.NIGHT]
+                )
+
+            second_night_var = shift_vars[second_key][
+                ShiftResult.ShiftTypeChoices.NIGHT
+            ]
+            boundary_pattern_var = model.NewBoolVar(
+                f"night_after_night_{staff_member.id}_month_boundary"
+            )
+            model.Add(boundary_pattern_var <= first_after_night_var)
+            model.Add(boundary_pattern_var <= second_night_var)
+            model.Add(
+                boundary_pattern_var
+                >= first_after_night_var + second_night_var - 1
+            )
+            staff_pattern_terms.append(boundary_pattern_var)
+
         for index, target_date in enumerate(month_dates):
             current_key = (staff_member.id, target_date)
             night_var = shift_vars[current_key][ShiftResult.ShiftTypeChoices.NIGHT]
@@ -476,13 +524,34 @@ def _add_night_pattern_constraints(
                 continue
 
             if third_fixed_shift_type is not None:
-                if third_fixed_shift_type != ShiftResult.ShiftTypeChoices.NIGHT:
+                if third_fixed_shift_type not in (
+                    OFF_LIKE_SHIFT_TYPES
+                    | {ShiftResult.ShiftTypeChoices.NIGHT}
+                ):
                     model.Add(night_var == 0)
-                continue
-            model.Add(
-                night_var
-                <= shift_vars[third_key][ShiftResult.ShiftTypeChoices.NIGHT]
+            else:
+                model.Add(
+                    night_var
+                    <= shift_vars[third_key][ShiftResult.ShiftTypeChoices.OFF]
+                    + shift_vars[third_key][ShiftResult.ShiftTypeChoices.NIGHT]
+                )
+
+            third_night_var = shift_vars[third_key][
+                ShiftResult.ShiftTypeChoices.NIGHT
+            ]
+            pattern_var = model.NewBoolVar(
+                f"night_after_night_{staff_member.id}_{target_date.isoformat()}"
             )
+            model.Add(pattern_var <= night_var)
+            model.Add(pattern_var <= third_night_var)
+            model.Add(pattern_var >= night_var + third_night_var - 1)
+            staff_pattern_terms.append(pattern_var)
+
+        if staff_pattern_terms:
+            model.Add(sum(staff_pattern_terms) <= 1)
+            night_after_night_pattern_terms.extend(staff_pattern_terms)
+
+    return night_after_night_pattern_terms
 
 
 def _add_monthly_off_day_constraints(
@@ -715,15 +784,25 @@ def _work_term(shift_vars, fixed_assignments, staff_member_id, target_date):
 
 
 def _build_night_count_balance_objective(
-    *, model, staff_members, month_dates, shift_vars
+    *,
+    model,
+    staff_members,
+    month_dates,
+    shift_vars,
+    night_after_night_pattern_terms=(),
 ) -> NightCountBalanceData:
-    """夜勤可能スタッフ間で許容差1回を超えた夜勤回数差を返す。"""
+    """夜勤回数差を優先し、同点なら明け翌日の夜勤を減らす。"""
 
     data = NightCountBalanceData()
+    pattern_penalty = (
+        sum(night_after_night_pattern_terms)
+        if night_after_night_pattern_terms
+        else 0
+    )
     eligible_staff = [staff for staff in staff_members if staff.can_night_shift]
     if len(eligible_staff) <= 1:
         data.night_balance_violation = 0
-        data.objective_score = 0
+        data.objective_score = pattern_penalty
         return data
     for staff_member in eligible_staff:
         count_var = model.NewIntVar(0, len(month_dates), f"night_count_{staff_member.id}")
@@ -751,7 +830,15 @@ def _build_night_count_balance_objective(
         data.night_balance_violation
         >= data.night_count_max - data.night_count_min - 1
     )
-    data.objective_score = data.night_balance_violation
+    if night_after_night_pattern_terms:
+        data.objective_score = _build_lexicographic_score(
+            [
+                (data.night_balance_violation, len(month_dates)),
+                (pattern_penalty, len(staff_members)),
+            ]
+        )
+    else:
+        data.objective_score = data.night_balance_violation
     return data
 
 

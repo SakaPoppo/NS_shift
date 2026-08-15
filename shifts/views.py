@@ -20,6 +20,7 @@ from .forms import (
 from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule
 from .services import (
     MonthBoundaryConflictError,
+    OFF_LIKE_SHIFT_TYPES,
     build_shift_carryovers,
     get_japanese_holiday_dates,
     get_month_dates,
@@ -550,6 +551,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             base_fixed_assignments,
             submitted_assignments,
         )
+        previous_shift_types = dict(
+            ShiftCarryover.objects.filter(
+                shift_plan=shift_plan,
+                source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            ).values_list("staff_member_id", "previous_last_shift_type")
+        )
         changed_keys = set()
 
         for cell_key, selected_value in submitted_assignments.items():
@@ -600,11 +607,31 @@ class UserShiftPlanMixin(LoginRequiredMixin):
                 previous_date = current_date.fromordinal(current_date.toordinal() - 1)
                 if previous_date not in month_dates_set:
                     # 前月情報がないスタッフは、月初の明けを手入力で補完できる。
-                    if not ShiftCarryover.objects.filter(
-                        shift_plan=shift_plan,
-                        staff_member_id=staff_member_id,
-                        source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
-                    ).exists():
+                    if staff_member_id not in previous_shift_types:
+                        continue
+                    if (
+                        previous_shift_types[staff_member_id]
+                        == ShiftResult.ShiftTypeChoices.NIGHT
+                    ):
+                        if not shift_plan.shift_rule.night_shift_next_day_off:
+                            next_date = current_date.fromordinal(
+                                current_date.toordinal() + 1
+                            )
+                            next_shift_type = final_shift_types.get(
+                                (staff_member_id, next_date), ""
+                            )
+                            if (
+                                next_shift_type
+                                and next_shift_type
+                                not in (
+                                    OFF_LIKE_SHIFT_TYPES
+                                    | {ShiftResult.ShiftTypeChoices.NIGHT}
+                                )
+                            ):
+                                errors.append(
+                                    f"{next_date.day}日の勤務は保存できません。"
+                                    "前月末の夜勤明け翌日は、休みまたは夜勤にしてください。"
+                                )
                         continue
                     errors.append(
                         f"{current_date.day}日の明けは保存できません。"

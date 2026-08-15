@@ -208,12 +208,12 @@ def _boundary_assignments(shift_plan: ShiftPlan, carryover: ShiftCarryover) -> d
     if previous == ShiftResult.ShiftTypeChoices.NIGHT:
         assignments = {first: ShiftResult.ShiftTypeChoices.AFTER_NIGHT}
         rule = getattr(shift_plan, "shift_rule", None)
-        if rule and calendar.monthrange(shift_plan.year, shift_plan.month)[1] >= 2:
-            assignments[first + timedelta(days=1)] = (
-                ShiftResult.ShiftTypeChoices.OFF
-                if rule.night_shift_next_day_off
-                else ShiftResult.ShiftTypeChoices.NIGHT
-            )
+        if (
+            rule
+            and rule.night_shift_next_day_off
+            and calendar.monthrange(shift_plan.year, shift_plan.month)[1] >= 2
+        ):
+            assignments[first + timedelta(days=1)] = ShiftResult.ShiftTypeChoices.OFF
         return assignments
     if previous == ShiftResult.ShiftTypeChoices.AFTER_NIGHT:
         return {first: ShiftResult.ShiftTypeChoices.OFF}
@@ -256,11 +256,8 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
         current = existing.get(key)
         regular_off = target_date.weekday() in regular.get(staff_id, set())
         base_off = key in requests or regular_off
-        # 2日目のOFFは既に保証された休みと重複保存しない。一方、明けや夜勤とは競合する。
+        # 境界OFFは既に保証された休みと重複保存せず、それ以外の境界勤務は競合扱いにする。
         if base_off and required_type == ShiftResult.ShiftTypeChoices.OFF:
-            continue
-        # 月境界の2日目だけは曜日固定休を優先し、明け翌日夜勤の例外を許可する。
-        if target_date.day == 2 and regular_off:
             continue
         if base_off or (current and current.lock_reason != ShiftResult.LockReasonChoices.MONTH_BOUNDARY):
             reason = "希望休または曜日固定休" if base_off else current.get_shift_type_display()
@@ -284,8 +281,8 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
         staff_id, target_date = key
         regular_off = target_date.weekday() in regular.get(staff_id, set())
         if (
-            (shift_type == ShiftResult.ShiftTypeChoices.OFF and (key in requests or regular_off))
-            or (target_date.day == 2 and regular_off)
+            shift_type == ShiftResult.ShiftTypeChoices.OFF
+            and (key in requests or regular_off)
         ):
             ShiftResult.objects.filter(
                 shift_plan=shift_plan, staff_member_id=staff_id, date=target_date,

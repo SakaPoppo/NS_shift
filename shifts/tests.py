@@ -1331,6 +1331,149 @@ class ShiftGeneratorTests(TestCase):
             ShiftResult.ShiftTypeChoices.OFF,
         )
 
+    def test_false_night_rule_does_not_force_another_night(self):
+        self.create_rule(night_shift_next_day_off=False)
+        staff_member = self.create_staff_member()
+        DateShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            target_date=date(2026, 7, 10),
+            required_night_staff=1,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 10))],
+            ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 11))],
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        )
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 12))],
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+
+    def test_false_night_rule_allows_one_night_after_night_pattern(self):
+        self.create_rule(night_shift_next_day_off=False)
+        staff_member = self.create_staff_member()
+        for day in (10, 12):
+            DateShiftRule.objects.create(
+                shift_plan=self.shift_plan,
+                target_date=date(2026, 7, day),
+                required_night_staff=1,
+            )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            [
+                shift_map[(staff_member.id, date(2026, 7, day))]
+                for day in (10, 11, 12)
+            ],
+            [
+                ShiftResult.ShiftTypeChoices.NIGHT,
+                ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                ShiftResult.ShiftTypeChoices.NIGHT,
+            ],
+        )
+
+    def test_false_night_rule_rejects_two_patterns_for_one_staff(self):
+        self.create_rule(night_shift_next_day_off=False)
+        self.create_staff_member()
+        for day in (3, 5, 12, 14):
+            DateShiftRule.objects.create(
+                shift_plan=self.shift_plan,
+                target_date=date(2026, 7, day),
+                required_night_staff=1,
+            )
+
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
+
+    def test_false_night_rule_respects_fixed_and_requested_off_days(self):
+        self.create_rule(night_shift_next_day_off=False)
+        staff_members = [
+            self.create_staff_member(name="固定休スタッフ"),
+            self.create_staff_member(name="希望休スタッフ"),
+            self.create_staff_member(name="曜日固定休スタッフ"),
+        ]
+        DateShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            target_date=date(2026, 7, 10),
+            required_night_staff=3,
+        )
+        for staff_member in staff_members:
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, 10),
+                shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_members[0],
+            date=date(2026, 7, 12),
+            shift_type=ShiftResult.ShiftTypeChoices.OFF,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_members[1],
+            date=date(2026, 7, 12),
+        )
+        StaffRegularDayOff.objects.create(
+            staff_member=staff_members[2],
+            day_of_week=date(2026, 7, 12).weekday(),
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        expected_third_day_shifts = (
+            ShiftResult.ShiftTypeChoices.OFF,
+            ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+        for staff_member, expected_third_day_shift in zip(
+            staff_members, expected_third_day_shifts
+        ):
+            with self.subTest(staff_member=staff_member.name):
+                self.assertEqual(
+                    shift_map[(staff_member.id, date(2026, 7, 10))],
+                    ShiftResult.ShiftTypeChoices.NIGHT,
+                )
+                self.assertEqual(
+                    shift_map[(staff_member.id, date(2026, 7, 11))],
+                    ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                )
+                self.assertEqual(
+                    shift_map[(staff_member.id, date(2026, 7, 12))],
+                    expected_third_day_shift,
+                )
+
+    def test_false_night_rule_still_rejects_fixed_day_after_night(self):
+        self.create_rule(night_shift_next_day_off=False)
+        staff_member = self.create_staff_member()
+        for day, shift_type in (
+            (10, ShiftResult.ShiftTypeChoices.NIGHT),
+            (12, ShiftResult.ShiftTypeChoices.DAY),
+        ):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, day),
+                shift_type=shift_type,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        with self.assertRaisesMessage(ShiftGenerationError, "2日後の固定勤務"):
+            generate_shift(self.shift_plan)
+
     def test_generate_shift_ignores_unlocked_generated_result(self):
         self.create_rule()
         staff_member = self.create_staff_member()
@@ -1932,7 +2075,36 @@ class ShiftSoftOptimizationTests(TestCase):
                 total_night_range=None,
             ),
             long_streak_terms=[],
-            phase_results=[],
+            phase_results=[
+                OptimizationPhaseResult(
+                    name="day_staffing_balance",
+                    status="OPTIMAL",
+                    objective_value=0,
+                    optimal=True,
+                    solver=solver,
+                ),
+                OptimizationPhaseResult(
+                    name="long_streak",
+                    status="OPTIMAL",
+                    objective_value=0,
+                    optimal=True,
+                    solver=solver,
+                ),
+                OptimizationPhaseResult(
+                    name="night_count_balance",
+                    status="UNKNOWN",
+                    objective_value=None,
+                    optimal=False,
+                    solver=None,
+                ),
+                OptimizationPhaseResult(
+                    name="ability_balance",
+                    status="NOT_RUN",
+                    objective_value=None,
+                    optimal=False,
+                    solver=None,
+                ),
+            ],
         )
 
         self.assertEqual(
@@ -1969,6 +2141,24 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(summary.day_staffing_delta_range, 3)
         self.assertEqual(summary.minimum_actual_day_count, 5)
         self.assertEqual(summary.maximum_actual_day_count, 10)
+        self.assertEqual(
+            summary.phase_statuses,
+            {
+                "day_staffing_balance": "OPTIMAL",
+                "long_streak": "OPTIMAL",
+                "night_count_balance": "UNKNOWN",
+                "ability_balance": "NOT_RUN",
+            },
+        )
+        self.assertEqual(
+            summary.phase_optimal_flags,
+            {
+                "day_staffing_balance": True,
+                "long_streak": True,
+                "night_count_balance": False,
+                "ability_balance": False,
+            },
+        )
 
     def test_day_shortage_can_be_derived_from_delta(self):
         delta = -2
@@ -2086,6 +2276,57 @@ class ShiftSoftOptimizationTests(TestCase):
                     prefix + expected_body,
                 )
 
+    def test_incomplete_optimization_message_matches_unknown_phase(self):
+        cases = [
+            (
+                {
+                    "day_staffing_balance": "OPTIMAL",
+                    "long_streak": "OPTIMAL",
+                    "night_count_balance": "OPTIMAL",
+                    "ability_balance": "FEASIBLE",
+                },
+                None,
+            ),
+            (
+                {"ability_balance": "UNKNOWN"},
+                "処理時間の上限に達したため、"
+                "能力配置の均等化を完了できませんでした。"
+                "それ以前の条件を反映したシフトを使用しています。",
+            ),
+            (
+                {
+                    "night_count_balance": "UNKNOWN",
+                    "ability_balance": "NOT_RUN",
+                },
+                "処理時間の上限に達したため、"
+                "夜勤回数・能力配置の均等化を完了できませんでした。"
+                "それ以前の条件を反映したシフトを使用しています。",
+            ),
+            (
+                {
+                    "long_streak": "UNKNOWN",
+                    "night_count_balance": "NOT_RUN",
+                    "ability_balance": "NOT_RUN",
+                },
+                "処理時間の上限に達したため、"
+                "連勤配置・夜勤回数・能力配置の調整を完了できませんでした。"
+                "日勤人数の均等化まで完了したシフトを使用しています。",
+            ),
+        ]
+
+        for phase_statuses, expected_message in cases:
+            with self.subTest(phase_statuses=phase_statuses):
+                actual_message = build_optimization_incomplete_message(
+                    optimization_summary=SimpleNamespace(
+                        phase_statuses=phase_statuses
+                    )
+                )
+
+                self.assertEqual(actual_message, expected_message)
+                if actual_message is not None:
+                    self.assertNotIn("_balance", actual_message)
+                    self.assertNotIn("long_streak", actual_message)
+
     def test_day_staffing_delta_range_one_has_no_imbalance_violation(self):
         summary = self.build_day_staffing_summary(
             minimum_delta=-1,
@@ -2132,6 +2373,11 @@ class ShiftSoftOptimizationTests(TestCase):
             shifts=[],
             day_staffing_adjustment_message="日勤人数を調整しました。",
         )
+        incomplete_optimization_only = ShiftGenerationResult(
+            status="success",
+            shifts=[],
+            optimization_incomplete_message="能力配置の均等化は未完了です。",
+        )
         day_warning = ShiftGenerationResult(
             status="success",
             shifts=[],
@@ -2158,6 +2404,7 @@ class ShiftSoftOptimizationTests(TestCase):
         )
 
         self.assertFalse(adjustment_only.has_violations)
+        self.assertFalse(incomplete_optimization_only.has_violations)
         self.assertTrue(day_warning.has_violations)
         self.assertTrue(night_warning.has_violations)
 
@@ -2184,21 +2431,39 @@ class ShiftSoftOptimizationTests(TestCase):
 
     def test_night_counts_are_balanced_and_hard_requirement_remains_exact(self):
         self.create_rule(
-            required_day_staff=0, required_night_staff=1, off_days_per_staff=0,
+            required_day_staff=0, required_night_staff=1, off_days_per_staff=7,
             max_consecutive_work_days=31, night_shift_next_day_off=False,
         )
-        self.create_staff_member(name="夜勤A")
-        self.create_staff_member(name="夜勤B")
+        staff_members = [
+            self.create_staff_member(name=f"夜勤{index + 1}")
+            for index in range(4)
+        ]
 
         result = generate_shift(self.shift_plan)
         summary = result.optimization_summary
+        shift_map = {
+            (shift.staff_member_id, shift.date): shift.shift_type
+            for shift in result.shifts
+        }
+        month_dates = get_month_dates(2026, 2)
         self.assertIsNotNone(summary)
         self.assertLessEqual(summary.night_shift_count_max - summary.night_shift_count_min, 1)
-        for target_date in get_month_dates(2026, 2):
+        for target_date in month_dates:
             self.assertEqual(sum(
                 shift.date == target_date and shift.shift_type == ShiftResult.ShiftTypeChoices.NIGHT
                 for shift in result.shifts
             ), 1)
+        for staff_member in staff_members:
+            pattern_count = sum(
+                shift_map[(staff_member.id, month_dates[index])]
+                == ShiftResult.ShiftTypeChoices.NIGHT
+                and shift_map[(staff_member.id, month_dates[index + 1])]
+                == ShiftResult.ShiftTypeChoices.AFTER_NIGHT
+                and shift_map[(staff_member.id, month_dates[index + 2])]
+                == ShiftResult.ShiftTypeChoices.NIGHT
+                for index in range(len(month_dates) - 2)
+            )
+            self.assertLessEqual(pattern_count, 1)
 
     def test_night_imbalance_violation_amount_allows_one_shift_difference(self):
         for counts, expected_amount in (
@@ -2586,6 +2851,40 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(solver.Value(data.night_balance_violation), 1)
         self.assertEqual(solver.Value(data.objective_score), 1)
 
+    def test_night_count_balance_uses_pattern_penalty_as_tiebreaker(self):
+        target_date = date(2026, 2, 1)
+        first_staff = self.create_staff_member(name="明け翌日夜勤候補")
+        second_staff = self.create_staff_member(name="代替夜勤候補")
+        staff_members = [first_staff, second_staff]
+        model = cp_model.CpModel()
+        first_night = model.NewBoolVar("first_night")
+        second_night = model.NewBoolVar("second_night")
+        model.Add(first_night + second_night == 1)
+        shift_vars = {
+            (first_staff.id, target_date): {
+                ShiftResult.ShiftTypeChoices.NIGHT: first_night,
+            },
+            (second_staff.id, target_date): {
+                ShiftResult.ShiftTypeChoices.NIGHT: second_night,
+            },
+        }
+
+        data = shift_optimization._build_night_count_balance_objective(
+            model=model,
+            staff_members=staff_members,
+            month_dates=[target_date],
+            shift_vars=shift_vars,
+            night_after_night_pattern_terms=[first_night],
+        )
+        model.Minimize(data.objective_score)
+        solver = cp_model.CpSolver()
+
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+        self.assertEqual(solver.Value(data.night_balance_violation), 0)
+        self.assertEqual(solver.Value(first_night), 0)
+        self.assertEqual(solver.Value(second_night), 1)
+        self.assertEqual(solver.Value(data.objective_score), 0)
+
     def test_night_count_balance_objective_is_zero_for_one_eligible_staff(self):
         model = cp_model.CpModel()
         staff_member = self.create_staff_member(name="単独夜勤者")
@@ -2677,22 +2976,18 @@ class ShiftSoftOptimizationTests(TestCase):
             ],
         )
 
-    def test_day_staffing_balance_solution_is_hinted_to_long_streak(self):
-        solvers = [object(), object(), object()]
+    def test_all_successful_phases_use_latest_solver_and_keep_hints(self):
+        phase_names = list(shift_optimization.PHASE_TIME_LIMITS)
+        solvers = [object() for _ in phase_names]
         results = [
-            SimpleNamespace(
-                name="day_staffing_balance",
-                status="FEASIBLE",
-                solver=solvers[0],
-            ),
-            SimpleNamespace(
-                name="long_streak", status="OPTIMAL", solver=solvers[1]
-            ),
-            SimpleNamespace(
-                name="night_count_balance",
+            OptimizationPhaseResult(
+                name=phase_name,
                 status="OPTIMAL",
-                solver=solvers[2],
-            ),
+                objective_value=index,
+                optimal=True,
+                solver=solvers[index],
+            )
+            for index, phase_name in enumerate(phase_names)
         ]
         phases = [
             SimpleNamespace(name=result.name, objective=index, max_time_seconds=1)
@@ -2721,44 +3016,271 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(phase_results, results)
         self.assertIs(solver, solvers[-1])
         self.assertEqual(status, "OPTIMAL")
-        self.assertEqual(add_hints.call_count, 2)
-        self.assertIs(add_hints.call_args_list[0].kwargs["solver"], solvers[0])
-        self.assertIs(add_hints.call_args_list[1].kwargs["solver"], solvers[1])
-
-    def test_failed_phase_does_not_become_hint_source(self):
-        successful_solver = object()
-        first_result = SimpleNamespace(
-            name="first", status="OPTIMAL", solver=successful_solver
+        self.assertEqual(add_hints.call_count, len(phases) - 1)
+        self.assertEqual(
+            [call.kwargs["solver"] for call in add_hints.call_args_list],
+            solvers[:-1],
         )
+
+    def test_feasible_result_updates_last_successful_solver_in_every_phase(self):
+        phase_names = list(shift_optimization.PHASE_TIME_LIMITS)
         phases = [
-            SimpleNamespace(name="first", objective=1, max_time_seconds=1),
-            SimpleNamespace(name="failed", objective=2, max_time_seconds=1),
-            SimpleNamespace(name="unreached", objective=3, max_time_seconds=1),
+            SimpleNamespace(name=name, objective=index, max_time_seconds=1)
+            for index, name in enumerate(phase_names)
         ]
 
-        with (
-            patch.object(
-                shift_optimization,
-                "_solve_and_fix_objective",
-                side_effect=[
-                    first_result,
-                    ShiftGenerationError("UNKNOWN"),
-                ],
-            ),
-            patch.object(
-                shift_optimization,
-                "_add_shift_solution_hints",
-            ) as add_hints,
-        ):
-            with self.assertRaises(ShiftGenerationError):
+        for feasible_index, feasible_phase_name in enumerate(phase_names):
+            with self.subTest(feasible_phase=feasible_phase_name):
+                solvers = [object() for _ in phase_names]
+                results = [
+                    OptimizationPhaseResult(
+                        name=phase_name,
+                        status=(
+                            "FEASIBLE"
+                            if index == feasible_index
+                            else "OPTIMAL"
+                        ),
+                        objective_value=index,
+                        optimal=index != feasible_index,
+                        solver=solvers[index],
+                    )
+                    for index, phase_name in enumerate(phase_names)
+                ]
+                with (
+                    patch.object(
+                        shift_optimization,
+                        "_solve_and_fix_objective",
+                        side_effect=results,
+                    ),
+                    patch.object(
+                        shift_optimization,
+                        "_add_shift_solution_hints",
+                    ) as add_hints,
+                ):
+                    phase_results, solver, status = (
+                        shift_optimization._run_optimization_phases(
+                            model=object(),
+                            shift_vars={},
+                            phase_definitions=phases,
+                        )
+                    )
+
+                self.assertEqual(phase_results, results)
+                self.assertIs(solver, solvers[-1])
+                self.assertEqual(status, results[-1].status)
+                if feasible_index < len(phase_names) - 1:
+                    self.assertIs(
+                        add_hints.call_args_list[feasible_index].kwargs[
+                            "solver"
+                        ],
+                        solvers[feasible_index],
+                    )
+
+    def test_later_unknown_uses_previous_solver_and_marks_remaining_phases(self):
+        phase_names = list(shift_optimization.PHASE_TIME_LIMITS)
+        phases = [
+            SimpleNamespace(name=name, objective=index, max_time_seconds=1)
+            for index, name in enumerate(phase_names)
+        ]
+
+        for unknown_index in range(1, len(phase_names)):
+            unknown_phase_name = phase_names[unknown_index]
+            with self.subTest(unknown_phase=unknown_phase_name):
+                successful_solvers = [
+                    object() for _ in range(unknown_index)
+                ]
+                executed_results = [
+                    OptimizationPhaseResult(
+                        name=phase_names[index],
+                        status="OPTIMAL",
+                        objective_value=index,
+                        optimal=True,
+                        solver=successful_solvers[index],
+                    )
+                    for index in range(unknown_index)
+                ]
+                executed_results.append(
+                    OptimizationPhaseResult(
+                        name=unknown_phase_name,
+                        status="UNKNOWN",
+                        objective_value=None,
+                        optimal=False,
+                        solver=None,
+                    )
+                )
+                with (
+                    patch.object(
+                        shift_optimization,
+                        "_solve_and_fix_objective",
+                        side_effect=executed_results,
+                    ) as solve_phase,
+                    patch.object(
+                        shift_optimization,
+                        "_add_shift_solution_hints",
+                    ) as add_hints,
+                ):
+                    phase_results, solver, status = (
+                        shift_optimization._run_optimization_phases(
+                            model=object(),
+                            shift_vars={},
+                            phase_definitions=phases,
+                        )
+                    )
+
+                expected_statuses = {
+                    phase_name: (
+                        "OPTIMAL"
+                        if index < unknown_index
+                        else "UNKNOWN"
+                        if index == unknown_index
+                        else "NOT_RUN"
+                    )
+                    for index, phase_name in enumerate(phase_names)
+                }
+                expected_optimal_flags = {
+                    phase_name: index < unknown_index
+                    for index, phase_name in enumerate(phase_names)
+                }
+                self.assertIs(solver, successful_solvers[-1])
+                self.assertEqual(status, "OPTIMAL")
+                self.assertEqual(
+                    {result.name: result.status for result in phase_results},
+                    expected_statuses,
+                )
+                self.assertEqual(
+                    {result.name: result.optimal for result in phase_results},
+                    expected_optimal_flags,
+                )
+                self.assertEqual(solve_phase.call_count, unknown_index + 1)
+                self.assertEqual(add_hints.call_count, unknown_index)
+                self.assertTrue(
+                    all(
+                        result.solver is None
+                        for result in phase_results[unknown_index:]
+                    )
+                )
+
+    def test_day_staffing_unknown_still_raises_generation_error(self):
+        unknown_result = OptimizationPhaseResult(
+            name="day_staffing_balance",
+            status="UNKNOWN",
+            objective_value=None,
+            optimal=False,
+            solver=None,
+        )
+
+        with patch.object(
+            shift_optimization,
+            "_solve_and_fix_objective",
+            return_value=unknown_result,
+        ) as solve_phase:
+            with self.assertRaisesRegex(
+                ShiftGenerationError,
+                "制限時間内に解を見つけられませんでした",
+            ):
                 shift_optimization._run_optimization_phases(
                     model=object(),
                     shift_vars={},
-                    phase_definitions=phases,
+                    phase_definitions=[
+                        SimpleNamespace(
+                            name="day_staffing_balance",
+                            objective=1,
+                            max_time_seconds=1,
+                        ),
+                        SimpleNamespace(
+                            name="long_streak",
+                            objective=2,
+                            max_time_seconds=1,
+                        ),
+                    ],
                 )
 
-        add_hints.assert_called_once()
-        self.assertIs(add_hints.call_args.kwargs["solver"], successful_solver)
+        solve_phase.assert_called_once()
+
+    def test_unknown_phase_does_not_read_or_fix_an_objective_value(self):
+        model = Mock()
+        solver = Mock()
+        solver.Solve.return_value = cp_model.UNKNOWN
+        solver.StatusName.return_value = "UNKNOWN"
+        solver.WallTime.return_value = 1.0
+
+        with patch.object(
+            shift_optimization,
+            "_new_solver",
+            return_value=solver,
+        ):
+            result = shift_optimization._solve_and_fix_objective(
+                model=model,
+                objective="objective",
+                phase_name="ability_balance",
+                max_time_seconds=1,
+            )
+
+        self.assertEqual(result.status, "UNKNOWN")
+        self.assertIsNone(result.objective_value)
+        self.assertFalse(result.optimal)
+        self.assertIsNone(result.solver)
+        solver.ObjectiveValue.assert_not_called()
+        model.Add.assert_not_called()
+        model.ClearObjective.assert_called_once_with()
+
+    def test_generate_shift_uses_previous_solution_when_ability_is_unknown(self):
+        self.create_rule(
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        self.create_staff_member(name="途中解採用")
+        solve_phase = shift_optimization._solve_and_fix_objective
+
+        def solve_until_ability(**kwargs):
+            if kwargs["phase_name"] == "ability_balance":
+                return OptimizationPhaseResult(
+                    name="ability_balance",
+                    status="UNKNOWN",
+                    objective_value=None,
+                    optimal=False,
+                    solver=None,
+                )
+            return solve_phase(**kwargs)
+
+        with patch.object(
+            shift_optimization,
+            "_solve_and_fix_objective",
+            side_effect=solve_until_ability,
+        ):
+            result = generate_shift(self.shift_plan)
+
+        summary = result.optimization_summary
+        self.assertEqual(result.status, "success")
+        self.assertEqual(len(result.shifts), 28)
+        self.assertEqual(
+            summary.phase_statuses["ability_balance"],
+            "UNKNOWN",
+        )
+        self.assertFalse(summary.phase_optimal_flags["ability_balance"])
+        self.assertTrue(
+            all(
+                summary.phase_statuses[phase_name]
+                in {"OPTIMAL", "FEASIBLE"}
+                for phase_name in (
+                    "day_staffing_balance",
+                    "long_streak",
+                    "night_count_balance",
+                )
+            )
+        )
+        self.assertEqual(
+            result.solver_status,
+            summary.phase_statuses["night_count_balance"],
+        )
+        self.assertEqual(
+            result.optimization_incomplete_message,
+            "処理時間の上限に達したため、"
+            "能力配置の均等化を完了できませんでした。"
+            "それ以前の条件を反映したシフトを使用しています。",
+        )
 
     def test_empty_phase_definitions_raise_explicit_error(self):
         with self.assertRaisesRegex(
@@ -3175,6 +3697,16 @@ class ShiftGenerateViewTests(TestCase):
         data.update(overrides)
         return ShiftRule.objects.create(shift_plan=self.shift_plan, **data)
 
+    def create_false_month_boundary_after_night(self):
+        self.create_rule(night_shift_next_day_off=False)
+        ShiftCarryover.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        sync_month_boundary_assignments(self.shift_plan)
+
     def test_generate_action_calls_generation_service(self):
         self.create_rule()
         fake_result = ShiftGenerationResult(status="success", shifts=[])
@@ -3198,6 +3730,7 @@ class ShiftGenerateViewTests(TestCase):
         )
 
         self.assertContains(response, "シフトを生成しました。")
+        self.assertNotContains(response, "処理時間の上限に達したため、")
 
     def test_generate_action_shows_day_staffing_adjustment_as_info(self):
         self.create_rule()
@@ -3228,6 +3761,41 @@ class ShiftGenerateViewTests(TestCase):
             response,
             "シフトを生成しましたが、一部の条件を満たせませんでした。",
         )
+
+    def test_generate_action_shows_adjustment_and_incomplete_optimization(self):
+        self.create_rule()
+        adjustment_message = (
+            "設定した必要日勤数ではシフト最適化ができなかったため、"
+            "日勤数：5〜6人で最適化を行なっています。"
+        )
+        incomplete_message = (
+            "処理時間の上限に達したため、"
+            "能力配置の均等化を完了できませんでした。"
+            "それ以前の条件を反映したシフトを使用しています。"
+        )
+        fake_result = ShiftGenerationResult(
+            status="success",
+            shifts=[],
+            day_staffing_adjustment_message=adjustment_message,
+            optimization_incomplete_message=incomplete_message,
+        )
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=fake_result,
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+                follow=True,
+            )
+
+        self.assertContains(response, "シフトを生成しました。")
+        self.assertContains(response, adjustment_message, count=1)
+        self.assertContains(response, incomplete_message, count=1)
+        self.assertContains(response, "alert-info", count=1)
+        self.assertContains(response, "alert-warning", count=1)
+        self.assertNotContains(response, "シフトを生成できませんでした。")
 
     def test_generate_action_replaces_daily_shortages_with_one_info(self):
         self.create_rule(
@@ -3293,6 +3861,58 @@ class ShiftGenerateViewTests(TestCase):
         )
         self.assertNotContains(response, "日勤が1人不足しています。")
 
+    def test_generate_action_shows_incomplete_and_staffing_warnings_together(self):
+        self.create_rule()
+        incomplete_message = (
+            "処理時間の上限に達したため、"
+            "夜勤回数・能力配置の均等化を完了できませんでした。"
+            "それ以前の条件を反映したシフトを使用しています。"
+        )
+        day_warning_message = (
+            "固定勤務や勤務条件の影響により、日勤人数を均等に配置できませんでした。"
+            "可能な範囲で均等化しています。"
+        )
+        night_warning_message = (
+            "スタッフ間の夜勤回数差が2回あります。"
+            "目標は1回以内ですが、固定勤務などの影響により調整できませんでした。"
+        )
+        fake_result = ShiftGenerationResult(
+            status="success",
+            shifts=[],
+            optimization_incomplete_message=incomplete_message,
+            violations=[
+                ShiftGenerationViolation(
+                    violation_type=(
+                        ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
+                    ),
+                    message=day_warning_message,
+                ),
+                ShiftGenerationViolation(
+                    violation_type=(
+                        ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE
+                    ),
+                    message=night_warning_message,
+                ),
+            ],
+        )
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=fake_result,
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+                follow=True,
+            )
+
+        self.assertContains(response, "シフトを生成しました。")
+        self.assertContains(response, incomplete_message, count=1)
+        self.assertContains(response, day_warning_message, count=1)
+        self.assertContains(response, night_warning_message, count=1)
+        self.assertContains(response, "alert-warning", count=2)
+        self.assertNotContains(response, "シフトを生成できませんでした。")
+
     def test_generate_action_shows_error_message_when_generation_fails(self):
         self.create_rule()
 
@@ -3353,6 +3973,86 @@ class ShiftGenerateViewTests(TestCase):
             shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
             input_type=ShiftResult.InputTypeChoices.MANUAL,
         ).exists())
+
+    def test_false_boundary_allows_manual_off_on_second_day(self):
+        self.create_false_month_boundary_after_night()
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-02": (
+                    ShiftResult.ShiftTypeChoices.OFF
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        saved_result = ShiftResult.objects.get(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 2),
+        )
+        self.assertEqual(saved_result.shift_type, ShiftResult.ShiftTypeChoices.OFF)
+        self.assertEqual(
+            saved_result.input_type,
+            ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+    def test_false_boundary_allows_manual_night_on_second_day(self):
+        self.create_false_month_boundary_after_night()
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-02": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+                f"shift_{self.staff_member.id}_2026-08-03": (
+                    ShiftResult.ShiftTypeChoices.AFTER_NIGHT
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        saved_shifts = dict(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date__in=[date(2026, 8, 2), date(2026, 8, 3)],
+            ).values_list("date", "shift_type")
+        )
+        self.assertEqual(
+            saved_shifts,
+            {
+                date(2026, 8, 2): ShiftResult.ShiftTypeChoices.NIGHT,
+                date(2026, 8, 3): ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            },
+        )
+
+    def test_false_boundary_rejects_manual_day_on_second_day(self):
+        self.create_false_month_boundary_after_night()
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-02": (
+                    ShiftResult.ShiftTypeChoices.DAY
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "前月末の夜勤明け翌日は、休みまたは夜勤にしてください。")
+        self.assertFalse(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date=date(2026, 8, 2),
+            ).exists()
+        )
 
 
 class HolidayOffTests(TestCase):
@@ -3489,6 +4189,84 @@ class ShiftCarryoverServiceTests(TestCase):
         self.assertTrue(all(result.is_locked for result in results))
         self.assertTrue(all(result.input_type == ShiftResult.InputTypeChoices.GENERATED for result in results))
         self.assertTrue(all(result.lock_reason == ShiftResult.LockReasonChoices.MONTH_BOUNDARY for result in results))
+
+    def test_previous_night_with_false_rule_leaves_second_day_selectable(self):
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            previous_consecutive_work_days=1,
+        )
+        ShiftRule.objects.create(
+            shift_plan=self.current,
+            off_days_per_staff=9,
+            max_consecutive_work_days=5,
+            required_day_staff=0,
+            required_night_staff=0,
+            night_shift_next_day_off=False,
+        )
+
+        boundary_results = sync_month_boundary_assignments(self.current)
+        result = generate_shift(self.current)
+        shift_map = {
+            shift.date: shift.shift_type for shift in result.shifts
+        }
+
+        self.assertEqual(
+            {item.date: item.shift_type for item in boundary_results},
+            {date(2026, 1, 1): ShiftResult.ShiftTypeChoices.AFTER_NIGHT},
+        )
+        self.assertEqual(
+            shift_map[date(2026, 1, 2)],
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+
+    def test_false_boundary_night_uses_monthly_pattern_allowance(self):
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            previous_consecutive_work_days=1,
+        )
+        ShiftRule.objects.create(
+            shift_plan=self.current,
+            off_days_per_staff=9,
+            max_consecutive_work_days=5,
+            required_day_staff=0,
+            required_night_staff=0,
+            night_shift_next_day_off=False,
+        )
+        DateShiftRule.objects.create(
+            shift_plan=self.current,
+            target_date=date(2026, 1, 2),
+            required_night_staff=1,
+        )
+        sync_month_boundary_assignments(self.current)
+
+        result = generate_shift(self.current)
+        shift_map = {
+            shift.date: shift.shift_type for shift in result.shifts
+        }
+
+        self.assertEqual(
+            [shift_map[date(2026, 1, day)] for day in (1, 2)],
+            [
+                ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                ShiftResult.ShiftTypeChoices.NIGHT,
+            ],
+        )
+
+        for day in (10, 12):
+            DateShiftRule.objects.create(
+                shift_plan=self.current,
+                target_date=date(2026, 1, day),
+                required_night_staff=1,
+            )
+
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.current)
 
     def test_previous_after_night_creates_first_day_off_idempotently(self):
         ShiftCarryover.objects.create(
