@@ -138,6 +138,26 @@ class AbilityBalanceData:
     objective_score: object | None = None
 
 
+@dataclass
+class AbilityDistributionData:
+    """勤務内の累積能力レベル分布を母集団比率と比較するデータ。"""
+
+    shift_type: str | None = None
+    thresholds: tuple[int, ...] = field(default_factory=tuple)
+    eligible_staff_count: int = 0
+    eligible_above_counts: dict[int, int] = field(default_factory=dict)
+    actual_shift_count_vars: dict[date, object] = field(default_factory=dict)
+    threshold_count_vars: dict[tuple[date, int], object] = field(
+        default_factory=dict
+    )
+    deviation_vars: dict[tuple[date, int], object] = field(
+        default_factory=dict
+    )
+    max_deviation: object | None = None
+    total_deviation: object | None = None
+    objective_score: object | None = None
+
+
 @dataclass(frozen=True)
 class OptimizationPhaseResult:
     name: str
