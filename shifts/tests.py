@@ -2909,6 +2909,45 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(data.night_balance_violation, 0)
         self.assertEqual(data.objective_score, 0)
 
+    def test_night_distribution_uses_only_night_eligible_staff(self):
+        self.create_rule()
+        staff_settings = (
+            ("夜勤可Lv4", 4, True),
+            ("夜勤可Lv1", 1, True),
+            ("夜勤不可Lv5", 5, False),
+        )
+        for name, ability_level, can_night_shift in staff_settings:
+            staff = self.create_staff_member(
+                name=name,
+                can_night_shift=can_night_shift,
+            )
+            staff.ability_level = ability_level
+            staff.save(update_fields=["ability_level"])
+
+        with patch.object(
+            shift_optimization,
+            "_build_night_count_balance_objective",
+            wraps=(
+                shift_optimization._build_night_count_balance_objective
+            ),
+        ) as build_night_objective:
+            result = generate_shift(self.shift_plan)
+
+        build_night_objective.assert_called_once()
+        distribution_data = build_night_objective.call_args.kwargs[
+            "ability_distribution_data"
+        ]
+        self.assertEqual(result.status, "success")
+        self.assertEqual(
+            distribution_data.shift_type,
+            ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        self.assertEqual(distribution_data.eligible_staff_count, 2)
+        self.assertEqual(
+            distribution_data.eligible_above_counts,
+            {3: 1, 4: 1, 5: 0},
+        )
+
     def test_phase_definitions_keep_required_order_and_time_limits(self):
         phase_definitions = shift_optimization._build_phase_definitions(
             day_staffing_balance_data=DayStaffingBalanceData(
@@ -3568,6 +3607,64 @@ class AbilityDistributionObjectiveTests(SimpleTestCase):
             for threshold in shift_optimization.ABILITY_THRESHOLDS
         )
 
+    def build_night_integration_model(self, ability_levels, date_count):
+        staff_members = [
+            SimpleNamespace(
+                id=index + 1,
+                ability_level=ability_level,
+                can_night_shift=True,
+            )
+            for index, ability_level in enumerate(ability_levels)
+        ]
+        month_dates = [
+            date(2026, 2, index + 1)
+            for index in range(date_count)
+        ]
+        model = cp_model.CpModel()
+        shift_vars = {
+            (staff.id, target_date): {
+                ShiftResult.ShiftTypeChoices.NIGHT: model.NewBoolVar(
+                    f"integrated_night_{staff.id}_{target_date}"
+                )
+            }
+            for staff in staff_members
+            for target_date in month_dates
+        }
+        return model, staff_members, month_dates, shift_vars
+
+    def solve_night_integration(
+        self,
+        *,
+        model,
+        staff_members,
+        month_dates,
+        shift_vars,
+        pattern_terms=(),
+    ):
+        ability_data = (
+            shift_optimization._build_ability_distribution_objective(
+                model=model,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+                eligible_staff=staff_members,
+            )
+        )
+        night_count_data = (
+            shift_optimization._build_night_count_balance_objective(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                night_after_night_pattern_terms=pattern_terms,
+                ability_distribution_data=ability_data,
+            )
+        )
+        model.Minimize(night_count_data.objective_score)
+        solver = cp_model.CpSolver()
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+        return solver, night_count_data, ability_data
+
     def test_counts_staff_at_or_above_each_ability_threshold(self):
         solver, data = self.solve_distribution(
             ability_levels=[5, 4, 2],
@@ -3834,6 +3931,282 @@ class AbilityDistributionObjectiveTests(SimpleTestCase):
         )
         self.assertEqual(solver.Value(data.max_deviation), 0)
         self.assertEqual(solver.Value(data.total_deviation), 0)
+        self.assertEqual(solver.Value(data.objective_score), 0)
+
+    def test_night_integration_spreads_every_ability_threshold(self):
+        model, staff_members, month_dates, shift_vars = (
+            self.build_night_integration_model(
+                ability_levels=[5, 5, 4, 4, 3, 3, 1, 1],
+                date_count=2,
+            )
+        )
+        for target_date in month_dates:
+            model.Add(
+                sum(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    for staff in staff_members
+                )
+                == 4
+            )
+        for staff in staff_members:
+            model.Add(
+                sum(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    for target_date in month_dates
+                )
+                == 1
+            )
+
+        solver, night_count_data, ability_data = (
+            self.solve_night_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+            )
+        )
+
+        for target_date in month_dates:
+            self.assertEqual(
+                tuple(
+                    solver.Value(
+                        ability_data.threshold_count_vars[
+                            (target_date, threshold)
+                        ]
+                    )
+                    for threshold in shift_optimization.ABILITY_THRESHOLDS
+                ),
+                (3, 2, 1),
+            )
+        self.assertEqual(
+            solver.Value(night_count_data.night_balance_violation),
+            0,
+        )
+        self.assertEqual(solver.Value(ability_data.max_deviation), 0)
+        self.assertEqual(solver.Value(ability_data.total_deviation), 0)
+
+    def test_night_count_balance_has_priority_over_ability_distribution(self):
+        model, staff_members, month_dates, shift_vars = (
+            self.build_night_integration_model(
+                ability_levels=[5, 4, 1, 1],
+                date_count=2,
+            )
+        )
+        choice = model.NewBoolVar("prefer_ability_over_night_count")
+        assignments = (
+            (1, 1 - choice, choice, 0),
+            (choice, 0, 1 - choice, 1),
+        )
+        for target_date, date_assignments in zip(
+            month_dates, assignments
+        ):
+            for staff, assignment in zip(
+                staff_members, date_assignments
+            ):
+                model.Add(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    == assignment
+                )
+
+        solver, night_count_data, ability_data = (
+            self.solve_night_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+            )
+        )
+
+        self.assertEqual(solver.Value(choice), 0)
+        self.assertEqual(
+            solver.Value(night_count_data.night_balance_violation),
+            0,
+        )
+        self.assertEqual(solver.Value(ability_data.max_deviation), 4)
+        self.assertEqual(solver.Value(night_count_data.objective_score), 112)
+
+    def test_night_pattern_penalty_has_priority_over_ability_distribution(self):
+        model, staff_members, month_dates, shift_vars = (
+            self.build_night_integration_model(
+                ability_levels=[5, 4, 1, 1],
+                date_count=1,
+            )
+        )
+        choice = model.NewBoolVar("prefer_ability_over_night_pattern")
+        for staff, assignment in zip(
+            staff_members,
+            (1, 1 - choice, choice, 0),
+        ):
+            model.Add(
+                shift_vars[(staff.id, month_dates[0])][
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ]
+                == assignment
+            )
+
+        solver, night_count_data, ability_data = (
+            self.solve_night_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                pattern_terms=[choice],
+            )
+        )
+
+        self.assertEqual(solver.Value(choice), 0)
+        self.assertEqual(
+            solver.Value(night_count_data.night_balance_violation),
+            0,
+        )
+        self.assertEqual(solver.Value(ability_data.max_deviation), 4)
+        self.assertEqual(solver.Value(night_count_data.objective_score), 58)
+
+    def test_night_ability_max_deviation_has_priority_over_total(self):
+        model, staff_members, month_dates, shift_vars = (
+            self.build_night_integration_model(
+                ability_levels=[3, 3, 1, 1, 1],
+                date_count=2,
+            )
+        )
+        choice = model.NewBoolVar("prefer_total_over_max_deviation")
+        assignments = (
+            (choice, choice, 1 - choice, 1 - choice, 0),
+            (choice, 0, 1, 1 - choice, 0),
+        )
+        for target_date, date_assignments in zip(
+            month_dates, assignments
+        ):
+            for staff, assignment in zip(
+                staff_members, date_assignments
+            ):
+                model.Add(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    == assignment
+                )
+
+        solver, night_count_data, ability_data = (
+            self.solve_night_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+            )
+        )
+
+        self.assertEqual(solver.Value(choice), 0)
+        self.assertEqual(
+            solver.Value(night_count_data.night_balance_violation),
+            1,
+        )
+        self.assertEqual(solver.Value(ability_data.max_deviation), 4)
+        self.assertEqual(solver.Value(ability_data.total_deviation), 8)
+        self.assertEqual(solver.Value(night_count_data.objective_score), 606)
+
+    def test_night_ability_total_breaks_equal_max_deviation_ties(self):
+        model, staff_members, month_dates, shift_vars = (
+            self.build_night_integration_model(
+                ability_levels=[3, 1, 1, 1, 1],
+                date_count=2,
+            )
+        )
+        choice = model.NewBoolVar("prefer_larger_total_deviation")
+        assignments = (
+            (1, 1, 0, 0, 0),
+            (choice, 1, 1 - choice, 0, 0),
+        )
+        for target_date, date_assignments in zip(
+            month_dates, assignments
+        ):
+            for staff, assignment in zip(
+                staff_members, date_assignments
+            ):
+                model.Add(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    == assignment
+                )
+
+        solver, night_count_data, ability_data = (
+            self.solve_night_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+            )
+        )
+
+        self.assertEqual(solver.Value(choice), 0)
+        self.assertEqual(
+            solver.Value(night_count_data.night_balance_violation),
+            1,
+        )
+        self.assertEqual(solver.Value(ability_data.max_deviation), 3)
+        self.assertEqual(solver.Value(ability_data.total_deviation), 5)
+        self.assertEqual(solver.Value(night_count_data.objective_score), 302)
+
+    def test_legacy_ability_objective_no_longer_optimizes_night_totals(self):
+        staff_members = [
+            SimpleNamespace(
+                id=1,
+                ability_level=5,
+                can_night_shift=True,
+            ),
+            SimpleNamespace(
+                id=2,
+                ability_level=1,
+                can_night_shift=True,
+            ),
+        ]
+        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
+        model = cp_model.CpModel()
+        shift_vars = {}
+        for staff in staff_members:
+            for date_index, target_date in enumerate(month_dates):
+                day_var = model.NewBoolVar(
+                    f"legacy_day_{staff.id}_{target_date}"
+                )
+                night_var = model.NewBoolVar(
+                    f"legacy_night_{staff.id}_{target_date}"
+                )
+                model.Add(day_var == 0)
+                model.Add(night_var == int(date_index == 0))
+                shift_vars[(staff.id, target_date)] = {
+                    ShiftResult.ShiftTypeChoices.DAY: day_var,
+                    ShiftResult.ShiftTypeChoices.NIGHT: night_var,
+                }
+        rule = SimpleNamespace(
+            required_day_staff=0,
+            required_night_staff=0,
+            required_leader_staff=0,
+            min_ability_level=None,
+            min_ability_level_staff_count=None,
+        )
+        data = shift_optimization._build_ability_total_balance_objective(
+            model=model,
+            staff_members=staff_members,
+            month_dates=month_dates,
+            shift_vars=shift_vars,
+            effective_rules={
+                target_date: rule for target_date in month_dates
+            },
+        )
+        model.Minimize(data.objective_score)
+        solver = cp_model.CpSolver()
+
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+        self.assertEqual(solver.Value(data.max_day_range), 0)
+        self.assertEqual(solver.Value(data.max_night_range), 6)
+        self.assertEqual(solver.Value(data.total_night_range), 6)
         self.assertEqual(solver.Value(data.objective_score), 0)
 
 

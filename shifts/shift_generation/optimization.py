@@ -122,12 +122,27 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
         previous_consecutive_work_days=context.previous_consecutive_work_days,
     )
+    night_eligible_staff = [
+        staff
+        for staff in context.staff_members
+        if staff.can_night_shift
+    ]
+    night_ability_distribution_data = (
+        _build_ability_distribution_objective(
+            model=model,
+            month_dates=context.month_dates,
+            shift_vars=shift_vars,
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            eligible_staff=night_eligible_staff,
+        )
+    )
     night_count_balance_data = _build_night_count_balance_objective(
         model=model,
         staff_members=context.staff_members,
         month_dates=context.month_dates,
         shift_vars=shift_vars,
         night_after_night_pattern_terms=night_after_night_pattern_terms,
+        ability_distribution_data=night_ability_distribution_data,
     )
     ability_balance_data = _build_ability_total_balance_objective(
         model=model,
@@ -792,8 +807,9 @@ def _build_night_count_balance_objective(
     month_dates,
     shift_vars,
     night_after_night_pattern_terms=(),
+    ability_distribution_data=None,
 ) -> NightCountBalanceData:
-    """夜勤回数差を優先し、同点なら明け翌日の夜勤を減らす。"""
+    """夜勤回数、明け翌日夜勤、能力分布の順に最適化する。"""
 
     data = NightCountBalanceData()
     pattern_penalty = (
@@ -804,43 +820,86 @@ def _build_night_count_balance_objective(
     eligible_staff = [staff for staff in staff_members if staff.can_night_shift]
     if len(eligible_staff) <= 1:
         data.night_balance_violation = 0
-        data.objective_score = pattern_penalty
-        return data
-    for staff_member in eligible_staff:
-        count_var = model.NewIntVar(0, len(month_dates), f"night_count_{staff_member.id}")
-        model.Add(count_var == sum(
-            shift_vars[(staff_member.id, target_date)][ShiftResult.ShiftTypeChoices.NIGHT]
-            for target_date in month_dates
-        ))
-        data.night_count_vars[staff_member.id] = count_var
-    data.night_count_min = model.NewIntVar(
-        0, len(month_dates), "night_count_min"
-    )
-    data.night_count_max = model.NewIntVar(
-        0, len(month_dates), "night_count_max"
-    )
-    model.AddMinEquality(
-        data.night_count_min, list(data.night_count_vars.values())
-    )
-    model.AddMaxEquality(
-        data.night_count_max, list(data.night_count_vars.values())
-    )
-    data.night_balance_violation = model.NewIntVar(
-        0, len(month_dates), "night_balance_violation"
-    )
-    model.Add(
-        data.night_balance_violation
-        >= data.night_count_max - data.night_count_min - 1
-    )
-    if night_after_night_pattern_terms:
-        data.objective_score = _build_lexicographic_score(
-            [
-                (data.night_balance_violation, len(month_dates)),
-                (pattern_penalty, len(staff_members)),
-            ]
-        )
     else:
-        data.objective_score = data.night_balance_violation
+        for staff_member in eligible_staff:
+            count_var = model.NewIntVar(
+                0,
+                len(month_dates),
+                f"night_count_{staff_member.id}",
+            )
+            model.Add(
+                count_var
+                == sum(
+                    shift_vars[(staff_member.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.NIGHT
+                    ]
+                    for target_date in month_dates
+                )
+            )
+            data.night_count_vars[staff_member.id] = count_var
+        data.night_count_min = model.NewIntVar(
+            0, len(month_dates), "night_count_min"
+        )
+        data.night_count_max = model.NewIntVar(
+            0, len(month_dates), "night_count_max"
+        )
+        model.AddMinEquality(
+            data.night_count_min, list(data.night_count_vars.values())
+        )
+        model.AddMaxEquality(
+            data.night_count_max, list(data.night_count_vars.values())
+        )
+        data.night_balance_violation = model.NewIntVar(
+            0, len(month_dates), "night_balance_violation"
+        )
+        model.Add(
+            data.night_balance_violation
+            >= data.night_count_max - data.night_count_min - 1
+        )
+
+    if ability_distribution_data is None:
+        if night_after_night_pattern_terms:
+            data.objective_score = _build_lexicographic_score(
+                [
+                    (data.night_balance_violation, len(month_dates)),
+                    (pattern_penalty, len(staff_members)),
+                ]
+            )
+        else:
+            data.objective_score = data.night_balance_violation
+        return data
+
+    deviation_upper_bounds = {
+        threshold: above_count
+        * (
+            ability_distribution_data.eligible_staff_count
+            - above_count
+        )
+        for threshold, above_count in (
+            ability_distribution_data.eligible_above_counts.items()
+        )
+    }
+    max_deviation_upper_bound = max(
+        deviation_upper_bounds.values(),
+        default=0,
+    )
+    total_deviation_upper_bound = len(month_dates) * sum(
+        deviation_upper_bounds.values()
+    )
+    data.objective_score = _build_lexicographic_score(
+        [
+            (data.night_balance_violation, len(month_dates)),
+            (pattern_penalty, len(staff_members)),
+            (
+                ability_distribution_data.max_deviation,
+                max_deviation_upper_bound,
+            ),
+            (
+                ability_distribution_data.total_deviation,
+                total_deviation_upper_bound,
+            ),
+        ]
+    )
     return data
 
 
@@ -883,7 +942,7 @@ def _add_long_consecutive_work_objective(
 def _build_lexicographic_score(components):
     """(式, 上限)を優先順に並べ、安全な係数の整数スコアへ変換する。"""
 
-    score = 0
+    score_terms = []
     multiplier = 1
     score_upper_bound = 0
     for expression, upper_bound in reversed(components):
@@ -892,9 +951,9 @@ def _build_lexicographic_score(components):
             raise ShiftGenerationError(
                 "最適化スコアがOR-Toolsの整数上限を超えるため生成できません。"
             )
-        score += expression * multiplier
+        score_terms.append(expression * multiplier)
         multiplier *= upper_bound + 1
-    return score
+    return sum(score_terms)
 
 
 def _build_ability_distribution_objective(
@@ -1107,8 +1166,6 @@ def _build_ability_total_balance_objective(
     data.objective_score = _build_lexicographic_score([
         (data.max_day_range, day_upper),
         (data.total_day_range, len(data.day_group_ranges) * day_upper),
-        (data.max_night_range, night_upper),
-        (data.total_night_range, len(data.night_group_ranges) * night_upper),
     ])
     return data
 
