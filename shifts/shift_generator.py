@@ -45,7 +45,6 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
         solver=optimization.solver,
         day_staffing_balance_data=optimization.day_staffing_balance_data,
         night_count_balance_data=optimization.night_count_balance_data,
-        ability_balance_data=optimization.ability_balance_data,
         long_streak_terms=optimization.long_streak_terms,
         phase_results=optimization.phase_results,
     )

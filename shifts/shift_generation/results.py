@@ -18,18 +18,8 @@ DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX = (
 OPTIMIZATION_INCOMPLETE_MESSAGES = {
     "long_streak": (
         "処理時間の上限に達したため、"
-        "連勤配置・夜勤回数・能力配置の調整を完了できませんでした。"
-        "日勤人数の均等化まで完了したシフトを使用しています。"
-    ),
-    "night_count_balance": (
-        "処理時間の上限に達したため、"
-        "夜勤回数・能力配置の均等化を完了できませんでした。"
-        "それ以前の条件を反映したシフトを使用しています。"
-    ),
-    "ability_balance": (
-        "処理時間の上限に達したため、"
-        "能力配置の均等化を完了できませんでした。"
-        "それ以前の条件を反映したシフトを使用しています。"
+        "連勤配置の調整を完了できませんでした。"
+        "夜勤回数・日勤人数・能力配置まで調整したシフトを使用しています。"
     ),
 }
 
@@ -132,7 +122,6 @@ def _build_optimization_summary(
     solver,
     day_staffing_balance_data,
     night_count_balance_data,
-    ability_balance_data,
     long_streak_terms,
     phase_results,
 ):
@@ -185,18 +174,6 @@ def _build_optimization_summary(
         ),
         night_count_imbalance_violation=_solver_value(
             solver, night_count_balance_data.night_balance_violation
-        ),
-        max_day_ability_total_range=_solver_value(
-            solver, ability_balance_data.max_day_range
-        ),
-        total_day_ability_total_range=_solver_value(
-            solver, ability_balance_data.total_day_range
-        ),
-        max_night_ability_total_range=_solver_value(
-            solver, ability_balance_data.max_night_range
-        ),
-        total_night_ability_total_range=_solver_value(
-            solver, ability_balance_data.total_night_range
         ),
         long_streak_penalty=sum(
             _solver_value(solver, term) for term in long_streak_terms

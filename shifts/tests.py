@@ -2038,10 +2038,6 @@ class ShiftSoftOptimizationTests(TestCase):
                 "night_shift_count_min",
                 "night_shift_count_max",
                 "night_count_imbalance_violation",
-                "max_day_ability_total_range",
-                "total_day_ability_total_range",
-                "max_night_ability_total_range",
-                "total_night_ability_total_range",
                 "long_streak_penalty",
                 "phase_statuses",
                 "phase_optimal_flags",
@@ -2069,14 +2065,15 @@ class ShiftSoftOptimizationTests(TestCase):
                 night_balance_violation=None,
                 night_count_vars={},
             ),
-            ability_balance_data=SimpleNamespace(
-                max_day_range=None,
-                total_day_range=None,
-                max_night_range=None,
-                total_night_range=None,
-            ),
             long_streak_terms=[],
             phase_results=[
+                OptimizationPhaseResult(
+                    name="night_count_balance",
+                    status="OPTIMAL",
+                    objective_value=0,
+                    optimal=True,
+                    solver=solver,
+                ),
                 OptimizationPhaseResult(
                     name="day_staffing_balance",
                     status="OPTIMAL",
@@ -2086,21 +2083,7 @@ class ShiftSoftOptimizationTests(TestCase):
                 ),
                 OptimizationPhaseResult(
                     name="long_streak",
-                    status="OPTIMAL",
-                    objective_value=0,
-                    optimal=True,
-                    solver=solver,
-                ),
-                OptimizationPhaseResult(
-                    name="night_count_balance",
                     status="UNKNOWN",
-                    objective_value=None,
-                    optimal=False,
-                    solver=None,
-                ),
-                OptimizationPhaseResult(
-                    name="ability_balance",
-                    status="NOT_RUN",
                     objective_value=None,
                     optimal=False,
                     solver=None,
@@ -2145,19 +2128,17 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(
             summary.phase_statuses,
             {
+                "night_count_balance": "OPTIMAL",
                 "day_staffing_balance": "OPTIMAL",
-                "long_streak": "OPTIMAL",
-                "night_count_balance": "UNKNOWN",
-                "ability_balance": "NOT_RUN",
+                "long_streak": "UNKNOWN",
             },
         )
         self.assertEqual(
             summary.phase_optimal_flags,
             {
+                "night_count_balance": True,
                 "day_staffing_balance": True,
-                "long_streak": True,
-                "night_count_balance": False,
-                "ability_balance": False,
+                "long_streak": False,
             },
         )
 
@@ -2281,37 +2262,27 @@ class ShiftSoftOptimizationTests(TestCase):
         cases = [
             (
                 {
-                    "day_staffing_balance": "OPTIMAL",
-                    "long_streak": "OPTIMAL",
                     "night_count_balance": "OPTIMAL",
-                    "ability_balance": "FEASIBLE",
+                    "day_staffing_balance": "FEASIBLE",
+                    "long_streak": "OPTIMAL",
                 },
                 None,
             ),
             (
-                {"ability_balance": "UNKNOWN"},
-                "処理時間の上限に達したため、"
-                "能力配置の均等化を完了できませんでした。"
-                "それ以前の条件を反映したシフトを使用しています。",
+                {"night_count_balance": "UNKNOWN"},
+                None,
             ),
             (
-                {
-                    "night_count_balance": "UNKNOWN",
-                    "ability_balance": "NOT_RUN",
-                },
-                "処理時間の上限に達したため、"
-                "夜勤回数・能力配置の均等化を完了できませんでした。"
-                "それ以前の条件を反映したシフトを使用しています。",
+                {"day_staffing_balance": "UNKNOWN"},
+                None,
             ),
             (
                 {
                     "long_streak": "UNKNOWN",
-                    "night_count_balance": "NOT_RUN",
-                    "ability_balance": "NOT_RUN",
                 },
                 "処理時間の上限に達したため、"
-                "連勤配置・夜勤回数・能力配置の調整を完了できませんでした。"
-                "日勤人数の均等化まで完了したシフトを使用しています。",
+                "連勤配置の調整を完了できませんでした。"
+                "夜勤回数・日勤人数・能力配置まで調整したシフトを使用しています。",
             ),
         ]
 
@@ -2909,7 +2880,7 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(data.night_balance_violation, 0)
         self.assertEqual(data.objective_score, 0)
 
-    def test_night_distribution_uses_only_night_eligible_staff(self):
+    def test_ability_distributions_use_the_correct_eligible_staff(self):
         self.create_rule()
         staff_settings = (
             ("夜勤可Lv4", 4, True),
@@ -2924,28 +2895,50 @@ class ShiftSoftOptimizationTests(TestCase):
             staff.ability_level = ability_level
             staff.save(update_fields=["ability_level"])
 
-        with patch.object(
-            shift_optimization,
-            "_build_night_count_balance_objective",
-            wraps=(
-                shift_optimization._build_night_count_balance_objective
-            ),
-        ) as build_night_objective:
+        with (
+            patch.object(
+                shift_optimization,
+                "_build_night_count_balance_objective",
+                wraps=(
+                    shift_optimization._build_night_count_balance_objective
+                ),
+            ) as build_night_objective,
+            patch.object(
+                shift_optimization,
+                "_build_day_staffing_balance_data",
+                wraps=(
+                    shift_optimization._build_day_staffing_balance_data
+                ),
+            ) as build_day_objective,
+        ):
             result = generate_shift(self.shift_plan)
 
         build_night_objective.assert_called_once()
-        distribution_data = build_night_objective.call_args.kwargs[
+        build_day_objective.assert_called_once()
+        night_distribution_data = build_night_objective.call_args.kwargs[
+            "ability_distribution_data"
+        ]
+        day_distribution_data = build_day_objective.call_args.kwargs[
             "ability_distribution_data"
         ]
         self.assertEqual(result.status, "success")
         self.assertEqual(
-            distribution_data.shift_type,
+            night_distribution_data.shift_type,
             ShiftResult.ShiftTypeChoices.NIGHT,
         )
-        self.assertEqual(distribution_data.eligible_staff_count, 2)
+        self.assertEqual(night_distribution_data.eligible_staff_count, 2)
         self.assertEqual(
-            distribution_data.eligible_above_counts,
+            night_distribution_data.eligible_above_counts,
             {3: 1, 4: 1, 5: 0},
+        )
+        self.assertEqual(
+            day_distribution_data.shift_type,
+            ShiftResult.ShiftTypeChoices.DAY,
+        )
+        self.assertEqual(day_distribution_data.eligible_staff_count, 3)
+        self.assertEqual(
+            day_distribution_data.eligible_above_counts,
+            {3: 2, 4: 2, 5: 1},
         )
 
     def test_phase_definitions_keep_required_order_and_time_limits(self):
@@ -2954,7 +2947,6 @@ class ShiftSoftOptimizationTests(TestCase):
                 objective_score=1
             ),
             night_count_balance_data=SimpleNamespace(objective_score=4),
-            ability_balance_data=SimpleNamespace(objective_score=6),
             long_streak_terms=[7],
             staff_count=20,
         )
@@ -2962,11 +2954,14 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(
             [phase.name for phase in phase_definitions],
             [
+                "night_count_balance",
                 "day_staffing_balance",
                 "long_streak",
-                "night_count_balance",
-                "ability_balance",
             ],
+        )
+        self.assertEqual(
+            shift_optimization.REQUIRED_OPTIMIZATION_PHASES,
+            {"night_count_balance", "day_staffing_balance"},
         )
         self.assertTrue(all(
             phase.max_time_seconds
@@ -3122,85 +3117,68 @@ class ShiftSoftOptimizationTests(TestCase):
             SimpleNamespace(name=name, objective=index, max_time_seconds=1)
             for index, name in enumerate(phase_names)
         ]
+        successful_solvers = [object(), object()]
+        executed_results = [
+            OptimizationPhaseResult(
+                name=phase_names[index],
+                status="OPTIMAL",
+                objective_value=index,
+                optimal=True,
+                solver=successful_solvers[index],
+            )
+            for index in range(2)
+        ]
+        executed_results.append(
+            OptimizationPhaseResult(
+                name="long_streak",
+                status="UNKNOWN",
+                objective_value=None,
+                optimal=False,
+                solver=None,
+            )
+        )
+        with (
+            patch.object(
+                shift_optimization,
+                "_solve_and_fix_objective",
+                side_effect=executed_results,
+            ) as solve_phase,
+            patch.object(
+                shift_optimization,
+                "_add_shift_solution_hints",
+            ) as add_hints,
+        ):
+            phase_results, solver, status = (
+                shift_optimization._run_optimization_phases(
+                    model=object(),
+                    shift_vars={},
+                    phase_definitions=phases,
+                )
+            )
 
-        for unknown_index in range(1, len(phase_names)):
-            unknown_phase_name = phase_names[unknown_index]
-            with self.subTest(unknown_phase=unknown_phase_name):
-                successful_solvers = [
-                    object() for _ in range(unknown_index)
-                ]
-                executed_results = [
-                    OptimizationPhaseResult(
-                        name=phase_names[index],
-                        status="OPTIMAL",
-                        objective_value=index,
-                        optimal=True,
-                        solver=successful_solvers[index],
-                    )
-                    for index in range(unknown_index)
-                ]
-                executed_results.append(
-                    OptimizationPhaseResult(
-                        name=unknown_phase_name,
-                        status="UNKNOWN",
-                        objective_value=None,
-                        optimal=False,
-                        solver=None,
-                    )
-                )
-                with (
-                    patch.object(
-                        shift_optimization,
-                        "_solve_and_fix_objective",
-                        side_effect=executed_results,
-                    ) as solve_phase,
-                    patch.object(
-                        shift_optimization,
-                        "_add_shift_solution_hints",
-                    ) as add_hints,
-                ):
-                    phase_results, solver, status = (
-                        shift_optimization._run_optimization_phases(
-                            model=object(),
-                            shift_vars={},
-                            phase_definitions=phases,
-                        )
-                    )
-
-                expected_statuses = {
-                    phase_name: (
-                        "OPTIMAL"
-                        if index < unknown_index
-                        else "UNKNOWN"
-                        if index == unknown_index
-                        else "NOT_RUN"
-                    )
-                    for index, phase_name in enumerate(phase_names)
-                }
-                expected_optimal_flags = {
-                    phase_name: index < unknown_index
-                    for index, phase_name in enumerate(phase_names)
-                }
-                self.assertIs(solver, successful_solvers[-1])
-                self.assertEqual(status, "OPTIMAL")
-                self.assertEqual(
-                    {result.name: result.status for result in phase_results},
-                    expected_statuses,
-                )
-                self.assertEqual(
-                    {result.name: result.optimal for result in phase_results},
-                    expected_optimal_flags,
-                )
-                self.assertEqual(solve_phase.call_count, unknown_index + 1)
-                self.assertEqual(add_hints.call_count, unknown_index)
-                self.assertTrue(
-                    all(
-                        result.solver is None
-                        for result in phase_results[unknown_index:]
-                    )
-                )
+        self.assertIs(solver, successful_solvers[-1])
+        self.assertEqual(status, "OPTIMAL")
+        self.assertEqual(
+            {result.name: result.status for result in phase_results},
+            {
+                "night_count_balance": "OPTIMAL",
+                "day_staffing_balance": "OPTIMAL",
+                "long_streak": "UNKNOWN",
+            },
+        )
+        self.assertEqual(solve_phase.call_count, 3)
+        self.assertEqual(add_hints.call_count, 2)
+        self.assertIsNone(phase_results[-1].solver)
 
     def test_day_staffing_unknown_still_raises_generation_error(self):
+        successful_solver = object()
+        night_result = OptimizationPhaseResult(
+            name="night_count_balance",
+            status="OPTIMAL",
+            objective_value=0,
+            optimal=True,
+            solver=successful_solver,
+        )
         unknown_result = OptimizationPhaseResult(
             name="day_staffing_balance",
             status="UNKNOWN",
@@ -3209,11 +3187,17 @@ class ShiftSoftOptimizationTests(TestCase):
             solver=None,
         )
 
-        with patch.object(
-            shift_optimization,
-            "_solve_and_fix_objective",
-            return_value=unknown_result,
-        ) as solve_phase:
+        with (
+            patch.object(
+                shift_optimization,
+                "_solve_and_fix_objective",
+                side_effect=[night_result, unknown_result],
+            ) as solve_phase,
+            patch.object(
+                shift_optimization,
+                "_add_shift_solution_hints",
+            ) as add_hints,
+        ):
             with self.assertRaisesRegex(
                 ShiftGenerationError,
                 "制限時間内に解を見つけられませんでした",
@@ -3222,6 +3206,11 @@ class ShiftSoftOptimizationTests(TestCase):
                     model=object(),
                     shift_vars={},
                     phase_definitions=[
+                        SimpleNamespace(
+                            name="night_count_balance",
+                            objective=0,
+                            max_time_seconds=1,
+                        ),
                         SimpleNamespace(
                             name="day_staffing_balance",
                             objective=1,
@@ -3235,7 +3224,12 @@ class ShiftSoftOptimizationTests(TestCase):
                     ],
                 )
 
-        solve_phase.assert_called_once()
+        self.assertEqual(solve_phase.call_count, 2)
+        add_hints.assert_called_once()
+        self.assertIs(
+            add_hints.call_args.kwargs["solver"],
+            successful_solver,
+        )
 
     def test_unknown_phase_does_not_read_or_fix_an_objective_value(self):
         model = Mock()
@@ -3252,7 +3246,7 @@ class ShiftSoftOptimizationTests(TestCase):
             result = shift_optimization._solve_and_fix_objective(
                 model=model,
                 objective="objective",
-                phase_name="ability_balance",
+                phase_name="long_streak",
                 max_time_seconds=1,
             )
 
@@ -3264,7 +3258,7 @@ class ShiftSoftOptimizationTests(TestCase):
         model.Add.assert_not_called()
         model.ClearObjective.assert_called_once_with()
 
-    def test_generate_shift_uses_previous_solution_when_ability_is_unknown(self):
+    def test_generate_shift_uses_previous_solution_when_long_streak_is_unknown(self):
         self.create_rule(
             required_day_staff=1,
             required_night_staff=0,
@@ -3274,10 +3268,10 @@ class ShiftSoftOptimizationTests(TestCase):
         self.create_staff_member(name="途中解採用")
         solve_phase = shift_optimization._solve_and_fix_objective
 
-        def solve_until_ability(**kwargs):
-            if kwargs["phase_name"] == "ability_balance":
+        def solve_until_long_streak(**kwargs):
+            if kwargs["phase_name"] == "long_streak":
                 return OptimizationPhaseResult(
-                    name="ability_balance",
+                    name="long_streak",
                     status="UNKNOWN",
                     objective_value=None,
                     optimal=False,
@@ -3288,7 +3282,7 @@ class ShiftSoftOptimizationTests(TestCase):
         with patch.object(
             shift_optimization,
             "_solve_and_fix_objective",
-            side_effect=solve_until_ability,
+            side_effect=solve_until_long_streak,
         ):
             result = generate_shift(self.shift_plan)
 
@@ -3296,30 +3290,29 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(len(result.shifts), 28)
         self.assertEqual(
-            summary.phase_statuses["ability_balance"],
+            summary.phase_statuses["long_streak"],
             "UNKNOWN",
         )
-        self.assertFalse(summary.phase_optimal_flags["ability_balance"])
+        self.assertFalse(summary.phase_optimal_flags["long_streak"])
         self.assertTrue(
             all(
                 summary.phase_statuses[phase_name]
                 in {"OPTIMAL", "FEASIBLE"}
                 for phase_name in (
-                    "day_staffing_balance",
-                    "long_streak",
                     "night_count_balance",
+                    "day_staffing_balance",
                 )
             )
         )
         self.assertEqual(
             result.solver_status,
-            summary.phase_statuses["night_count_balance"],
+            summary.phase_statuses["day_staffing_balance"],
         )
         self.assertEqual(
             result.optimization_incomplete_message,
             "処理時間の上限に達したため、"
-            "能力配置の均等化を完了できませんでした。"
-            "それ以前の条件を反映したシフトを使用しています。",
+            "連勤配置の調整を完了できませんでした。"
+            "夜勤回数・日勤人数・能力配置まで調整したシフトを使用しています。",
         )
 
     def test_empty_phase_definitions_raise_explicit_error(self):
@@ -3383,17 +3376,21 @@ class ShiftSoftOptimizationTests(TestCase):
                         objective_score=1
                     ),
                     night_count_balance_data=SimpleNamespace(objective_score=2),
-                    ability_balance_data=SimpleNamespace(objective_score=3),
                     long_streak_terms=[4],
                     staff_count=staff_count,
                 )
+                day_phase = next(
+                    phase
+                    for phase in phase_definitions
+                    if phase.name == "day_staffing_balance"
+                )
 
                 self.assertEqual(
-                    phase_definitions[0].name,
+                    day_phase.name,
                     "day_staffing_balance",
                 )
                 self.assertEqual(
-                    phase_definitions[0].max_time_seconds,
+                    day_phase.max_time_seconds,
                     expected_seconds,
                 )
 
@@ -3403,75 +3400,18 @@ class ShiftSoftOptimizationTests(TestCase):
                 objective_score=1
             ),
             night_count_balance_data=SimpleNamespace(objective_score=4),
-            ability_balance_data=SimpleNamespace(objective_score=6),
             long_streak_terms=[7],
             staff_count=40,
         )
 
         self.assertEqual(
             [phase.max_time_seconds for phase in phase_definitions],
-            [60, 23, 15, 15],
+            [15, 60, 23],
         )
         self.assertEqual(
             [phase.name for phase in phase_definitions],
             list(shift_optimization.PHASE_TIME_LIMITS),
         )
-
-    def test_ability_phase_balances_totals_instead_of_staff_average(self):
-        staff_members = []
-        for name, level in (("高", 5), ("中", 4), ("低", 1)):
-            staff = self.create_staff_member(name=name)
-            staff.ability_level = level
-            staff.save(update_fields=["ability_level"])
-            staff_members.append(staff)
-        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
-        model = cp_model.CpModel()
-        shift_vars = {}
-        for staff in staff_members:
-            for target_date in month_dates:
-                day_var = model.NewBoolVar(f"day_{staff.id}_{target_date}")
-                night_var = model.NewBoolVar(f"night_{staff.id}_{target_date}")
-                model.Add(night_var == 0)
-                shift_vars[(staff.id, target_date)] = {
-                    ShiftResult.ShiftTypeChoices.DAY: day_var,
-                    ShiftResult.ShiftTypeChoices.NIGHT: night_var,
-                }
-            model.Add(sum(
-                shift_vars[(staff.id, target_date)][ShiftResult.ShiftTypeChoices.DAY]
-                for target_date in month_dates
-            ) == 1)
-        model.Add(sum(
-            shift_vars[(staff.id, month_dates[0])][ShiftResult.ShiftTypeChoices.DAY]
-            for staff in staff_members
-        ) == 2)
-        model.Add(sum(
-            shift_vars[(staff.id, month_dates[1])][ShiftResult.ShiftTypeChoices.DAY]
-            for staff in staff_members
-        ) == 1)
-        rule = SimpleNamespace(
-            required_day_staff=1, required_night_staff=0,
-            required_leader_staff=0, min_ability_level=None,
-            min_ability_level_staff_count=None,
-        )
-        data = shift_optimization._build_ability_total_balance_objective(
-            model=model,
-            staff_members=staff_members,
-            month_dates=month_dates,
-            shift_vars=shift_vars,
-            effective_rules={target_date: rule for target_date in month_dates},
-        )
-
-        model.Minimize(data.objective_score)
-        solver = cp_model.CpSolver()
-        self.assertIn(solver.Solve(model), (cp_model.OPTIMAL, cp_model.FEASIBLE))
-
-        self.assertEqual(
-            solver.Value(data.day_ability_total_vars[month_dates[0]]), 5
-        )
-        self.assertEqual(
-            solver.Value(data.day_ability_total_vars[month_dates[1]]), 5
-        )
-        self.assertEqual(solver.Value(data.max_day_range), 0)
 
     def test_summary_records_every_optimization_phase_status(self):
         self.create_rule(
@@ -3485,6 +3425,15 @@ class ShiftSoftOptimizationTests(TestCase):
 
         self.assertEqual(set(summary.phase_statuses), expected_phases)
         self.assertEqual(set(summary.phase_optimal_flags), expected_phases)
+        self.assertEqual(
+            list(summary.phase_statuses),
+            [
+                "night_count_balance",
+                "day_staffing_balance",
+                "long_streak",
+            ],
+        )
+        self.assertNotIn("ability_balance", summary.phase_statuses)
         self.assertIn("day_staffing_balance", summary.phase_statuses)
         self.assertIn("night_count_balance", summary.phase_statuses)
         self.assertTrue(
@@ -3492,23 +3441,6 @@ class ShiftSoftOptimizationTests(TestCase):
         )
         self.assertTrue(
             all(isinstance(optimal, bool) for optimal in summary.phase_optimal_flags.values())
-        )
-
-    def test_ability_balance_uses_same_condition_daily_totals(self):
-        self.create_rule(
-            required_day_staff=2, required_night_staff=0, off_days_per_staff=14,
-            max_consecutive_work_days=31,
-        )
-        for level in (1, 2, 4, 5):
-            staff_member = self.create_staff_member(name=f"能力{level}")
-            staff_member.ability_level = level
-            staff_member.save(update_fields=["ability_level"])
-
-        summary = generate_shift(self.shift_plan).optimization_summary
-        self.assertEqual(summary.max_day_ability_total_range, 0)
-        self.assertEqual(summary.total_day_ability_total_range, 0)
-        self.assertFalse(
-            hasattr(shift_optimization, "_add_ability_balance_objective")
         )
 
     def test_long_streak_penalty_includes_previous_month_work(self):
@@ -3664,6 +3596,75 @@ class AbilityDistributionObjectiveTests(SimpleTestCase):
         solver = cp_model.CpSolver()
         self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
         return solver, night_count_data, ability_data
+
+    def build_day_integration_model(self, ability_levels, required_counts):
+        staff_members = [
+            SimpleNamespace(
+                id=index + 1,
+                ability_level=ability_level,
+            )
+            for index, ability_level in enumerate(ability_levels)
+        ]
+        month_dates = [
+            date(2026, 2, index + 1)
+            for index in range(len(required_counts))
+        ]
+        model = cp_model.CpModel()
+        shift_vars = {
+            (staff.id, target_date): {
+                ShiftResult.ShiftTypeChoices.DAY: model.NewBoolVar(
+                    f"integrated_day_{staff.id}_{target_date}"
+                )
+            }
+            for staff in staff_members
+            for target_date in month_dates
+        }
+        effective_rules = {
+            target_date: SimpleNamespace(required_day_staff=required_count)
+            for target_date, required_count in zip(
+                month_dates, required_counts
+            )
+        }
+        return (
+            model,
+            staff_members,
+            month_dates,
+            shift_vars,
+            effective_rules,
+        )
+
+    def solve_day_integration(
+        self,
+        *,
+        model,
+        staff_members,
+        month_dates,
+        shift_vars,
+        effective_rules,
+    ):
+        ability_data = (
+            shift_optimization._build_ability_distribution_objective(
+                model=model,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                shift_type=ShiftResult.ShiftTypeChoices.DAY,
+                eligible_staff=staff_members,
+            )
+        )
+        day_staffing_data = (
+            shift_optimization._build_day_staffing_balance_data(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                effective_rules=effective_rules,
+                ability_distribution_data=ability_data,
+            )
+        )
+        model.Minimize(day_staffing_data.objective_score)
+        solver = cp_model.CpSolver()
+        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
+        return solver, day_staffing_data, ability_data
 
     def test_counts_staff_at_or_above_each_ability_threshold(self):
         solver, data = self.solve_distribution(
@@ -3933,6 +3934,181 @@ class AbilityDistributionObjectiveTests(SimpleTestCase):
         self.assertEqual(solver.Value(data.total_deviation), 0)
         self.assertEqual(solver.Value(data.objective_score), 0)
 
+    def test_day_staffing_balance_has_priority_over_ability_distribution(self):
+        (
+            model,
+            staff_members,
+            month_dates,
+            shift_vars,
+            effective_rules,
+        ) = self.build_day_integration_model(
+            ability_levels=[5, 4, 1, 1],
+            required_counts=[2, 2],
+        )
+        choice = model.NewBoolVar("prefer_ability_over_day_staffing")
+        assignments = (
+            (1, 1 - choice, choice, 0),
+            (0, choice, 1, 1),
+        )
+        for target_date, date_assignments in zip(
+            month_dates, assignments
+        ):
+            for staff, assignment in zip(
+                staff_members, date_assignments
+            ):
+                model.Add(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.DAY
+                    ]
+                    == assignment
+                )
+
+        solver, day_staffing_data, ability_data = (
+            self.solve_day_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                effective_rules=effective_rules,
+            )
+        )
+
+        self.assertEqual(solver.Value(choice), 0)
+        self.assertEqual(solver.Value(day_staffing_data.delta_range), 0)
+        self.assertEqual(solver.Value(ability_data.max_deviation), 4)
+        self.assertEqual(solver.Value(ability_data.total_deviation), 20)
+        self.assertEqual(solver.Value(day_staffing_data.objective_score), 112)
+
+    def test_day_integration_spreads_ability_when_staffing_is_equal(self):
+        (
+            model,
+            staff_members,
+            month_dates,
+            shift_vars,
+            effective_rules,
+        ) = self.build_day_integration_model(
+            ability_levels=[5, 4, 1, 1],
+            required_counts=[2, 2],
+        )
+        choice = model.NewBoolVar("spread_day_ability")
+        assignments = (
+            (1, 1 - choice, choice, 0),
+            (0, choice, 1 - choice, 1),
+        )
+        for target_date, date_assignments in zip(
+            month_dates, assignments
+        ):
+            for staff, assignment in zip(
+                staff_members, date_assignments
+            ):
+                model.Add(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.DAY
+                    ]
+                    == assignment
+                )
+
+        solver, day_staffing_data, ability_data = (
+            self.solve_day_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                effective_rules=effective_rules,
+            )
+        )
+
+        self.assertEqual(solver.Value(choice), 1)
+        self.assertEqual(solver.Value(day_staffing_data.delta_range), 0)
+        self.assertEqual(
+            [
+                solver.Value(
+                    ability_data.threshold_count_vars[(target_date, 3)]
+                )
+                for target_date in month_dates
+            ],
+            [1, 1],
+        )
+        self.assertEqual(
+            [
+                solver.Value(
+                    ability_data.threshold_count_vars[(target_date, 4)]
+                )
+                for target_date in month_dates
+            ],
+            [1, 1],
+        )
+        self.assertEqual(
+            sorted(
+                solver.Value(
+                    ability_data.threshold_count_vars[(target_date, 5)]
+                )
+                for target_date in month_dates
+            ),
+            [0, 1],
+        )
+        self.assertEqual(solver.Value(ability_data.max_deviation), 2)
+        self.assertEqual(solver.Value(ability_data.total_deviation), 4)
+        self.assertEqual(solver.Value(day_staffing_data.objective_score), 50)
+
+    def test_day_integration_spreads_every_ability_threshold(self):
+        (
+            model,
+            staff_members,
+            month_dates,
+            shift_vars,
+            effective_rules,
+        ) = self.build_day_integration_model(
+            ability_levels=[5, 5, 4, 4, 3, 3, 1, 1],
+            required_counts=[4, 4],
+        )
+        for target_date in month_dates:
+            model.Add(
+                sum(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.DAY
+                    ]
+                    for staff in staff_members
+                )
+                == 4
+            )
+        for staff in staff_members:
+            model.Add(
+                sum(
+                    shift_vars[(staff.id, target_date)][
+                        ShiftResult.ShiftTypeChoices.DAY
+                    ]
+                    for target_date in month_dates
+                )
+                == 1
+            )
+
+        solver, day_staffing_data, ability_data = (
+            self.solve_day_integration(
+                model=model,
+                staff_members=staff_members,
+                month_dates=month_dates,
+                shift_vars=shift_vars,
+                effective_rules=effective_rules,
+            )
+        )
+
+        for target_date in month_dates:
+            self.assertEqual(
+                tuple(
+                    solver.Value(
+                        ability_data.threshold_count_vars[
+                            (target_date, threshold)
+                        ]
+                    )
+                    for threshold in shift_optimization.ABILITY_THRESHOLDS
+                ),
+                (3, 2, 1),
+            )
+        self.assertEqual(solver.Value(day_staffing_data.delta_range), 0)
+        self.assertEqual(solver.Value(ability_data.max_deviation), 0)
+        self.assertEqual(solver.Value(ability_data.total_deviation), 0)
+
     def test_night_integration_spreads_every_ability_threshold(self):
         model, staff_members, month_dates, shift_vars = (
             self.build_night_integration_model(
@@ -4111,7 +4287,7 @@ class AbilityDistributionObjectiveTests(SimpleTestCase):
         self.assertEqual(solver.Value(ability_data.total_deviation), 8)
         self.assertEqual(solver.Value(night_count_data.objective_score), 606)
 
-    def test_night_ability_total_breaks_equal_max_deviation_ties(self):
+    def test_night_ability_total_deviation_breaks_equal_max_ties(self):
         model, staff_members, month_dates, shift_vars = (
             self.build_night_integration_model(
                 ability_levels=[3, 1, 1, 1, 1],
@@ -4153,62 +4329,6 @@ class AbilityDistributionObjectiveTests(SimpleTestCase):
         self.assertEqual(solver.Value(ability_data.max_deviation), 3)
         self.assertEqual(solver.Value(ability_data.total_deviation), 5)
         self.assertEqual(solver.Value(night_count_data.objective_score), 302)
-
-    def test_legacy_ability_objective_no_longer_optimizes_night_totals(self):
-        staff_members = [
-            SimpleNamespace(
-                id=1,
-                ability_level=5,
-                can_night_shift=True,
-            ),
-            SimpleNamespace(
-                id=2,
-                ability_level=1,
-                can_night_shift=True,
-            ),
-        ]
-        month_dates = [date(2026, 2, 1), date(2026, 2, 2)]
-        model = cp_model.CpModel()
-        shift_vars = {}
-        for staff in staff_members:
-            for date_index, target_date in enumerate(month_dates):
-                day_var = model.NewBoolVar(
-                    f"legacy_day_{staff.id}_{target_date}"
-                )
-                night_var = model.NewBoolVar(
-                    f"legacy_night_{staff.id}_{target_date}"
-                )
-                model.Add(day_var == 0)
-                model.Add(night_var == int(date_index == 0))
-                shift_vars[(staff.id, target_date)] = {
-                    ShiftResult.ShiftTypeChoices.DAY: day_var,
-                    ShiftResult.ShiftTypeChoices.NIGHT: night_var,
-                }
-        rule = SimpleNamespace(
-            required_day_staff=0,
-            required_night_staff=0,
-            required_leader_staff=0,
-            min_ability_level=None,
-            min_ability_level_staff_count=None,
-        )
-        data = shift_optimization._build_ability_total_balance_objective(
-            model=model,
-            staff_members=staff_members,
-            month_dates=month_dates,
-            shift_vars=shift_vars,
-            effective_rules={
-                target_date: rule for target_date in month_dates
-            },
-        )
-        model.Minimize(data.objective_score)
-        solver = cp_model.CpSolver()
-
-        self.assertEqual(solver.Solve(model), cp_model.OPTIMAL)
-        self.assertEqual(solver.Value(data.max_day_range), 0)
-        self.assertEqual(solver.Value(data.max_night_range), 6)
-        self.assertEqual(solver.Value(data.total_night_range), 6)
-        self.assertEqual(solver.Value(data.objective_score), 0)
-
 
 class ShiftGenerationPersistenceTests(TestCase):
     def setUp(self):

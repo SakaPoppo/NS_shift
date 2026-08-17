@@ -62,10 +62,6 @@ class ShiftOptimizationSummary:
     night_shift_count_min: int | None
     night_shift_count_max: int | None
     night_count_imbalance_violation: int
-    max_day_ability_total_range: int
-    total_day_ability_total_range: int
-    max_night_ability_total_range: int
-    total_night_ability_total_range: int
     long_streak_penalty: int
     phase_statuses: dict[str, str] = field(default_factory=dict)
     phase_optimal_flags: dict[str, bool] = field(default_factory=dict)
@@ -126,19 +122,6 @@ class OptimizationPhaseDefinition:
 
 
 @dataclass
-class AbilityBalanceData:
-    day_ability_total_vars: dict[date, object] = field(default_factory=dict)
-    night_ability_total_vars: dict[date, object] = field(default_factory=dict)
-    day_group_ranges: list = field(default_factory=list)
-    night_group_ranges: list = field(default_factory=list)
-    max_day_range: object | None = None
-    total_day_range: object | None = None
-    max_night_range: object | None = None
-    total_night_range: object | None = None
-    objective_score: object | None = None
-
-
-@dataclass
 class AbilityDistributionData:
     """勤務内の累積能力レベル分布を母集団比率と比較するデータ。"""
 
@@ -176,7 +159,6 @@ class ShiftOptimizationOutput:
     shift_vars: dict
     day_staffing_balance_data: DayStaffingBalanceData
     night_count_balance_data: NightCountBalanceData
-    ability_balance_data: AbilityBalanceData
     long_streak_terms: list
     phase_results: list[OptimizationPhaseResult]
 

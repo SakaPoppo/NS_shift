@@ -21,7 +21,6 @@ from ..models import ShiftResult
 from ..services import OFF_LIKE_SHIFT_TYPES, WORKLIKE_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
-    AbilityBalanceData,
     AbilityDistributionData,
     DayStaffingBalanceData,
     GenerationContext,
@@ -40,12 +39,14 @@ LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
 ABILITY_THRESHOLDS = (3, 4, 5)
 CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
+    "night_count_balance": 10,
     "day_staffing_balance": 40,
     "long_streak": 15,
-    "night_count_balance": 10,
-    "ability_balance": 10,
 }
-REQUIRED_OPTIMIZATION_PHASES = {"day_staffing_balance"}
+REQUIRED_OPTIMIZATION_PHASES = {
+    "night_count_balance",
+    "day_staffing_balance",
+}
 SUCCESSFUL_OPTIMIZATION_STATUSES = {"OPTIMAL", "FEASIBLE"}
 BASE_STAFF_COUNT = 20
 STAFF_COUNT_STEP = 10
@@ -99,12 +100,22 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         shift_vars=shift_vars,
         effective_rules=context.effective_rules,
     )
+    day_ability_distribution_data = (
+        _build_ability_distribution_objective(
+            model=model,
+            month_dates=context.month_dates,
+            shift_vars=shift_vars,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            eligible_staff=context.staff_members,
+        )
+    )
     day_staffing_balance_data = _build_day_staffing_balance_data(
         model=model,
         staff_members=context.staff_members,
         month_dates=context.month_dates,
         shift_vars=shift_vars,
         effective_rules=context.effective_rules,
+        ability_distribution_data=day_ability_distribution_data,
     )
     _add_staffing_safety_constraints(
         model=model,
@@ -144,13 +155,6 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         night_after_night_pattern_terms=night_after_night_pattern_terms,
         ability_distribution_data=night_ability_distribution_data,
     )
-    ability_balance_data = _build_ability_total_balance_objective(
-        model=model,
-        staff_members=context.staff_members,
-        month_dates=context.month_dates,
-        shift_vars=shift_vars,
-        effective_rules=context.effective_rules,
-    )
     long_streak_terms = _add_long_consecutive_work_objective(
         model=model,
         staff_members=context.staff_members,
@@ -164,7 +168,6 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
     phase_definitions = _build_phase_definitions(
         day_staffing_balance_data=day_staffing_balance_data,
         night_count_balance_data=night_count_balance_data,
-        ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
         staff_count=len(context.staff_members),
     )
@@ -191,7 +194,6 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         shift_vars=shift_vars,
         day_staffing_balance_data=day_staffing_balance_data,
         night_count_balance_data=night_count_balance_data,
-        ability_balance_data=ability_balance_data,
         long_streak_terms=long_streak_terms,
         phase_results=phase_results,
     )
@@ -201,7 +203,6 @@ def _build_phase_definitions(
     *,
     day_staffing_balance_data: DayStaffingBalanceData,
     night_count_balance_data: NightCountBalanceData,
-    ability_balance_data: AbilityBalanceData,
     long_streak_terms: list,
     staff_count: int,
 ) -> list[OptimizationPhaseDefinition]:
@@ -209,13 +210,12 @@ def _build_phase_definitions(
 
     time_scale = _calculate_solver_time_scale(staff_count)
     objectives = [
+        ("night_count_balance", night_count_balance_data.objective_score),
         (
             "day_staffing_balance",
             day_staffing_balance_data.objective_score,
         ),
         ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
-        ("night_count_balance", night_count_balance_data.objective_score),
-        ("ability_balance", ability_balance_data.objective_score),
     ]
     return [
         OptimizationPhaseDefinition(
@@ -633,6 +633,7 @@ def _build_day_staffing_balance_data(
     month_dates,
     shift_vars,
     effective_rules,
+    ability_distribution_data=None,
 ) -> DayStaffingBalanceData:
     """必要人数との差分と、月全体の差分幅・集計を構築する。"""
 
@@ -692,9 +693,12 @@ def _build_day_staffing_balance_data(
         data.maximum_delta,
         list(data.day_staffing_delta_vars.values()),
     )
+    delta_range_upper_bound = (
+        maximum_delta_upper_bound - minimum_delta_lower_bound
+    )
     data.delta_range = model.NewIntVar(
         0,
-        maximum_delta_upper_bound - minimum_delta_lower_bound,
+        delta_range_upper_bound,
         "day_staffing_delta_range",
     )
     model.Add(data.delta_range == data.maximum_delta - data.minimum_delta)
@@ -704,7 +708,40 @@ def _build_day_staffing_balance_data(
     data.total_delta = (
         data.total_actual_day_count - data.total_required_day_count
     )
-    data.objective_score = data.delta_range
+    if ability_distribution_data is None:
+        data.objective_score = data.delta_range
+        return data
+
+    deviation_upper_bounds = {
+        threshold: above_count
+        * (
+            ability_distribution_data.eligible_staff_count
+            - above_count
+        )
+        for threshold, above_count in (
+            ability_distribution_data.eligible_above_counts.items()
+        )
+    }
+    max_deviation_upper_bound = max(
+        deviation_upper_bounds.values(),
+        default=0,
+    )
+    total_deviation_upper_bound = len(month_dates) * sum(
+        deviation_upper_bounds.values()
+    )
+    data.objective_score = _build_lexicographic_score(
+        [
+            (data.delta_range, delta_range_upper_bound),
+            (
+                ability_distribution_data.max_deviation,
+                max_deviation_upper_bound,
+            ),
+            (
+                ability_distribution_data.total_deviation,
+                total_deviation_upper_bound,
+            ),
+        ]
+    )
     return data
 
 
@@ -1062,111 +1099,6 @@ def _build_ability_distribution_objective(
             (data.total_deviation, total_deviation_upper_bound),
         ]
     )
-    return data
-
-
-def _build_staffing_condition_key(rule):
-    """曜日名ではなく、解決済みの勤務条件そのもので日付を分類する。"""
-
-    return (
-        rule.required_day_staff,
-        rule.required_night_staff,
-        rule.required_leader_staff,
-        rule.min_ability_level,
-        rule.min_ability_level_staff_count,
-    )
-
-
-def _group_dates_by_staffing_condition(month_dates, effective_rules):
-    groups = {}
-    for target_date in month_dates:
-        key = _build_staffing_condition_key(effective_rules[target_date])
-        groups.setdefault(key, []).append(target_date)
-    return groups
-
-
-def _add_group_ability_ranges(
-    *, model, groups, ability_total_vars, ability_upper_bound, name
-):
-    ranges = []
-    for group_index, dates in enumerate(groups.values()):
-        if len(dates) < 2:
-            continue
-        minimum = model.NewIntVar(
-            0, ability_upper_bound, f"{name}_ability_min_{group_index}"
-        )
-        maximum = model.NewIntVar(
-            0, ability_upper_bound, f"{name}_ability_max_{group_index}"
-        )
-        model.AddMinEquality(
-            minimum, [ability_total_vars[target_date] for target_date in dates]
-        )
-        model.AddMaxEquality(
-            maximum, [ability_total_vars[target_date] for target_date in dates]
-        )
-        ability_range = model.NewIntVar(
-            0, ability_upper_bound, f"{name}_ability_range_{group_index}"
-        )
-        model.Add(ability_range == maximum - minimum)
-        ranges.append(ability_range)
-    return ranges
-
-
-def _build_ability_total_balance_objective(
-    *, model, staff_members, month_dates, shift_vars, effective_rules
-):
-    data = AbilityBalanceData()
-    groups = _group_dates_by_staffing_condition(month_dates, effective_rules)
-    night_staff = [staff for staff in staff_members if staff.can_night_shift]
-    day_upper = sum(staff.ability_level for staff in staff_members)
-    night_upper = sum(staff.ability_level for staff in night_staff)
-    for target_date in month_dates:
-        day_total = model.NewIntVar(
-            0, day_upper, f"day_ability_total_{target_date.isoformat()}"
-        )
-        model.Add(day_total == sum(
-            staff.ability_level
-            * shift_vars[(staff.id, target_date)][ShiftResult.ShiftTypeChoices.DAY]
-            for staff in staff_members
-        ))
-        data.day_ability_total_vars[target_date] = day_total
-
-        night_total = model.NewIntVar(
-            0, night_upper, f"night_ability_total_{target_date.isoformat()}"
-        )
-        model.Add(night_total == sum(
-            staff.ability_level
-            * shift_vars[(staff.id, target_date)][ShiftResult.ShiftTypeChoices.NIGHT]
-            for staff in night_staff
-        ))
-        data.night_ability_total_vars[target_date] = night_total
-
-    data.day_group_ranges = _add_group_ability_ranges(
-        model=model,
-        groups=groups,
-        ability_total_vars=data.day_ability_total_vars,
-        ability_upper_bound=day_upper,
-        name="day",
-    )
-    data.night_group_ranges = _add_group_ability_ranges(
-        model=model,
-        groups=groups,
-        ability_total_vars=data.night_ability_total_vars,
-        ability_upper_bound=night_upper,
-        name="night",
-    )
-    data.max_day_range = _add_max_or_zero(
-        model, data.day_group_ranges, day_upper, "max_day_ability_range"
-    )
-    data.total_day_range = sum(data.day_group_ranges)
-    data.max_night_range = _add_max_or_zero(
-        model, data.night_group_ranges, night_upper, "max_night_ability_range"
-    )
-    data.total_night_range = sum(data.night_group_ranges)
-    data.objective_score = _build_lexicographic_score([
-        (data.max_day_range, day_upper),
-        (data.total_day_range, len(data.day_group_ranges) * day_upper),
-    ])
     return data
 
 
