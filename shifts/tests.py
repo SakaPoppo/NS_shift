@@ -959,7 +959,17 @@ class ShiftRuleWorkflowTests(TestCase):
         self.assertContains(response, "日別集計 夜勤能力")
         self.assertContains(response, 'id="shift-generation-loading"')
         self.assertContains(response, "data-generate-shift")
-        self.assertContains(response, "シフトを生成中です")
+        self.assertContains(response, "シフトを生成しています…")
+        self.assertContains(
+            response,
+            "通常は数十秒で完了しますが、スタッフ数や条件によっては"
+            "2〜3分程度かかる場合があります。",
+        )
+        self.assertContains(response, "画面を閉じずにそのままお待ちください。")
+        self.assertContains(
+            response,
+            'event.submitter?.value !== "generate"',
+        )
         self.assertContains(response, "window.requestAnimationFrame")
         self.assertContains(response, "HTMLFormElement.prototype.submit.call")
 
@@ -3365,10 +3375,10 @@ class ShiftSoftOptimizationTests(TestCase):
 
     def test_day_staffing_balance_time_limit_scales_with_staff_count(self):
         for staff_count, expected_seconds in (
-            (20, 40),
-            (21, 50),
-            (31, 60),
-            (41, 70),
+            (20, 60),
+            (21, 75),
+            (31, 90),
+            (41, 105),
         ):
             with self.subTest(staff_count=staff_count):
                 phase_definitions = shift_optimization._build_phase_definitions(
@@ -3394,24 +3404,38 @@ class ShiftSoftOptimizationTests(TestCase):
                     expected_seconds,
                 )
 
-    def test_phase_definitions_scale_all_limits_for_forty_staff(self):
-        phase_definitions = shift_optimization._build_phase_definitions(
-            day_staffing_balance_data=DayStaffingBalanceData(
-                objective_score=1
-            ),
-            night_count_balance_data=SimpleNamespace(objective_score=4),
-            long_streak_terms=[7],
-            staff_count=40,
+    def test_phase_definitions_scale_all_limits_with_staff_count(self):
+        cases = (
+            (20, [30, 60, 20]),
+            (30, [38, 75, 25]),
+            (40, [45, 90, 30]),
+            (41, [53, 105, 35]),
         )
 
-        self.assertEqual(
-            [phase.max_time_seconds for phase in phase_definitions],
-            [15, 60, 23],
-        )
-        self.assertEqual(
-            [phase.name for phase in phase_definitions],
-            list(shift_optimization.PHASE_TIME_LIMITS),
-        )
+        for staff_count, expected_limits in cases:
+            with self.subTest(staff_count=staff_count):
+                phase_definitions = shift_optimization._build_phase_definitions(
+                    day_staffing_balance_data=DayStaffingBalanceData(
+                        objective_score=1
+                    ),
+                    night_count_balance_data=SimpleNamespace(
+                        objective_score=4
+                    ),
+                    long_streak_terms=[7],
+                    staff_count=staff_count,
+                )
+
+                self.assertEqual(
+                    [
+                        phase.max_time_seconds
+                        for phase in phase_definitions
+                    ],
+                    expected_limits,
+                )
+                self.assertEqual(
+                    [phase.name for phase in phase_definitions],
+                    list(shift_optimization.PHASE_TIME_LIMITS),
+                )
 
     def test_summary_records_every_optimization_phase_status(self):
         self.create_rule(
