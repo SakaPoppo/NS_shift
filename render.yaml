@@ -1,6 +1,6 @@
 databases:
   - name: ns-shift-db
-    plan: free
+    plan: basic-256mb
     region: singapore
     databaseName: ns_shift
     user: ns_shift
