@@ -1,8 +1,9 @@
 import csv
+import os
 from dataclasses import fields
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
@@ -3021,6 +3022,164 @@ class ShiftSoftOptimizationTests(TestCase):
             ],
         )
 
+    def test_fix_night_assignments_adds_equalities_for_every_night_only(self):
+        events = []
+        solver_reads = []
+
+        class RecordingVar:
+            def __init__(self, name):
+                self.name = name
+
+            def __eq__(self, value):
+                return (self.name, value)
+
+        class RecordingModel:
+            def Add(self, constraint):
+                events.append(constraint)
+
+        class RecordingSolver:
+            def Value(self, shift_var):
+                solver_reads.append(shift_var.name)
+                return int(shift_var.name.startswith("staff_1_"))
+
+        shift_vars = {}
+        expected_constraints = []
+        expected_solver_reads = []
+        for staff_id in (1, 2):
+            for day_number in (1, 2):
+                target_date = date(2026, 2, day_number)
+                day_vars = {
+                    shift_type: RecordingVar(
+                        f"staff_{staff_id}_{day_number}_{shift_type}"
+                    )
+                    for shift_type in (
+                        ShiftResult.ShiftTypeChoices.DAY,
+                        ShiftResult.ShiftTypeChoices.NIGHT,
+                        ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                        ShiftResult.ShiftTypeChoices.OFF,
+                    )
+                }
+                shift_vars[(staff_id, target_date)] = day_vars
+                night_name = day_vars[
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ].name
+                night_value = int(night_name.startswith("staff_1_"))
+                expected_solver_reads.append(night_name)
+                expected_constraints.append((night_name, night_value))
+
+        shift_optimization._fix_night_assignments(
+            model=RecordingModel(),
+            shift_vars=shift_vars,
+            solver=RecordingSolver(),
+        )
+
+        self.assertEqual(solver_reads, expected_solver_reads)
+        self.assertEqual(events, expected_constraints)
+
+    def test_later_optimization_keeps_nights_but_can_swap_day_and_off(self):
+        model = cp_model.CpModel()
+        shift_vars = {}
+        first_date = date(2026, 2, 1)
+        second_date = date(2026, 2, 2)
+
+        for staff_id in (1, 2):
+            for target_date in (first_date, second_date):
+                day_vars = {
+                    shift_type: model.NewBoolVar(
+                        f"staff_{staff_id}_{target_date}_{shift_type}"
+                    )
+                    for shift_type in (
+                        ShiftResult.ShiftTypeChoices.DAY,
+                        ShiftResult.ShiftTypeChoices.NIGHT,
+                        ShiftResult.ShiftTypeChoices.OFF,
+                    )
+                }
+                model.AddExactlyOne(day_vars.values())
+                shift_vars[(staff_id, target_date)] = day_vars
+
+        model.Add(
+            sum(
+                shift_vars[(staff_id, first_date)][
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ]
+                for staff_id in (1, 2)
+            )
+            == 1
+        )
+        model.Add(
+            sum(
+                shift_vars[(staff_id, second_date)][
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ]
+                for staff_id in (1, 2)
+            )
+            == 0
+        )
+
+        night_solver = cp_model.CpSolver()
+        self.assertEqual(night_solver.Solve(model), cp_model.OPTIMAL)
+        original_nights = {
+            cell_key: night_solver.Value(
+                day_vars[ShiftResult.ShiftTypeChoices.NIGHT]
+            )
+            for cell_key, day_vars in shift_vars.items()
+        }
+        original_night_staff_id = next(
+            staff_id
+            for staff_id in (1, 2)
+            if original_nights[(staff_id, first_date)]
+        )
+        opposite_night_staff_id = 3 - original_night_staff_id
+        second_day_vars = shift_vars[(1, second_date)]
+        original_second_day_shift = (
+            ShiftResult.ShiftTypeChoices.DAY
+            if night_solver.Value(
+                second_day_vars[ShiftResult.ShiftTypeChoices.DAY]
+            )
+            else ShiftResult.ShiftTypeChoices.OFF
+        )
+        alternative_second_day_shift = (
+            ShiftResult.ShiftTypeChoices.OFF
+            if original_second_day_shift
+            == ShiftResult.ShiftTypeChoices.DAY
+            else ShiftResult.ShiftTypeChoices.DAY
+        )
+
+        shift_optimization._fix_night_assignments(
+            model=model,
+            shift_vars=shift_vars,
+            solver=night_solver,
+        )
+        model.Maximize(
+            10
+            * shift_vars[(opposite_night_staff_id, first_date)][
+                ShiftResult.ShiftTypeChoices.NIGHT
+            ]
+            + second_day_vars[alternative_second_day_shift]
+        )
+
+        later_solver = cp_model.CpSolver()
+        self.assertEqual(later_solver.Solve(model), cp_model.OPTIMAL)
+        self.assertEqual(
+            {
+                cell_key: later_solver.Value(
+                    day_vars[ShiftResult.ShiftTypeChoices.NIGHT]
+                )
+                for cell_key, day_vars in shift_vars.items()
+            },
+            original_nights,
+        )
+        self.assertEqual(
+            later_solver.Value(
+                second_day_vars[alternative_second_day_shift]
+            ),
+            1,
+        )
+        self.assertEqual(
+            later_solver.Value(second_day_vars[original_second_day_shift]),
+            0,
+        )
+
     def test_all_successful_phases_use_latest_solver_and_keep_hints(self):
         phase_names = list(shift_optimization.PHASE_TIME_LIMITS)
         solvers = [object() for _ in phase_names]
@@ -3039,16 +3198,35 @@ class ShiftSoftOptimizationTests(TestCase):
             for index, result in enumerate(results)
         ]
 
+        events = []
+        result_iterator = iter(results)
+
+        def solve_phase(**kwargs):
+            events.append(("solve", kwargs["phase_name"]))
+            return next(result_iterator)
+
+        def fix_nights(**kwargs):
+            events.append(("fix_nights", kwargs["solver"]))
+
+        def add_solution_hints(**kwargs):
+            events.append(("add_hints", kwargs["solver"]))
+
         with (
             patch.object(
                 shift_optimization,
                 "_solve_and_fix_objective",
-                side_effect=results,
+                side_effect=solve_phase,
             ),
             patch.object(
                 shift_optimization,
                 "_add_shift_solution_hints",
+                side_effect=add_solution_hints,
             ) as add_hints,
+            patch.object(
+                shift_optimization,
+                "_fix_night_assignments",
+                side_effect=fix_nights,
+            ) as fix_night_assignments,
         ):
             phase_results, solver, status = (
                 shift_optimization._run_optimization_phases(
@@ -3065,6 +3243,22 @@ class ShiftSoftOptimizationTests(TestCase):
         self.assertEqual(
             [call.kwargs["solver"] for call in add_hints.call_args_list],
             solvers[:-1],
+        )
+        fix_night_assignments.assert_called_once_with(
+            model=ANY,
+            shift_vars={"shifts": "only"},
+            solver=solvers[0],
+        )
+        self.assertEqual(
+            events,
+            [
+                ("solve", "night_count_balance"),
+                ("fix_nights", solvers[0]),
+                ("add_hints", solvers[0]),
+                ("solve", "day_staffing_balance"),
+                ("add_hints", solvers[1]),
+                ("solve", "long_streak"),
+            ],
         )
 
     def test_feasible_result_updates_last_successful_solver_in_every_phase(self):
@@ -3101,6 +3295,10 @@ class ShiftSoftOptimizationTests(TestCase):
                         shift_optimization,
                         "_add_shift_solution_hints",
                     ) as add_hints,
+                    patch.object(
+                        shift_optimization,
+                        "_fix_night_assignments",
+                    ) as fix_night_assignments,
                 ):
                     phase_results, solver, status = (
                         shift_optimization._run_optimization_phases(
@@ -3113,6 +3311,11 @@ class ShiftSoftOptimizationTests(TestCase):
                 self.assertEqual(phase_results, results)
                 self.assertIs(solver, solvers[-1])
                 self.assertEqual(status, results[-1].status)
+                fix_night_assignments.assert_called_once_with(
+                    model=ANY,
+                    shift_vars={},
+                    solver=solvers[0],
+                )
                 if feasible_index < len(phase_names) - 1:
                     self.assertIs(
                         add_hints.call_args_list[feasible_index].kwargs[
@@ -3241,6 +3444,44 @@ class ShiftSoftOptimizationTests(TestCase):
             successful_solver,
         )
 
+    def test_night_unknown_does_not_fix_assignments(self):
+        unknown_result = OptimizationPhaseResult(
+            name="night_count_balance",
+            status="UNKNOWN",
+            objective_value=None,
+            optimal=False,
+            solver=None,
+        )
+
+        with (
+            patch.object(
+                shift_optimization,
+                "_solve_and_fix_objective",
+                return_value=unknown_result,
+            ),
+            patch.object(
+                shift_optimization,
+                "_fix_night_assignments",
+            ) as fix_night_assignments,
+        ):
+            with self.assertRaisesRegex(
+                ShiftGenerationError,
+                "制限時間内に解を見つけられませんでした",
+            ):
+                shift_optimization._run_optimization_phases(
+                    model=object(),
+                    shift_vars={"invalid": "must not be read"},
+                    phase_definitions=[
+                        SimpleNamespace(
+                            name="night_count_balance",
+                            objective=0,
+                            max_time_seconds=1,
+                        )
+                    ],
+                )
+
+        fix_night_assignments.assert_not_called()
+
     def test_unknown_phase_does_not_read_or_fix_an_objective_value(self):
         model = Mock()
         solver = Mock()
@@ -3267,6 +3508,23 @@ class ShiftSoftOptimizationTests(TestCase):
         solver.ObjectiveValue.assert_not_called()
         model.Add.assert_not_called()
         model.ClearObjective.assert_called_once_with()
+
+    def test_new_solver_uses_worker_count_from_environment(self):
+        with patch.dict(
+            os.environ,
+            {"ORTOOLS_NUM_SEARCH_WORKERS": "2"},
+        ):
+            solver = shift_optimization._new_solver(12)
+
+        self.assertEqual(solver.parameters.max_time_in_seconds, 12)
+        self.assertEqual(solver.parameters.num_search_workers, 2)
+
+    def test_new_solver_keeps_existing_default_worker_count(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ORTOOLS_NUM_SEARCH_WORKERS", None)
+            solver = shift_optimization._new_solver(12)
+
+        self.assertEqual(solver.parameters.num_search_workers, 8)
 
     def test_generate_shift_uses_previous_solution_when_long_streak_is_unknown(self):
         self.create_rule(
