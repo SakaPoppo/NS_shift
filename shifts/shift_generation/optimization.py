@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 
 from ortools.sat.python import cp_model
 
@@ -259,6 +260,14 @@ def _add_shift_solution_hints(*, model, shift_vars: dict, solver) -> None:
             model.AddHint(shift_var, solver.Value(shift_var))
 
 
+def _fix_night_assignments(*, model, shift_vars: dict, solver) -> None:
+    """夜勤フェーズで採用したNIGHT配置を後続フェーズ向けに固定する。"""
+
+    for day_vars in shift_vars.values():
+        night_var = day_vars[ShiftResult.ShiftTypeChoices.NIGHT]
+        model.Add(night_var == solver.Value(night_var))
+
+
 def _run_optimization_phases(
     *,
     model,
@@ -324,6 +333,12 @@ def _run_optimization_phases(
             raise ShiftGenerationError(
                 _build_solver_error_message(result.status)
             )
+        if phase.name == "night_count_balance":
+            _fix_night_assignments(
+                model=model,
+                shift_vars=shift_vars,
+                solver=result.solver,
+            )
         last_successful_solver = result.solver
         last_successful_status = result.status
         last_successful_phase_name = result.name
@@ -343,7 +358,9 @@ def _run_optimization_phases(
 def _new_solver(max_time_seconds: int) -> cp_model.CpSolver:
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max_time_seconds
-    solver.parameters.num_search_workers = 8
+    solver.parameters.num_search_workers = int(
+        os.environ.get("ORTOOLS_NUM_SEARCH_WORKERS", "8")
+    )
     return solver
 
 
