@@ -40,7 +40,7 @@ LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
 ABILITY_THRESHOLDS = (3, 4, 5)
 CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
-    "night_count_balance": 20,
+    "night_count_balance": 40,
     "night_ability_balance": 40,
     "day_staffing_balance": 15,
     "day_ability_balance": 10,
