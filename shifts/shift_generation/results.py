@@ -16,6 +16,11 @@ DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX = (
     "設定した必要日勤数ではシフト最適化ができなかったため、"
 )
 OPTIMIZATION_INCOMPLETE_MESSAGES = {
+    "day_ability_balance": (
+        "処理時間の上限に達したため、"
+        "日勤能力配置・連勤配置の調整を完了できませんでした。"
+        "夜勤回数・日勤人数まで調整したシフトを使用しています。"
+    ),
     "long_streak": (
         "処理時間の上限に達したため、"
         "連勤配置の調整を完了できませんでした。"
