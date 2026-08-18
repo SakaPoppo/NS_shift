@@ -7,7 +7,7 @@ databases:
 
 services:
   - type: web
-    plan: free
+    plan: starter 
     name: ns-shift-web
     runtime: python
     region: singapore
@@ -21,6 +21,8 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: WEB_CONCURRENCY
+        value: "1"
+      - key: ORTOOLS_NUM_SEARCH_WORKERS
         value: "1"
       - key: GUNICORN_TIMEOUT
         value: "210"

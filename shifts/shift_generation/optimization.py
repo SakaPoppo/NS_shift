@@ -40,10 +40,11 @@ LONG_STREAK_WEIGHTS = {"near_max": 1, "at_max": 3}
 ABILITY_THRESHOLDS = (3, 4, 5)
 CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
-    "night_count_balance": 30,
-    "day_staffing_balance": 60,
-    "day_ability_balance": 60,
-    "long_streak": 20,
+    "night_count_balance": 20,
+    "night_ability_balance": 40,
+    "day_staffing_balance": 15,
+    "day_ability_balance": 10,
+    "long_streak": 10,
 }
 REQUIRED_OPTIMIZATION_PHASES = {
     "night_count_balance",
@@ -216,17 +217,27 @@ def _build_phase_definitions(
 
     time_scale = _calculate_solver_time_scale(staff_count)
     objectives = [
-        ("night_count_balance", night_count_balance_data.objective_score),
-        (
-            "day_staffing_balance",
-            day_staffing_balance_data.objective_score,
-        ),
-        (
-            "day_ability_balance",
-            day_ability_distribution_data.objective_score,
-        ),
-        ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
-    ]
+    (
+        "night_count_balance",
+        night_count_balance_data.night_balance_violation,
+    ),
+    (
+        "night_ability_balance",
+        night_count_balance_data.objective_score,
+    ),
+    (
+        "day_staffing_balance",
+        day_staffing_balance_data.objective_score,
+    ),
+    (
+        "day_ability_balance",
+        day_ability_distribution_data.objective_score,
+    ),
+    (
+        "long_streak",
+        sum(long_streak_terms) if long_streak_terms else 0,
+    ),
+]
     return [
         OptimizationPhaseDefinition(
             name=name,
@@ -321,6 +332,22 @@ def _run_optimization_phases(
 
         if result.status == "UNKNOWN":
             if (
+                phase.name == "night_ability_balance"
+                and last_successful_solver is not None
+                and last_successful_phase_name == "night_count_balance"
+            ):
+                _fix_night_assignments(
+                    model=model,
+                    shift_vars=shift_vars,
+                    solver=last_successful_solver,
+                )
+                logger.warning(
+                    "night ability optimization fallback "
+                    "using night_count_balance solution"
+                )
+                continue
+
+            if (
                 last_successful_solver is None
                 or not REQUIRED_OPTIMIZATION_PHASES.issubset(
                     completed_successful_phase_names
@@ -329,6 +356,7 @@ def _run_optimization_phases(
                 raise ShiftGenerationError(
                     _build_solver_error_message(result.status)
                 )
+
             phase_results.extend(
                 OptimizationPhaseResult(
                     name=remaining_phase.name,
@@ -339,6 +367,7 @@ def _run_optimization_phases(
                 )
                 for remaining_phase in phase_definitions[phase_index + 1 :]
             )
+
             logger.warning(
                 "shift optimization fallback stopped_phase=%s "
                 "last_successful_phase=%s status=%s",
@@ -352,7 +381,7 @@ def _run_optimization_phases(
             raise ShiftGenerationError(
                 _build_solver_error_message(result.status)
             )
-        if phase.name == "night_count_balance":
+        if phase.name == "night_ability_balance":
             _fix_night_assignments(
                 model=model,
                 shift_vars=shift_vars,
@@ -396,6 +425,11 @@ def _solve_and_fix_objective(
 
     model.Minimize(objective)
     solver = _new_solver(max_time_seconds)
+    logger.info(
+    "shift optimization phase started phase=%s limit=%ss",
+    phase_name,
+    max_time_seconds,
+)
     status = solver.Solve(model)
     status_name = solver.StatusName(status)
     logger.info(
