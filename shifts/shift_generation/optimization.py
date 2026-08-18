@@ -42,6 +42,7 @@ CP_SAT_INT_MAX = 2**63 - 1
 PHASE_TIME_LIMITS = {
     "night_count_balance": 30,
     "day_staffing_balance": 60,
+    "day_ability_balance": 60,
     "long_streak": 20,
 }
 REQUIRED_OPTIMIZATION_PHASES = {
@@ -116,7 +117,6 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         month_dates=context.month_dates,
         shift_vars=shift_vars,
         effective_rules=context.effective_rules,
-        ability_distribution_data=day_ability_distribution_data,
     )
     _add_staffing_safety_constraints(
         model=model,
@@ -168,6 +168,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
 
     phase_definitions = _build_phase_definitions(
         day_staffing_balance_data=day_staffing_balance_data,
+        day_ability_distribution_data=day_ability_distribution_data,
         night_count_balance_data=night_count_balance_data,
         long_streak_terms=long_streak_terms,
         staff_count=len(context.staff_members),
@@ -186,6 +187,9 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
     phase_results, solver, solver_status = _run_optimization_phases(
         model=model,
         shift_vars=shift_vars,
+        actual_day_count_vars=(
+            day_staffing_balance_data.actual_day_count_vars
+        ),
         phase_definitions=phase_definitions,
     )
 
@@ -203,6 +207,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
 def _build_phase_definitions(
     *,
     day_staffing_balance_data: DayStaffingBalanceData,
+    day_ability_distribution_data: AbilityDistributionData,
     night_count_balance_data: NightCountBalanceData,
     long_streak_terms: list,
     staff_count: int,
@@ -215,6 +220,10 @@ def _build_phase_definitions(
         (
             "day_staffing_balance",
             day_staffing_balance_data.objective_score,
+        ),
+        (
+            "day_ability_balance",
+            day_ability_distribution_data.objective_score,
         ),
         ("long_streak", sum(long_streak_terms) if long_streak_terms else 0),
     ]
@@ -268,10 +277,20 @@ def _fix_night_assignments(*, model, shift_vars: dict, solver) -> None:
         model.Add(night_var == solver.Value(night_var))
 
 
+def _fix_day_staffing_counts(
+    *, model, actual_day_count_vars: dict, solver
+) -> None:
+    """日勤人数フェーズで採用した各日の人数を後続フェーズ向けに固定する。"""
+
+    for count_var in actual_day_count_vars.values():
+        model.Add(count_var == solver.Value(count_var))
+
+
 def _run_optimization_phases(
     *,
     model,
     shift_vars: dict,
+    actual_day_count_vars: dict,
     phase_definitions: list[OptimizationPhaseDefinition],
 ) -> tuple[list[OptimizationPhaseResult], object, str]:
     """フェーズを順に解き、直前の有効な配置を次フェーズへ引き継ぐ。"""
@@ -337,6 +356,12 @@ def _run_optimization_phases(
             _fix_night_assignments(
                 model=model,
                 shift_vars=shift_vars,
+                solver=result.solver,
+            )
+        elif phase.name == "day_staffing_balance":
+            _fix_day_staffing_counts(
+                model=model,
+                actual_day_count_vars=actual_day_count_vars,
                 solver=result.solver,
             )
         last_successful_solver = result.solver
@@ -650,7 +675,6 @@ def _build_day_staffing_balance_data(
     month_dates,
     shift_vars,
     effective_rules,
-    ability_distribution_data=None,
 ) -> DayStaffingBalanceData:
     """必要人数との差分と、月全体の差分幅・集計を構築する。"""
 
@@ -725,40 +749,7 @@ def _build_day_staffing_balance_data(
     data.total_delta = (
         data.total_actual_day_count - data.total_required_day_count
     )
-    if ability_distribution_data is None:
-        data.objective_score = data.delta_range
-        return data
-
-    deviation_upper_bounds = {
-        threshold: above_count
-        * (
-            ability_distribution_data.eligible_staff_count
-            - above_count
-        )
-        for threshold, above_count in (
-            ability_distribution_data.eligible_above_counts.items()
-        )
-    }
-    max_deviation_upper_bound = max(
-        deviation_upper_bounds.values(),
-        default=0,
-    )
-    total_deviation_upper_bound = len(month_dates) * sum(
-        deviation_upper_bounds.values()
-    )
-    data.objective_score = _build_lexicographic_score(
-        [
-            (data.delta_range, delta_range_upper_bound),
-            (
-                ability_distribution_data.max_deviation,
-                max_deviation_upper_bound,
-            ),
-            (
-                ability_distribution_data.total_deviation,
-                total_deviation_upper_bound,
-            ),
-        ]
-    )
+    data.objective_score = data.delta_range
     return data
 
 
