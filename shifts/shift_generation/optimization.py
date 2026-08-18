@@ -928,6 +928,9 @@ def _build_night_count_balance_objective(
         model.AddMaxEquality(
             data.night_count_max, list(data.night_count_vars.values())
         )
+        model.Add(
+            data.night_count_max - data.night_count_min <= 2
+        )
         data.night_balance_violation = model.NewIntVar(
             0, len(month_dates), "night_balance_violation"
         )
