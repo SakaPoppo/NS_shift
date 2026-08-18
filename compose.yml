@@ -27,7 +27,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    cpus: "1.0"
+    cpus: "0.5"
     restart: unless-stopped
     # ローカル開発用のDjango開発サーバーを起動
     command: python manage.py runserver 0.0.0.0:8000
@@ -40,7 +40,7 @@ services:
       # webコンテナ内のタイムゾーン
       TZ: Asia/Tokyo
       # 1 CPU環境でのOR-Tools探索worker数
-      ORTOOLS_NUM_SEARCH_WORKERS: "2"
+      ORTOOLS_NUM_SEARCH_WORKERS: "1"
     env_file:
       # ローカル開発用の環境変数を読み込む
       - .env
