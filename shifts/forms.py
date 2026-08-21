@@ -51,22 +51,19 @@ def delete_form_instance(form):
 
 
 class ShiftPlanCreateForm(forms.ModelForm):
-    """シフト表の対象年月を選ぶフォーム。
+    """シフト表の対象年月を選ぶフォーム。"""
 
-    ユーザーごとに同じ年月のシフト表を重複作成できないため、
-    clean() では request.user 相当の user を使って重複を確認する。
-    """
-
-    START_YEAR = 2025
-    YEAR_COUNT = 10
-    YEAR_CHOICES = [(year, f"{year}年") for year in range(START_YEAR, START_YEAR + YEAR_COUNT)]
-    MONTH_CHOICES = [(month, f"{month}月") for month in range(1, 13)]
+    MONTH_CHOICES = [
+        (month, f"{month}月")
+        for month in range(1, 13)
+    ]
 
     year = forms.TypedChoiceField(
         label="年",
-        choices=YEAR_CHOICES,
+        choices=(),
         coerce=int,
     )
+
     month = forms.TypedChoiceField(
         label="月",
         choices=MONTH_CHOICES,
@@ -83,10 +80,15 @@ class ShiftPlanCreateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
         today = timezone.localdate()
-        year_choices = [choice[0] for choice in self.YEAR_CHOICES]
-        initial_year = today.year if today.year in year_choices else year_choices[0]
 
-        self.fields["year"].initial = self.initial.get("year", initial_year)
+        year_choices = [
+            (year, f"{year}年")
+            for year in range(today.year - 1, today.year + 2)
+        ]
+
+        self.fields["year"].choices = year_choices
+        self.fields["year"].initial = self.initial.get("year", today.year)
+
         set_widget_attrs(self.fields["year"], **{"class": SELECT_CLASS})
         self.fields["month"].initial = self.initial.get("month", today.month)
 
