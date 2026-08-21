@@ -42,7 +42,7 @@
           <div class="form-control w-full gap-2">
             <label class="label justify-start gap-3 pb-0" for="{{ rule_form.required_day_staff.id_for_label }}">
               <span class="label-text font-semibold text-slate-700">必要日勤数</span>
-              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+              {% include "components/field_badge.html" with variant="required" %}
             </label>
             <div class="label justify-start px-0 pt-0">
               <span class="label-text-alt text-base-content/60">1日あたりに必要な日勤人数を入力してください。</span>
@@ -56,7 +56,7 @@
           <div class="form-control w-full gap-2">
             <label class="label justify-start gap-3 pb-0" for="{{ rule_form.required_night_staff.id_for_label }}">
               <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
-              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+              {% include "components/field_badge.html" with variant="required" %}
             </label>
             <div class="label justify-start px-0 pt-0">
               <span class="label-text-alt text-base-content/60">1日あたりに必要な夜勤人数を入力してください。</span>
@@ -70,7 +70,7 @@
           <div class="form-control w-full gap-2">
             <label class="label justify-start gap-3 pb-0" for="{{ rule_form.off_days_per_staff.id_for_label }}">
               <span class="label-text font-semibold text-slate-700">月休日数</span>
-              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+              {% include "components/field_badge.html" with variant="required" %}
             </label>
             <div class="label justify-start px-0 pt-0">
               <span class="label-text-alt text-base-content/60">スタッフ1人あたりの月間休日数を入力してください。</span>
@@ -84,7 +84,7 @@
           <div class="form-control w-full gap-2">
             <label class="label justify-start gap-3 pb-0" for="{{ rule_form.max_consecutive_work_days.id_for_label }}">
               <span class="label-text font-semibold text-slate-700">最大連勤数</span>
-              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+              {% include "components/field_badge.html" with variant="required" %}
             </label>
             <div class="label justify-start px-0 pt-0">
               <span class="label-text-alt text-base-content/60">連続勤務を何日まで許可するかを入力してください。</span>
@@ -98,7 +98,7 @@
           <div class="form-control w-full gap-2">
             <span class="label justify-start gap-3 pb-0">
               <span class="label-text font-semibold text-slate-700">夜勤明け翌日を公休にするか</span>
-              <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">必須</span>
+              {% include "components/field_badge.html" with variant="required" %}
             </span>
             <div class="label justify-start px-0 pt-0">
               <span class="label-text-alt text-base-content/60">「しない」を選んだ場合、夜勤が連続で配置される場合があります。</span>
@@ -119,7 +119,7 @@
           <div class="form-control w-full gap-2">
             <label class="label justify-start gap-3 pb-0" for="{{ rule_form.required_leader_staff.id_for_label }}">
               <span class="label-text font-semibold text-slate-700">各勤務に必要なリーダー数</span>
-              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+              {% include "components/field_badge.html" with variant="optional" %}
             </label>
             <div class="label justify-start px-0 pt-0">
               <span class="label-text-alt text-base-content/60">必要な場合のみ入力してください。未入力時は0人として保存されます。</span>
@@ -182,7 +182,7 @@
                     <div class="form-control w-full gap-2">
                       <label class="label justify-start gap-3 pb-0" for="{{ row.form.required_day_staff.id_for_label }}">
                         <span class="label-text font-semibold text-slate-700">必要日勤数</span>
-                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                        {% include "components/field_badge.html" with variant="optional" %}
                       </label>
                       {{ row.form.required_day_staff }}
                       {% for error in row.form.required_day_staff.errors %}
@@ -193,7 +193,7 @@
                     <div class="form-control w-full gap-2">
                       <label class="label justify-start gap-3 pb-0" for="{{ row.form.required_night_staff.id_for_label }}">
                         <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
-                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                        {% include "components/field_badge.html" with variant="optional" %}
                       </label>
                       {{ row.form.required_night_staff }}
                       {% for error in row.form.required_night_staff.errors %}
@@ -207,7 +207,7 @@
                         <div class="form-control w-full gap-2">
                           <label class="label justify-start gap-3 pb-0" for="{{ row.form.min_ability_level.id_for_label }}">
                             <span class="label-text font-semibold text-slate-700">勤務レベル</span>
-                            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                            {% include "components/field_badge.html" with variant="optional" %}
                           </label>
                           {{ row.form.min_ability_level }}
                         </div>
@@ -215,7 +215,7 @@
                         <div class="form-control w-full gap-2">
                           <label class="label justify-start gap-3 pb-0" for="{{ row.form.min_ability_level_staff_count.id_for_label }}">
                             <span class="label-text font-semibold text-slate-700">必要人数</span>
-                            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                            {% include "components/field_badge.html" with variant="optional" %}
                           </label>
                           {{ row.form.min_ability_level_staff_count }}
                         </div>
@@ -232,7 +232,7 @@
                     <div class="form-control w-full gap-2">
                       <label class="label justify-start gap-3 pb-0" for="{{ row.form.required_leader_staff.id_for_label }}">
                         <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
-                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                        {% include "components/field_badge.html" with variant="optional" %}
                       </label>
                       {{ row.form.required_leader_staff }}
                       {% for error in row.form.required_leader_staff.errors %}
@@ -243,7 +243,7 @@
                     <div class="form-control w-full gap-2">
                       <label class="label justify-start gap-3 pb-0" for="{{ row.form.memo.id_for_label }}">
                         <span class="label-text font-semibold text-slate-700">メモ</span>
-                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                        {% include "components/field_badge.html" with variant="optional" %}
                       </label>
                       {{ row.form.memo }}
                       {% for error in row.form.memo.errors %}
@@ -364,7 +364,7 @@
                           <div class="form-control w-full gap-2">
                             <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.required_day_staff.id_for_label }}">
                               <span class="label-text font-semibold text-slate-700">必要日勤数</span>
-                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                              {% include "components/field_badge.html" with variant="optional" %}
                             </label>
                             {{ date_rule_form.required_day_staff }}
                             {% for error in date_rule_form.required_day_staff.errors %}
@@ -375,7 +375,7 @@
                           <div class="form-control w-full gap-2">
                             <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.required_night_staff.id_for_label }}">
                               <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
-                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                              {% include "components/field_badge.html" with variant="optional" %}
                             </label>
                             {{ date_rule_form.required_night_staff }}
                             {% for error in date_rule_form.required_night_staff.errors %}
@@ -389,7 +389,7 @@
                               <div class="form-control w-full gap-2">
                                 <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.min_ability_level.id_for_label }}">
                                   <span class="label-text font-semibold text-slate-700">勤務レベル</span>
-                                  <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                                  {% include "components/field_badge.html" with variant="optional" %}
                                 </label>
                                 {{ date_rule_form.min_ability_level }}
                               </div>
@@ -397,7 +397,7 @@
                               <div class="form-control w-full gap-2">
                                 <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.min_ability_level_staff_count.id_for_label }}">
                                   <span class="label-text font-semibold text-slate-700">必要人数</span>
-                                  <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                                  {% include "components/field_badge.html" with variant="optional" %}
                                 </label>
                                 {{ date_rule_form.min_ability_level_staff_count }}
                               </div>
@@ -414,7 +414,7 @@
                           <div class="form-control w-full gap-2">
                             <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.required_leader_staff.id_for_label }}">
                               <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
-                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                              {% include "components/field_badge.html" with variant="optional" %}
                             </label>
                             {{ date_rule_form.required_leader_staff }}
                             {% for error in date_rule_form.required_leader_staff.errors %}
@@ -425,7 +425,7 @@
                           <div class="form-control w-full gap-2">
                             <label class="label justify-start gap-3 pb-0" for="{{ date_rule_form.memo.id_for_label }}">
                               <span class="label-text font-semibold text-slate-700">メモ</span>
-                              <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                              {% include "components/field_badge.html" with variant="optional" %}
                             </label>
                             {{ date_rule_form.memo }}
                             {% for error in date_rule_form.memo.errors %}
@@ -460,7 +460,7 @@
                   <div class="form-control w-full gap-2">
                     <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.required_day_staff.id_for_label }}">
                       <span class="label-text font-semibold text-slate-700">必要日勤数</span>
-                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      {% include "components/field_badge.html" with variant="optional" %}
                     </label>
                     {{ empty_date_rule_form.required_day_staff }}
                   </div>
@@ -468,7 +468,7 @@
                   <div class="form-control w-full gap-2">
                     <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.required_night_staff.id_for_label }}">
                       <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
-                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      {% include "components/field_badge.html" with variant="optional" %}
                     </label>
                     {{ empty_date_rule_form.required_night_staff }}
                   </div>
@@ -479,7 +479,7 @@
                       <div class="form-control w-full gap-2">
                         <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.min_ability_level.id_for_label }}">
                           <span class="label-text font-semibold text-slate-700">勤務レベル</span>
-                          <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                          {% include "components/field_badge.html" with variant="optional" %}
                         </label>
                         {{ empty_date_rule_form.min_ability_level }}
                       </div>
@@ -487,7 +487,7 @@
                       <div class="form-control w-full gap-2">
                         <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.min_ability_level_staff_count.id_for_label }}">
                           <span class="label-text font-semibold text-slate-700">必要人数</span>
-                          <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                          {% include "components/field_badge.html" with variant="optional" %}
                         </label>
                         {{ empty_date_rule_form.min_ability_level_staff_count }}
                       </div>
@@ -498,7 +498,7 @@
                   <div class="form-control w-full gap-2">
                     <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.required_leader_staff.id_for_label }}">
                       <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
-                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      {% include "components/field_badge.html" with variant="optional" %}
                     </label>
                     {{ empty_date_rule_form.required_leader_staff }}
                   </div>
@@ -506,7 +506,7 @@
                   <div class="form-control w-full gap-2">
                     <label class="label justify-start gap-3 pb-0" for="{{ empty_date_rule_form.memo.id_for_label }}">
                       <span class="label-text font-semibold text-slate-700">メモ</span>
-                      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">任意</span>
+                      {% include "components/field_badge.html" with variant="optional" %}
                     </label>
                     {{ empty_date_rule_form.memo }}
                   </div>

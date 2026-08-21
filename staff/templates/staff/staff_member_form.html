@@ -10,7 +10,7 @@
   <div class="form-control w-full gap-2">
     <label class="label justify-start gap-3 pb-0" for="{{ form.name.id_for_label }}">
       <span class="label-text font-semibold text-slate-700">名前</span>
-      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
+      {% include "components/field_badge.html" with variant="required" %}
     </label>
     {{ form.name }}
     {% for error in form.name.errors %}
@@ -21,7 +21,7 @@
   <div class="form-control w-full gap-2">
     <span class="label justify-start gap-3 pb-0">
       <span class="label-text font-semibold text-slate-700">性別</span>
-      <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
+      {% include "components/field_badge.html" with variant="required" %}
     </span>
     <div class="mt-3 grid gap-3 sm:grid-cols-2">
       {% for radio in form.gender %}
@@ -39,7 +39,7 @@
   <div class="form-control w-full gap-2">
     <label class="label justify-start gap-3 pb-0" for="{{ form.job.id_for_label }}">
       <span class="label-text font-semibold text-slate-700">職種</span>
-      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
+      {% include "components/field_badge.html" with variant="optional" %}
     </label>
     {{ form.job }}
     {% for error in form.job.errors %}
@@ -50,7 +50,7 @@
   <div class="form-control w-full gap-2">
     <label class="label justify-start gap-3 pb-0" for="{{ form.role.id_for_label }}">
       <span class="label-text font-semibold text-slate-700">役割</span>
-      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
+      {% include "components/field_badge.html" with variant="optional" %}
     </label>
     {{ form.role }}
     {% for error in form.role.errors %}
@@ -61,7 +61,7 @@
   <div class="form-control w-full gap-2">
     <label class="label justify-start gap-3 pb-0" for="{{ form.ability_level.id_for_label }}">
       <span class="label-text font-semibold text-slate-700">能力評価</span>
-      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
+      {% include "components/field_badge.html" with variant="optional" %}
     </label>
     {{ form.ability_level }}
     <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-base-content/60">{{ form.ability_level.help_text }}</span></div>
@@ -73,7 +73,7 @@
   <div class="form-control w-full gap-2">
     <span class="label justify-start gap-3 pb-0">
       <span class="label-text font-semibold text-slate-700">夜勤の可否</span>
-      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
+      {% include "components/field_badge.html" with variant="optional" %}
     </span>
     <div class="mt-3 grid gap-3 sm:grid-cols-2">
       {% for radio in form.can_night_shift %}
@@ -91,7 +91,7 @@
   <div class="form-control w-full gap-2">
     <span class="label justify-start gap-3 pb-0">
       <span class="label-text font-semibold text-slate-700">固定休</span>
-      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">任意</span>
+      {% include "components/field_badge.html" with variant="optional" %}
     </span>
     <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">選んだ曜日、祝日が固定休になります。複数選択できます。</span></div>
     <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
