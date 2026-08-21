@@ -23,7 +23,7 @@
         <div class="form-control w-full gap-2">
           <label class="label justify-start gap-3 pb-0" for="{{ form.year.id_for_label }}">
             <span class="label-text font-semibold text-slate-700">年</span>
-            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
+            {% include "components/field_badge.html" with variant="required" %}
           </label>
           <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">作成したいシフト表の対象年を選択してください。</span></div>
           {{ form.year }}
@@ -35,7 +35,7 @@
         <div class="form-control w-full gap-2">
           <span class="label justify-start gap-3 pb-0">
             <span class="label-text font-semibold text-slate-700">月</span>
-            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700">必須</span>
+            {% include "components/field_badge.html" with variant="required" %}
           </span>
           <div class="label justify-start px-0 pt-0"><span class="label-text-alt text-base-content/60">作成したいシフト表の対象月を選択してください。</span></div>
           {{ form.month }}

@@ -1,0 +1,9 @@
+{% if variant == "required" %}
+  <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold text-rose-700">
+    必須
+  </span>
+{% elif variant == "optional" %}
+  <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+    任意
+  </span>
+{% endif %}
