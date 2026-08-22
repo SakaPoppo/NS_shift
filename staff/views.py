@@ -42,7 +42,7 @@ class StaffMemberListView(UserStaffMemberQuerysetMixin, ListView):
     context_object_name = "staff_members"
 
     def get_queryset(self):
-        return super().get_queryset().order_by("id")
+        return super().get_queryset().order_by("-ability_level", "id")
 
 
 class StaffMemberCreateView(LoginRequiredMixin, CreateView):

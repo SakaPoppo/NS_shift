@@ -10,13 +10,11 @@
       <p class="mt-2 text-sm font-medium text-slate-600">
         登録済みのスタッフ情報を変更します。
       </p>
-      <p class="mt-3 text-sm font-bold text-sky-700">
-        スタッフ編集：{{ object.name }}
-      </p>
     </div>
 
     <div class="ns-page-panel-strong p-6 sm:p-8">
-      {% include "staff/staff_member_form.html" with submit_label="更新する" %}
+      {% url 'staff:delete' object.pk as remove_url %}
+      {% include "staff/staff_member_form.html" with submit_label="更新する" remove_url=remove_url %}
     </div>
   </section>
 {% endblock %}
