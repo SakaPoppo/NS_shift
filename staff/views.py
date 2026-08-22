@@ -1,9 +1,13 @@
+from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.http import HttpResponseRedirect
+from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
+from .constants import MAX_ACTIVE_STAFF_COUNT, active_staff_limit_message
 from .forms import StaffMemberForm
 from .models import StaffMember, StaffRegularDayOff
 
@@ -37,6 +41,26 @@ class UserStaffMemberQuerysetMixin(LoginRequiredMixin):
         ).prefetch_related("regular_days_off")
 
 
+class ActiveStaffLimitMixin:
+    """アクティブスタッフの上限を新規作成時にだけ適用する。"""
+
+    def get_active_staff_count(self):
+        return StaffMember.objects.filter(
+            user=self.request.user,
+            is_active=True,
+        ).count()
+
+    def is_active_staff_limit_reached(self):
+        return self.get_active_staff_count() >= MAX_ACTIVE_STAFF_COUNT
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and self.is_active_staff_limit_reached():
+            messages.error(request, active_staff_limit_message())
+            return redirect("staff:list")
+
+        return super().dispatch(request, *args, **kwargs)
+
+
 class StaffMemberListView(UserStaffMemberQuerysetMixin, ListView):
     template_name = "staff/staff_member_list.html"
     context_object_name = "staff_members"
@@ -44,8 +68,18 @@ class StaffMemberListView(UserStaffMemberQuerysetMixin, ListView):
     def get_queryset(self):
         return super().get_queryset().order_by("-ability_level", "id")
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active_staff_count = self.get_queryset().count()
+        context.update(
+            active_staff_count=active_staff_count,
+            max_active_staff_count=MAX_ACTIVE_STAFF_COUNT,
+            can_create_staff=active_staff_count < MAX_ACTIVE_STAFF_COUNT,
+        )
+        return context
 
-class StaffMemberCreateView(LoginRequiredMixin, CreateView):
+
+class StaffMemberCreateView(ActiveStaffLimitMixin, LoginRequiredMixin, CreateView):
     model = StaffMember
     form_class = StaffMemberForm
     template_name = "staff/staff_member_create.html"
@@ -54,6 +88,12 @@ class StaffMemberCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         # StaffMember と固定休は別テーブルなので、片方だけ保存される状態を避ける。
         with transaction.atomic():
+            # 同時に複数の登録リクエストが来ても、ユーザー単位で上限判定を直列化する。
+            get_user_model().objects.select_for_update().get(pk=self.request.user.pk)
+            if self.is_active_staff_limit_reached():
+                messages.error(self.request, active_staff_limit_message())
+                return redirect("staff:list")
+
             form.instance.user = self.request.user
             self.object = form.save()
             sync_regular_days_off(
