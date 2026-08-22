@@ -95,6 +95,20 @@ class StaffMemberFormTests(TestCase):
 
 
 class StaffMemberListTests(TestCase):
+    def test_staff_members_are_grouped_by_ability_level(self):
+        user = get_user_model().objects.create_user(username="ability-list-user", password="x")
+        StaffMember.objects.create(user=user, name="管理者スタッフ", ability_level=5)
+        StaffMember.objects.create(user=user, name="自立スタッフ", ability_level=2)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("staff:list"))
+
+        content = response.content.decode()
+        self.assertContains(response, "Lv.5 管理者スタッフ")
+        self.assertContains(response, "Lv.2 自立スタッフ")
+        self.assertContains(response, "<details", count=2)
+        self.assertLess(content.index("Lv.5 管理者スタッフ"), content.index("Lv.2 自立スタッフ"))
+
     def test_holiday_off_is_displayed_after_regular_days(self):
         user = get_user_model().objects.create_user(username="holiday-list-user", password="x")
         staff_member = StaffMember.objects.create(
@@ -106,6 +120,6 @@ class StaffMemberListTests(TestCase):
         response = self.client.get(reverse("staff:list"))
 
         content = response.content.decode()
-        self.assertContains(response, "<span>月</span>", html=True)
-        self.assertContains(response, "<span>祝</span>", html=True)
-        self.assertLess(content.index("<span>月</span>"), content.index("<span>祝</span>"))
+        self.assertContains(response, "<span class=\"inline-flex h-5 min-w-5 items-center justify-center rounded px-1.5 text-[11px] font-bold leading-none bg-slate-100 text-slate-600\">月</span>", html=True)
+        self.assertContains(response, "<span class=\"inline-flex h-5 min-w-5 items-center justify-center rounded bg-red-100 px-1.5 text-[11px] font-bold leading-none text-red-600\">祝</span>", html=True)
+        self.assertLess(content.index(">月</span>"), content.index(">祝</span>"))
