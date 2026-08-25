@@ -15,12 +15,28 @@
         </p>
       </div>
 
-      <div class="grid w-full grid-cols-1 gap-8 md:grid-cols-2">
-        <a
-          href="{% url 'shifts:list' %}"
-          class="group overflow-hidden rounded-xl bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-md"
-        >
-          <div class="aspect-[857/459] overflow-hidden bg-sky-50">
+      <div class="group/dashboard grid w-full grid-cols-1 gap-8 md:grid-cols-2">
+        {% if dashboard_state == "setup_staff" %}
+          <div
+            class="order-2 cursor-default overflow-hidden rounded-xl bg-white opacity-75 shadow-sm md:order-1"
+            aria-disabled="true"
+          >
+        {% else %}
+          <div class="relative order-1 w-full">
+            {% if dashboard_state == "create_shift" %}
+              <div class="pointer-events-none absolute -top-16 left-1/2 z-11 -translate-x-1/2">
+                <div class="relative isolate rounded-lg border-2 border-brand-500 bg-white px-5 py-2 text-base font-black text-brand-500 shadow-sm before:absolute before:top-full before:left-1/2 before:z-0 before:h-[13px] before:w-[21px] before:-translate-x-1/2 before:bg-brand-500 before:content-[''] before:[clip-path:polygon(0_0,100%_0,50%_100%)] after:absolute after:top-[calc(100%-1px)] after:left-1/2 after:z-10 after:h-[10px] after:w-[18px] after:-translate-x-1/2 after:bg-white after:content-[''] after:[clip-path:polygon(0_0,100%_0,50%_100%)]">
+                  <span class="relative z-20">シフト作成はこちら</span>
+                </div>
+              </div>
+            {% endif %}
+
+            <a
+              href="{% url 'shifts:list' %}"
+              class="shift-management-card group block cursor-pointer overflow-hidden rounded-xl bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-md {% if dashboard_state == 'normal' %}hover:ring-2 hover:ring-brand-500 hover:ring-offset-2{% elif dashboard_state == 'create_shift' %}ring-2 ring-brand-500 ring-offset-2 group-has-[.staff-management-card:hover]/dashboard:ring-0 group-has-[.staff-management-card:hover]/dashboard:ring-offset-0{% endif %}"
+            >
+        {% endif %}
+          <div class="aspect-[857/459] overflow-hidden bg-sky-50 {% if dashboard_state == 'setup_staff' %}grayscale{% endif %}">
             <img
               class="h-full w-full object-cover"
               src="{% static 'core/images/シフト用.png' %}"
@@ -35,38 +51,57 @@
             <p class="mx-auto mt-4 max-w-[280px] text-sm leading-6 text-slate-700">
               勤務表の作成・編集・確認を行います
             </p>
-            <div class="mt-6 inline-flex items-center gap-2 text-sm font-bold text-brand-500">
-              <span>管理画面へ移動</span>
-              <span class="transition group-hover:translate-x-1">→</span>
+            <div class="mt-6 inline-flex items-center gap-2 text-sm font-bold {% if dashboard_state == 'setup_staff' %}text-slate-400{% else %}text-brand-500{% endif %}">
+              {% if dashboard_state == "setup_staff" %}
+                <span>スタッフが1人以上登録されると使用できます</span>
+              {% else %}
+                <span>管理画面へ移動</span>
+                <span class="transition group-hover:translate-x-1">→</span>
+              {% endif %}
             </div>
           </div>
-        </a>
-
-        <a
-          href="{% url 'staff:list' %}"
-          class="group overflow-hidden rounded-xl bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-md"
-        >
-          <div class="aspect-[857/459] overflow-hidden bg-sky-50">
-            <img
-              class="h-full w-full object-cover"
-              src="{% static 'core/images/スタッフ用.png' %}"
-              alt="スタッフ管理画面のイメージ"
-            >
+        {% if dashboard_state == "setup_staff" %}
           </div>
+        {% else %}
+          </a>
+          </div>
+        {% endif %}
 
-          <div class="px-10 py-9 text-center">
-            <h2 class="text-[1.6rem] font-black text-slate-900">
-              スタッフ管理
-            </h2>
-            <p class="mx-auto mt-4 max-w-[290px] text-sm leading-6 text-slate-700">
-              スタッフ情報を登録・編集・確認を行います
-            </p>
-            <div class="mt-6 inline-flex items-center gap-2 text-sm font-bold text-brand-500">
-              <span>管理画面へ移動</span>
-              <span class="transition group-hover:translate-x-1">→</span>
+        <div class="relative w-full {% if dashboard_state == 'setup_staff' %}order-1 md:order-2{% else %}order-2{% endif %}">
+          {% if dashboard_state == "setup_staff" %}
+            <div class="pointer-events-none absolute -top-16 left-1/2 z-11 -translate-x-1/2">
+              <div class="relative isolate rounded-lg border-2 border-brand-500 bg-white px-5 py-2 text-base font-black text-brand-500 shadow-sm before:absolute before:top-full before:left-1/2 before:z-0 before:h-[13px] before:w-[21px] before:-translate-x-1/2 before:bg-brand-500 before:content-[''] before:[clip-path:polygon(0_0,100%_0,50%_100%)] after:absolute after:top-[calc(100%-1px)] after:left-1/2 after:z-10 after:h-[10px] after:w-[18px] after:-translate-x-1/2 after:bg-white after:content-[''] after:[clip-path:polygon(0_0,100%_0,50%_100%)]">
+                <span class="relative z-20">まずはこちら</span>
+              </div>
             </div>
-          </div>
-        </a>
+          {% endif %}
+
+          <a
+            href="{% url 'staff:list' %}"
+            class="staff-management-card group block cursor-pointer overflow-hidden rounded-xl bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-md {% if dashboard_state == 'normal' or dashboard_state == 'create_shift' %}hover:ring-2 hover:ring-brand-500 hover:ring-offset-2{% elif dashboard_state == 'setup_staff' %}ring-2 ring-brand-500 ring-offset-2{% endif %}"
+          >
+            <div class="aspect-[857/459] overflow-hidden bg-sky-50">
+              <img
+                class="h-full w-full object-cover"
+                src="{% static 'core/images/スタッフ用.png' %}"
+                alt="スタッフ管理画面のイメージ"
+              >
+            </div>
+
+            <div class="px-10 py-9 text-center">
+              <h2 class="text-[1.6rem] font-black text-slate-900">
+                スタッフ管理
+              </h2>
+              <p class="mx-auto mt-4 max-w-[290px] text-sm leading-6 text-slate-700">
+                スタッフの登録・編集・確認を行います
+              </p>
+              <div class="mt-6 inline-flex items-center gap-2 text-sm font-bold text-brand-500">
+                <span>管理画面へ移動</span>
+                <span class="transition group-hover:translate-x-1">→</span>
+              </div>
+            </div>
+          </a>
+        </div>
       </div>
     </div>
   </section>
