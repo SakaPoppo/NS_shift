@@ -48,7 +48,14 @@
               <span class="label-text font-bold text-slate-700">{{ form.password1.label }}</span>
               {% include "components/field_badge.html" with variant="required" %}
             </label>
-            {{ form.password1 }}
+            <p class="text-xs leading-5 text-slate-500">
+              8文字以上で入力してください<br>
+              英字・数字・記号が使用できます
+            </p>
+            <div class="relative" data-password-field>
+              {{ form.password1 }}
+              {% include "accounts/components/password_toggle_button.html" %}
+            </div>
             {% for error in form.password1.errors %}
               <div class="label justify-start px-0 pt-1">
                 <span class="label-text-alt text-sm font-medium text-error">{{ error }}</span>
@@ -61,7 +68,10 @@
               <span class="label-text font-bold text-slate-700">{{ form.password2.label }}</span>
               {% include "components/field_badge.html" with variant="required" %}
             </label>
-            {{ form.password2 }}
+            <div class="relative" data-password-field>
+              {{ form.password2 }}
+              {% include "accounts/components/password_toggle_button.html" %}
+            </div>
             {% for error in form.password2.errors %}
               <div class="label justify-start px-0 pt-1">
                 <span class="label-text-alt text-sm font-medium text-error">{{ error }}</span>
@@ -81,4 +91,8 @@
       </div>
     </div>
   </section>
+{% endblock %}
+
+{% block extra_js %}
+  {% include "accounts/components/password_toggle_script.html" %}
 {% endblock %}

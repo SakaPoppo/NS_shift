@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from .forms import REGISTRATION_UNAVAILABLE_MESSAGE, SignUpForm
+from .forms import LoginForm, REGISTRATION_UNAVAILABLE_MESSAGE, SignUpForm
 
 
 User = get_user_model()
@@ -49,6 +49,23 @@ class SignUpFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertEqual(form.errors["email"], [REGISTRATION_UNAVAILABLE_MESSAGE])
 
+    def test_password_widgets_reserve_space_for_the_toggle_button(self):
+        signup_form = SignUpForm()
+        login_form = LoginForm()
+
+        for field in ("password1", "password2"):
+            self.assertIn("pr-12", signup_form.fields[field].widget.attrs["class"])
+            self.assertEqual(
+                signup_form.fields[field].widget.attrs["data-password-input"],
+                "true",
+            )
+
+        self.assertIn("pr-12", login_form.fields["password"].widget.attrs["class"])
+        self.assertEqual(
+            login_form.fields["password"].widget.attrs["data-password-input"],
+            "true",
+        )
+
 
 class SignUpViewTests(TestCase):
     signup_url = reverse("accounts:signup")
@@ -64,6 +81,20 @@ class SignUpViewTests(TestCase):
 
         self.assertContains(response, "メールアドレス")
         self.assertNotContains(response, "任意")
+
+    def test_signup_page_shows_password_guidance_before_two_toggleable_fields(self):
+        response = self.client.get(self.signup_url)
+        content = response.content.decode()
+
+        self.assertContains(response, "8文字以上で入力してください")
+        self.assertContains(response, "英字・数字・記号が使用できます")
+        self.assertLess(
+            content.index("8文字以上で入力してください"),
+            content.index('id="id_password1"'),
+        )
+        self.assertEqual(content.count("data-password-toggle\n>"), 2)
+        self.assertContains(response, 'type="button"', count=2)
+        self.assertContains(response, 'aria-label="パスワードを表示"', count=2)
 
     def test_duplicate_errors_do_not_reveal_registration_status(self):
         User.objects.create_user(
@@ -86,3 +117,14 @@ class SignUpViewTests(TestCase):
         user = User.objects.get(username=self.valid_data["username"])
         self.assertEqual(user.email, self.valid_data["email"])
         self.assertEqual(int(self.client.session["_auth_user_id"]), user.pk)
+
+
+class LoginViewTests(TestCase):
+    def test_login_page_has_one_password_toggle_without_signup_guidance(self):
+        response = self.client.get(reverse("accounts:login"))
+
+        self.assertEqual(response.content.decode().count("data-password-toggle\n>"), 1)
+        self.assertContains(response, 'type="button"', count=1)
+        self.assertContains(response, 'aria-label="パスワードを表示"', count=1)
+        self.assertNotContains(response, "8文字以上で入力してください")
+        self.assertNotContains(response, "英字・数字・記号が使用できます")
