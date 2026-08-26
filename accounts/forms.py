@@ -41,10 +41,10 @@ class SignUpForm(UserCreationForm):
             {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "email@example.com"}
         )
         self.fields["password1"].widget.attrs.update(
-            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white pr-12 text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード", "data-password-input": "true"}
         )
         self.fields["password2"].widget.attrs.update(
-            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード（確認用）"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white pr-12 text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード（確認用）", "data-password-input": "true"}
         )
 
     def clean_email(self):
@@ -79,7 +79,7 @@ class LoginForm(forms.Form):
             {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "ユーザー名またはメールアドレス"}
         )
         self.fields["password"].widget.attrs.update(
-            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード"}
+            {"class": "input input-bordered h-12 w-full rounded-lg border-base-300 bg-white pr-12 text-sm text-base-content placeholder:text-base-content/45 focus:border-brand-500 focus:outline-none", "placeholder": "パスワード", "data-password-input": "true"}
         )
 
     def clean(self):
