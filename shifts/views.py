@@ -85,7 +85,7 @@ SHIFT_DISPLAY_CONFIG = {
     },
 }
 
-SHIFT_TYPE_LABELS = dict(ShiftResult.ShiftTypeChoices.choices)
+SHIFT_TYPE_LABELS = dict(ShiftResult.ShiftTypeChoices.choices) # 辞書にしてエラーとかの時にとる
 BASE_FIXED_SOURCE_LABELS = {
     "day_off_request": "希望休",
     "regular_day_off": "曜日固定休",
@@ -95,7 +95,7 @@ BASE_FIXED_SOURCE_LABELS = {
 WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
 
 
-def build_day_headers(month_dates, holiday_dates=frozenset()):
+def build_day_headers(month_dates, holiday_dates=frozenset()): # 画面用の日付加工
     return [
         {
             "date": current_date,
