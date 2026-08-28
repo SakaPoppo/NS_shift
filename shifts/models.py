@@ -29,6 +29,11 @@ class ShiftPlan(models.Model):
         choices=StatusChoices.choices,
         default=StatusChoices.DRAFT,
     )
+    excluded_staffs = models.ManyToManyField(
+        StaffMember,
+        blank=True,
+        related_name="excluded_shift_plans",
+    )
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
     updated_at = models.DateTimeField("更新日時", auto_now=True)
 
