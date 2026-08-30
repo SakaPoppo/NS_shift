@@ -51,6 +51,10 @@ class ShiftPlan(models.Model):
     def display_title(self):
         return f"{self.year}年{self.month}月 シフト表"
 
+    def get_excluded_staff_ids(self):
+        """このシフト表で生成・配置集計の対象外にするスタッフIDを返す。"""
+        return set(self.excluded_staffs.values_list("id", flat=True))
+
     def __str__(self):
         return self.display_title
 

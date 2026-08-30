@@ -114,6 +114,7 @@ def build_shift_plan_grid(
     shift_results_by_key,
     base_fixed_assignments,
     display_assignments=None,
+    excluded_staff_ids=frozenset(),
 ):
     """編集画面用のグリッドデータを組み立てる。
 
@@ -138,6 +139,7 @@ def build_shift_plan_grid(
     }
 
     for staff_member in staff_members:
+        is_excluded = staff_member.id in excluded_staff_ids
         row_stats = {
             "day": 0,
             "night": 0,
@@ -179,12 +181,14 @@ def build_shift_plan_grid(
 
             if shift_type == ShiftResult.ShiftTypeChoices.DAY:
                 row_stats["day"] += 1
-                day_totals[current_date]["day"] += 1
-                day_totals[current_date]["day_ability_total"] += staff_member.ability_level
+                if not is_excluded:
+                    day_totals[current_date]["day"] += 1
+                    day_totals[current_date]["day_ability_total"] += staff_member.ability_level
             elif shift_type == ShiftResult.ShiftTypeChoices.NIGHT:
                 row_stats["night"] += 1
-                day_totals[current_date]["night"] += 1
-                day_totals[current_date]["night_ability_total"] += staff_member.ability_level
+                if not is_excluded:
+                    day_totals[current_date]["night"] += 1
+                    day_totals[current_date]["night_ability_total"] += staff_member.ability_level
             elif shift_type in (
                 ShiftResult.ShiftTypeChoices.OFF,
                 ShiftResult.ShiftTypeChoices.OFF_REQUEST,
@@ -221,6 +225,7 @@ def build_shift_plan_grid(
                 "staff_member": staff_member,
                 "cells": cells,
                 "stats": row_stats,
+                "is_excluded": is_excluded,
             }
         )
 
@@ -271,6 +276,22 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             user=self.request.user,
             is_active=True,
         ).prefetch_related("regular_days_off").order_by("id")
+
+    def get_submitted_excluded_staff_members(self, staff_members):
+        """画面に表示している有効スタッフだけを対象外として受け付ける。"""
+        if "generation_target_selection_submitted" not in self.request.POST:
+            return []
+        target_staff_ids = set()
+        for raw_staff_id in self.request.POST.getlist("generation_target_staff_ids"):
+            try:
+                target_staff_ids.add(int(raw_staff_id))
+            except (TypeError, ValueError):
+                continue
+        return [
+            staff_member
+            for staff_member in staff_members
+            if staff_member.id not in target_staff_ids
+        ]
 
     def get_shift_rule_form(self, shift_plan, data=None):
         current_rule = self.get_shift_rule(shift_plan)
@@ -422,8 +443,21 @@ class UserShiftPlanMixin(LoginRequiredMixin):
 
         return base_fixed_assignments
 
-    def build_edit_context(self, shift_plan, *, display_assignments=None):
+    def build_edit_context(
+        self,
+        shift_plan,
+        *,
+        display_assignments=None,
+        excluded_staff_ids=None,
+    ):
         staff_members = list(self.get_staff_members())
+        if excluded_staff_ids is None:
+            excluded_staff_ids = shift_plan.get_excluded_staff_ids()
+        excluded_staff_ids = {
+            staff_member.id
+            for staff_member in staff_members
+            if staff_member.id in excluded_staff_ids
+        }
         month_dates = get_month_dates(shift_plan.year, shift_plan.month)
         holiday_dates = get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
         day_headers = build_day_headers(month_dates, holiday_dates)
@@ -439,6 +473,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             shift_results_by_key,
             base_fixed_assignments,
             display_assignments=display_assignments,
+            excluded_staff_ids=excluded_staff_ids,
         )
         shift_rule = self.get_shift_rule(shift_plan)
         carryover_staff_ids = set(
@@ -457,6 +492,8 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             "shift_select_options": SHIFT_SELECT_OPTIONS,
             "day_summary_rows": day_summary_rows,
             "staff_count": len(staff_members),
+            "generation_target_count": len(staff_members) - len(excluded_staff_ids),
+            "excluded_staff_count": len(excluded_staff_ids),
             "weekday_rule_count": shift_plan.weekday_rules.count(),
             "date_rule_count": shift_plan.date_rules.count(),
             "can_export_csv": shift_plan.status in {
@@ -868,6 +905,12 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             staff_members,
             month_dates,
         )
+        submitted_excluded_staff_members = self.get_submitted_excluded_staff_members(
+            staff_members
+        )
+        submitted_excluded_staff_ids = {
+            staff_member.id for staff_member in submitted_excluded_staff_members
+        }
 
         if action == "reset_to_manual":
             with transaction.atomic():
@@ -905,10 +948,23 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             context = self.build_edit_context(
                 shift_plan,
                 display_assignments=submitted_assignments,
+                excluded_staff_ids=submitted_excluded_staff_ids,
             )
             return render(request, self.template_name, context)
 
         if action == "generate":
+            shift_plan.excluded_staffs.set(submitted_excluded_staff_members)
+            if len(submitted_excluded_staff_members) == len(staff_members):
+                messages.error(
+                    request,
+                    "シフト生成対象のスタッフを1名以上選択してください。",
+                )
+                context = self.build_edit_context(
+                    shift_plan,
+                    display_assignments=submitted_assignments,
+                    excluded_staff_ids=submitted_excluded_staff_ids,
+                )
+                return render(request, self.template_name, context)
             try:
                 with transaction.atomic():
                     self.save_manual_shift_results(
@@ -924,6 +980,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 context = self.build_edit_context(
                     shift_plan,
                     display_assignments=submitted_assignments,
+                    excluded_staff_ids=submitted_excluded_staff_ids,
                 )
                 return render(request, self.template_name, context)
 
@@ -949,6 +1006,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
         with transaction.atomic():
+            shift_plan.excluded_staffs.set(submitted_excluded_staff_members)
             self.save_manual_shift_results(
                 shift_plan,
                 submitted_assignments,
