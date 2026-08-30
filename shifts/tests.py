@@ -15,6 +15,8 @@ from staff.models import StaffMember, StaffRegularDayOff
 
 from .shift_generation import optimization as shift_optimization
 from .shift_generation import results as shift_results
+from .shift_generation.context import load_generation_context
+from .shift_generation.persistence import save_generated_shift_results
 from .forms import ShiftPlanCreateForm, ShiftRuleForm
 from .shift_generator import (
     ShiftGenerationError,
@@ -72,6 +74,65 @@ class ShiftPlanModelTests(TestCase):
 
         self.assertEqual(shift_plan.display_title, "2026年7月 シフト表")
         self.assertEqual(str(shift_plan), "2026年7月 シフト表")
+
+
+class ShiftGenerationContextTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="generation-context-user",
+            password="password123",
+        )
+        self.shift_plan = ShiftPlan.objects.create(
+            user=self.user,
+            year=2026,
+            month=7,
+        )
+        ShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            required_day_staff=0,
+            required_night_staff=0,
+            required_leader_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        self.target_staff = StaffMember.objects.create(
+            user=self.user,
+            name="生成対象",
+        )
+        self.excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="生成対象外",
+        )
+
+    def test_context_contains_only_generation_target_staff(self):
+        self.shift_plan.excluded_staffs.add(self.excluded_staff)
+
+        context = load_generation_context(self.shift_plan)
+
+        self.assertEqual(
+            [staff_member.id for staff_member in context.staff_members],
+            [self.target_staff.id],
+        )
+
+    def test_context_includes_all_staff_when_none_are_excluded(self):
+        context = load_generation_context(self.shift_plan)
+
+        self.assertEqual(
+            [staff_member.id for staff_member in context.staff_members],
+            [self.target_staff.id, self.excluded_staff.id],
+        )
+
+    def test_context_rejects_when_all_staff_are_excluded(self):
+        self.shift_plan.excluded_staffs.add(
+            self.target_staff,
+            self.excluded_staff,
+        )
+
+        with self.assertRaisesMessage(
+            ShiftGenerationError,
+            "シフト生成対象のスタッフを1名以上選択してください。",
+        ):
+            load_generation_context(self.shift_plan)
 
 
 class ShiftPlanCsvExportViewTests(TestCase):
@@ -296,6 +357,58 @@ class ShiftAggregationTests(TestCase):
         self.assertEqual(second_day["night_count"], 0)
         self.assertEqual(second_day["day_ability_total"], 0)
         self.assertEqual(second_day["night_ability_total"], 0)
+
+    def test_excluded_staff_is_shown_but_not_included_in_daily_totals(self):
+        month_dates = [date(2026, 7, 1), date(2026, 7, 2)]
+        target_staff = StaffMember.objects.create(
+            user=self.user,
+            name="対象スタッフ",
+            ability_level=3,
+        )
+        excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="対象外スタッフ",
+            ability_level=5,
+        )
+        shift_results = {
+            (target_staff.id, month_dates[0]): ShiftResult(
+                staff_member=target_staff,
+                date=month_dates[0],
+                shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            ),
+            (excluded_staff.id, month_dates[0]): ShiftResult(
+                staff_member=excluded_staff,
+                date=month_dates[0],
+                shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            ),
+            (target_staff.id, month_dates[1]): ShiftResult(
+                staff_member=target_staff,
+                date=month_dates[1],
+                shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            ),
+            (excluded_staff.id, month_dates[1]): ShiftResult(
+                staff_member=excluded_staff,
+                date=month_dates[1],
+                shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            ),
+        }
+
+        staff_rows, day_summary_rows = build_shift_plan_grid(
+            [target_staff, excluded_staff],
+            month_dates,
+            shift_results,
+            {},
+            excluded_staff_ids={excluded_staff.id},
+        )
+
+        self.assertEqual(len(staff_rows), 2)
+        self.assertFalse(staff_rows[0]["is_excluded"])
+        self.assertTrue(staff_rows[1]["is_excluded"])
+        first_day, second_day = day_summary_rows[0]["values"]
+        self.assertEqual(first_day["day_count"], 1)
+        self.assertEqual(first_day["day_ability_total"], 3)
+        self.assertEqual(second_day["night_count"], 1)
+        self.assertEqual(second_day["night_ability_total"], 3)
 
 
 class ShiftRuleFormTests(TestCase):
@@ -5216,6 +5329,89 @@ class ShiftGenerationPersistenceTests(TestCase):
         self.assertFalse(ShiftResult.objects.filter(shift_plan=self.shift_plan).exists())
 
 
+class ShiftGenerationPersistenceExcludedStaffTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="excluded-persistence-user",
+            password="password123",
+        )
+        self.shift_plan = ShiftPlan.objects.create(
+            user=self.user,
+            year=2026,
+            month=8,
+        )
+        self.target_staff = StaffMember.objects.create(
+            user=self.user,
+            name="生成対象スタッフ",
+        )
+        self.excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="対象外スタッフ",
+        )
+
+    def test_save_generated_results_keeps_excluded_staff_results(self):
+        self.shift_plan.excluded_staffs.add(self.excluded_staff)
+        generated_result = ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.excluded_staff,
+            date=date(2026, 8, 1),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+        )
+        manual_result = ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.excluded_staff,
+            date=date(2026, 8, 2),
+            shift_type=ShiftResult.ShiftTypeChoices.TRAINING,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        save_generated_shift_results(
+            self.shift_plan,
+            ShiftGenerationResult(status="success", shifts=[]),
+        )
+
+        self.assertTrue(ShiftResult.objects.filter(pk=generated_result.pk).exists())
+        self.assertTrue(ShiftResult.objects.filter(pk=manual_result.pk).exists())
+
+    def test_generation_does_not_create_results_for_excluded_staff(self):
+        ShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            required_day_staff=1,
+            required_night_staff=0,
+            required_leader_staff=0,
+            off_days_per_staff=0,
+            max_consecutive_work_days=31,
+        )
+        self.shift_plan.excluded_staffs.add(self.excluded_staff)
+        manual_result = ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.excluded_staff,
+            date=date(2026, 8, 1),
+            shift_type=ShiftResult.ShiftTypeChoices.TRAINING,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        generate_and_save_shift(self.shift_plan)
+
+        self.assertEqual(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.target_staff,
+                input_type=ShiftResult.InputTypeChoices.GENERATED,
+            ).count(),
+            31,
+        )
+        self.assertFalse(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.excluded_staff,
+                input_type=ShiftResult.InputTypeChoices.GENERATED,
+            ).exists()
+        )
+        self.assertTrue(ShiftResult.objects.filter(pk=manual_result.pk).exists())
+
+
 class ShiftGenerateViewTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -5601,6 +5797,122 @@ class ShiftGenerateViewTests(TestCase):
                 staff_member=self.staff_member,
                 date=date(2026, 8, 2),
             ).exists()
+        )
+
+    def test_edit_page_marks_excluded_staff_as_not_generation_target(self):
+        self.create_rule()
+        excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="編集画面対象外",
+        )
+        self.shift_plan.excluded_staffs.add(excluded_staff)
+
+        response = self.client.get(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        )
+        row_by_staff_id = {
+            row["staff_member"].id: row for row in response.context["staff_rows"]
+        }
+
+        self.assertFalse(row_by_staff_id[self.staff_member.id]["is_excluded"])
+        self.assertTrue(row_by_staff_id[excluded_staff.id]["is_excluded"])
+        self.assertEqual(response.context["generation_target_count"], 1)
+        self.assertEqual(response.context["excluded_staff_count"], 1)
+        self.assertContains(response, "data-generation-target-checkbox")
+
+    def test_save_updates_excluded_staffs_from_generation_target_checkboxes(self):
+        self.create_rule()
+        excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="保存対象外",
+        )
+        edit_url = reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+
+        response = self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                "generation_target_selection_submitted": "1",
+                "generation_target_staff_ids": str(self.staff_member.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            set(self.shift_plan.excluded_staffs.values_list("id", flat=True)),
+            {excluded_staff.id},
+        )
+
+        self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                "generation_target_selection_submitted": "1",
+                "generation_target_staff_ids": [
+                    str(self.staff_member.id),
+                    str(excluded_staff.id),
+                ],
+            },
+        )
+
+        self.assertFalse(self.shift_plan.excluded_staffs.exists())
+
+    def test_generate_uses_posted_generation_target_selection_without_prior_save(self):
+        self.create_rule()
+        excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="生成対象外",
+        )
+        fake_result = ShiftGenerationResult(status="success", shifts=[])
+
+        def generate_with_current_selection(shift_plan):
+            self.assertEqual(
+                set(shift_plan.excluded_staffs.values_list("id", flat=True)),
+                {excluded_staff.id},
+            )
+            return fake_result
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            side_effect=generate_with_current_selection,
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {
+                    "action": "generate",
+                    "generation_target_selection_submitted": "1",
+                    "generation_target_staff_ids": str(self.staff_member.id),
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            set(self.shift_plan.excluded_staffs.values_list("id", flat=True)),
+            {excluded_staff.id},
+        )
+
+    def test_generate_with_no_generation_target_does_not_call_solver(self):
+        self.create_rule()
+        excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="全員対象外",
+        )
+
+        with patch("shifts.views.generate_and_save_shift") as mock_generate:
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {
+                    "action": "generate",
+                    "generation_target_selection_submitted": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "シフト生成対象のスタッフを1名以上選択してください。")
+        mock_generate.assert_not_called()
+        self.assertEqual(
+            set(self.shift_plan.excluded_staffs.values_list("id", flat=True)),
+            {self.staff_member.id, excluded_staff.id},
         )
 
 

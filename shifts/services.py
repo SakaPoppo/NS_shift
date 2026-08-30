@@ -223,12 +223,13 @@ def _boundary_assignments(shift_plan: ShiftPlan, carryover: ShiftCarryover) -> d
 @transaction.atomic
 def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
     """必要な月初勤務を冪等同期する。競合時は既存境界勤務も保持する。"""
+    excluded_staff_ids = shift_plan.get_excluded_staff_ids()
     carryovers = list(
         shift_plan.carryovers.select_related("staff_member").filter(
             staff_member__user=shift_plan.user,
             staff_member__is_active=True,
             source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
-        )
+        ).exclude(staff_member_id__in=excluded_staff_ids)
     )
     wanted = {
         (carryover.staff_member_id, target_date): (carryover, shift_type)
@@ -272,7 +273,7 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
     boundary_qs = ShiftResult.objects.filter(
         shift_plan=shift_plan,
         lock_reason=ShiftResult.LockReasonChoices.MONTH_BOUNDARY,
-    )
+    ).exclude(staff_member_id__in=excluded_staff_ids)
     obsolete_ids = [result.id for result in boundary_qs if (result.staff_member_id, result.date) not in wanted]
     if obsolete_ids:
         ShiftResult.objects.filter(id__in=obsolete_ids).delete()

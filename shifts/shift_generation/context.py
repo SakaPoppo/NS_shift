@@ -23,14 +23,27 @@ def load_generation_context(shift_plan) -> GenerationContext:
 
     month_dates = get_month_dates(shift_plan.year, shift_plan.month)
     holiday_dates = get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
-    staff_members = list(
+    all_staff_members = list(
         StaffMember.objects.filter(
             user=shift_plan.user,
             is_active=True,
-        ).prefetch_related("regular_days_off")
+        )
+        .prefetch_related("regular_days_off")
+        .order_by("id")
     )
-    if not staff_members:
+    if not all_staff_members:
         raise ShiftGenerationError("有効なスタッフがいないため、自動生成できません。")
+
+    excluded_staff_ids = shift_plan.get_excluded_staff_ids()
+    staff_members = [
+        staff_member
+        for staff_member in all_staff_members
+        if staff_member.id not in excluded_staff_ids
+    ]
+    if not staff_members:
+        raise ShiftGenerationError(
+            "シフト生成対象のスタッフを1名以上選択してください。"
+        )
 
     weekday_rules = list(shift_plan.weekday_rules.all())
     date_rules = list(shift_plan.date_rules.all())
@@ -179,7 +192,6 @@ def _build_fixed_assignments(
 def _validate_fixed_assignments(
     *, staff_members, month_dates, fixed_assignments, effective_rules
 ):
-    staff_by_id = {staff.id: staff for staff in staff_members}
     for staff in staff_members:
         for index, target_date in enumerate(month_dates):
             fixed_shift_type = fixed_assignments.get((staff.id, target_date))
@@ -257,11 +269,3 @@ def _validate_fixed_assignments(
                 raise ShiftGenerationError(
                     f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、2日後の固定勤務と整合しません。"
                 )
-
-    unknown_staff_ids = {
-        staff_member_id for staff_member_id, _ in fixed_assignments
-    } - set(staff_by_id)
-    if unknown_staff_ids:
-        raise ShiftGenerationError(
-            "固定勤務に対象外スタッフが含まれているため、自動生成できません。"
-        )

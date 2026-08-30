@@ -11,6 +11,8 @@ def save_generated_shift_results(
 ) -> None:
     """未ロックの自動生成勤務を置き換え、生成結果を一括保存する。"""
 
+    excluded_staff_ids = shift_plan.get_excluded_staff_ids()
+
     # 生成中に手入力・ロックされた勤務も守るため、保存直前に固定キーを取得する。
     fixed_result_keys = {
         (shift_result.staff_member_id, shift_result.date)
@@ -25,7 +27,7 @@ def save_generated_shift_results(
         shift_plan=shift_plan,
         input_type=ShiftResult.InputTypeChoices.GENERATED,
         is_locked=False,
-    ).delete()
+    ).exclude(staff_member_id__in=excluded_staff_ids).delete()
 
     create_targets = [
         ShiftResult(

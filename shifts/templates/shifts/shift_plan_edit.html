@@ -87,6 +87,7 @@
 
       <form id="shift-plan-form" method="post" class="space-y-3" aria-busy="false">
         {% csrf_token %}
+        <input type="hidden" name="generation_target_selection_submitted" value="1">
 
         {% if missing_previous_staff_members %}
           <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
@@ -99,6 +100,9 @@
             <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <h2 class="text-sm font-black tracking-wide text-slate-900">シフト表</h2>
               <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                <p class="mr-3 self-center whitespace-nowrap text-sm font-bold text-slate-600 sm:mr-5">
+                  生成対象 <span data-generation-target-count>{{ generation_target_count }}</span>名 / 対象外 <span data-excluded-staff-count>{{ excluded_staff_count }}</span>名
+                </p>
                 <button
                   type="submit"
                   name="action"
@@ -167,7 +171,10 @@
             <table class="min-w-full border-separate border-spacing-0">
               <thead class="bg-slate-50">
                 <tr>
-                  <th class="sticky left-0 z-30 min-w-[146px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
+                  <th class="sticky left-0 z-30 w-[52px] min-w-[52px] border-b border-r border-slate-200 bg-slate-50 px-1 py-2 text-center text-[11px] font-black text-slate-700">
+                    生成対象
+                  </th>
+                  <th class="sticky left-[52px] z-30 min-w-[146px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
                     スタッフ
                   </th>
                   {% for header in day_headers %}
@@ -194,8 +201,19 @@
 
               <tbody>
                 {% for row in staff_rows %}
-                  <tr>
-                    <th class="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-2 py-2 text-left align-middle">
+                  <tr{% if row.is_excluded %} class="grayscale brightness-75"{% endif %}>
+                    <td class="sticky left-0 z-10 w-[52px] min-w-[52px] border-b border-r border-slate-200 bg-white px-1 py-2 text-center align-middle">
+                      <input
+                        type="checkbox"
+                        name="generation_target_staff_ids"
+                        value="{{ row.staff_member.id }}"
+                        aria-label="{{ row.staff_member.name }}を生成対象にする"
+                        data-generation-target-checkbox
+                        class="checkbox checkbox-xs checkbox-info"
+                        {% if not row.is_excluded %}checked{% endif %}
+                      >
+                    </td>
+                    <th class="sticky left-[52px] z-10 border-b border-r border-slate-200 bg-white px-2 py-2 text-left align-middle">
                       <div class="flex items-center gap-1.5 text-sm font-black text-slate-900">
                         {% if row.staff_member.gender == "male" %}
                           <img src="{% static 'staff/male_icon.png' %}" alt="男性" class="h-4 w-4 shrink-0 object-contain">
@@ -251,7 +269,7 @@
                   </tr>
                 {% empty %}
                   <tr>
-                    <td colspan="{{ month_dates|length|add:'4' }}" class="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                    <td colspan="{{ month_dates|length|add:'5' }}" class="px-6 py-10 text-center text-sm font-medium text-slate-500">
                       在籍中のスタッフが登録されていません。
                     </td>
                   </tr>
@@ -261,7 +279,7 @@
               <tfoot>
                 {% for summary in day_summary_rows %}
                   <tr>
-                    <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                    <th colspan="2" class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
                       日別集計 日勤人数
                     </th>
                     {% for value in summary.values %}
@@ -272,7 +290,7 @@
                     <td class="border-b border-slate-200 bg-slate-50"></td>
                   </tr>
                   <tr>
-                    <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                    <th colspan="2" class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
                       日別集計 夜勤人数
                     </th>
                     {% for value in summary.values %}
@@ -283,7 +301,7 @@
                     <td class="border-b border-slate-200 bg-slate-50"></td>
                   </tr>
                   <tr>
-                    <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                    <th colspan="2" class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
                       日別集計 日勤能力
                     </th>
                     {% for value in summary.values %}
@@ -294,7 +312,7 @@
                     <td class="border-b border-slate-200 bg-slate-50"></td>
                   </tr>
                   <tr>
-                    <th class="sticky left-0 z-10 border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
+                    <th colspan="2" class="sticky left-0 z-10 border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700">
                       日別集計 夜勤能力
                     </th>
                     {% for value in summary.values %}
@@ -378,6 +396,31 @@
         select.addEventListener("change", applyClasses);
         applyClasses();
       });
+
+      const generationTargetCheckboxes = document.querySelectorAll(
+        "[data-generation-target-checkbox]"
+      );
+      const generationTargetCount = document.querySelector(
+        "[data-generation-target-count]"
+      );
+      const excludedStaffCount = document.querySelector(
+        "[data-excluded-staff-count]"
+      );
+      const updateGenerationTargetDisplay = () => {
+        const targetCount = [...generationTargetCheckboxes].filter(
+          (checkbox) => checkbox.checked
+        ).length;
+        generationTargetCount.textContent = targetCount;
+        excludedStaffCount.textContent = generationTargetCheckboxes.length - targetCount;
+        generationTargetCheckboxes.forEach((checkbox) => {
+          checkbox.closest("tr")?.classList.toggle("grayscale", !checkbox.checked);
+          checkbox.closest("tr")?.classList.toggle("brightness-75", !checkbox.checked);
+        });
+      };
+      generationTargetCheckboxes.forEach((checkbox) => {
+        checkbox.addEventListener("change", updateGenerationTargetDisplay);
+      });
+      updateGenerationTargetDisplay();
 
       const shiftForm = document.getElementById("shift-plan-form");
       const generateButton = document.querySelector("[data-generate-shift]");
