@@ -1,0 +1,57 @@
+<div class="space-y-5">
+  <div class="form-control w-full gap-2">
+    <label class="label justify-start gap-3 pb-0" for="{{ condition_form.required_day_staff.id_for_label }}">
+      <span class="label-text font-semibold text-slate-700">必要日勤数</span>
+    </label>
+    {{ condition_form.required_day_staff }}
+    {% for error in condition_form.required_day_staff.errors %}
+      <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+    {% endfor %}
+  </div>
+
+  <div class="form-control w-full gap-2">
+    <label class="label justify-start gap-3 pb-0" for="{{ condition_form.required_night_staff.id_for_label }}">
+      <span class="label-text font-semibold text-slate-700">必要夜勤数</span>
+    </label>
+    {{ condition_form.required_night_staff }}
+    {% for error in condition_form.required_night_staff.errors %}
+      <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+    {% endfor %}
+  </div>
+
+  <div class="space-y-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4">
+    <p class="text-sm font-semibold text-slate-700">追加条件</p>
+    <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] sm:items-end">
+      <div class="form-control w-full gap-2">
+        <label class="label justify-start gap-3 pb-0" for="{{ condition_form.min_ability_level.id_for_label }}">
+          <span class="label-text font-semibold text-slate-700">勤務レベル</span>
+        </label>
+        {{ condition_form.min_ability_level }}
+      </div>
+      <p class="pb-3 text-sm font-semibold text-slate-600">以上のスタッフが</p>
+      <div class="form-control w-full gap-2">
+        <label class="label justify-start gap-3 pb-0" for="{{ condition_form.min_ability_level_staff_count.id_for_label }}">
+          <span class="label-text font-semibold text-slate-700">必要人数</span>
+        </label>
+        {{ condition_form.min_ability_level_staff_count }}
+      </div>
+      <p class="pb-3 text-sm font-semibold text-slate-600">人以上必要</p>
+    </div>
+    {% for error in condition_form.min_ability_level.errors %}
+      <p class="text-sm font-medium text-error">{{ error }}</p>
+    {% endfor %}
+    {% for error in condition_form.min_ability_level_staff_count.errors %}
+      <p class="text-sm font-medium text-error">{{ error }}</p>
+    {% endfor %}
+  </div>
+
+  <div class="form-control w-full gap-2">
+    <label class="label justify-start gap-3 pb-0" for="{{ condition_form.required_leader_staff.id_for_label }}">
+      <span class="label-text font-semibold text-slate-700">必要リーダー数</span>
+    </label>
+    {{ condition_form.required_leader_staff }}
+    {% for error in condition_form.required_leader_staff.errors %}
+      <div class="label justify-start px-0 pt-1"><span class="label-text-alt text-error">{{ error }}</span></div>
+    {% endfor %}
+  </div>
+</div>

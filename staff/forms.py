@@ -12,14 +12,19 @@ class StaffMemberForm(forms.ModelForm):
 
     gender = forms.ChoiceField(
         label="性別",
-        choices=StaffMember.GenderChoices.choices,
+        choices=(
+            (StaffMember.GenderChoices.FEMALE, "女性"),
+            (StaffMember.GenderChoices.MALE, "男性"),
+        ),
         required=True,
         widget=forms.RadioSelect,
+        initial=StaffMember.GenderChoices.FEMALE,
     )
     can_night_shift = forms.TypedChoiceField(
         label="夜勤の可否",
         choices=((True, "可"), (False, "不可")),
         coerce=lambda value: value in {True, "True", "true", "1", "on"},
+        required=True,
         widget=forms.RadioSelect,
         initial=True,
     )
@@ -47,6 +52,8 @@ class StaffMemberForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        for field_name in ("job", "role", "ability_level", "can_night_shift"):
+            self.fields[field_name].required = True
         self.fields["gender"].widget.attrs.update({"class": "radio radio-primary radio-sm"})
         self.fields["can_night_shift"].widget.attrs.update({"class": "radio radio-primary radio-sm"})
         self.fields["regular_days_off"].widget.attrs.update({"class": "checkbox checkbox-primary checkbox-sm rounded-md"})

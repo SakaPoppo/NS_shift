@@ -14,10 +14,9 @@ SELECT_CLASS = (
     "select select-bordered h-12 w-full rounded-lg border-base-300 bg-white "
     "text-sm text-base-content focus:border-brand-500 focus:outline-none"
 )
-TEXTAREA_CLASS = (
-    "textarea textarea-bordered w-full rounded-lg border-base-300 bg-white "
-    "text-sm text-base-content placeholder:text-base-content/45 "
-    "focus:border-brand-500 focus:outline-none"
+ABILITY_LEVEL_CHOICES = tuple(
+    (level.value, f"Lv.{level.value}")
+    for level in StaffMember.AbilityLevelChoices
 )
 
 
@@ -209,7 +208,12 @@ class WeekdayShiftRuleForm(forms.Form):
     # 曜日ボタンの選択状態を POST で受け取る内部フィールド。モデルには保存しない。
     selected = forms.CharField(required=False, widget=forms.HiddenInput)
     # どの曜日フォームかを POST から復元するための内部フィールド。
-    day_of_week = forms.IntegerField(min_value=0, max_value=6, widget=forms.HiddenInput)
+    day_of_week = forms.IntegerField(
+        min_value=0,
+        max_value=WeekdayShiftRule.DayOfWeekChoices.HOLIDAY,
+        required=False,
+        widget=forms.HiddenInput,
+    )
     required_day_staff = forms.IntegerField(label="必要日勤数", min_value=0, required=False)
     required_night_staff = forms.IntegerField(label="必要夜勤数", min_value=0, required=False)
     required_leader_staff = forms.IntegerField(label="必要リーダー数", min_value=0, required=False)
@@ -218,19 +222,13 @@ class WeekdayShiftRuleForm(forms.Form):
         required=False,
         coerce=int,
         empty_value=None,
-        choices=(("", "レベルを選択してください"), *StaffMember.AbilityLevelChoices.choices),
+        choices=(("", ""), *ABILITY_LEVEL_CHOICES),
     )
     min_ability_level_staff_count = forms.IntegerField(
         label="必要人数",
         min_value=1,
         required=False,
     )
-    memo = forms.CharField(
-        label="メモ",
-        required=False,
-        widget=forms.Textarea(attrs={"rows": 2}),
-    )
-
     def __init__(self, *args, day_of_week=None, instance=None, initial_rule=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.instance = instance
@@ -250,16 +248,6 @@ class WeekdayShiftRuleForm(forms.Form):
                 set_widget_attrs(field, **{"class": SELECT_CLASS})
                 continue
 
-            if field_name == "memo":
-                set_widget_attrs(
-                    field,
-                    **{
-                        "class": TEXTAREA_CLASS,
-                        "placeholder": "必要なメモがあれば入力",
-                    },
-                )
-                continue
-
             set_widget_attrs(field, **{"class": INPUT_CLASS})
 
         # POST後の再表示では、ユーザーが入力した値を initial で潰さない。
@@ -276,7 +264,6 @@ class WeekdayShiftRuleForm(forms.Form):
                         "required_leader_staff": source_rule.required_leader_staff,
                         "min_ability_level": source_rule.min_ability_level,
                         "min_ability_level_staff_count": source_rule.min_ability_level_staff_count,
-                        "memo": source_rule.memo,
                     }
                 )
 
@@ -302,7 +289,6 @@ class WeekdayShiftRuleForm(forms.Form):
             self.data.get(self.add_prefix("required_leader_staff"), ""),
             self.data.get(self.add_prefix("min_ability_level"), ""),
             self.data.get(self.add_prefix("min_ability_level_staff_count"), ""),
-            self.data.get(self.add_prefix("memo"), ""),
         ]
         return any(str(value).strip() for value in raw_fields)
 
@@ -352,7 +338,6 @@ class WeekdayShiftRuleForm(forms.Form):
         weekday_rule.required_leader_staff = self.cleaned_data["required_leader_staff"]
         weekday_rule.min_ability_level = self.cleaned_data["min_ability_level"]
         weekday_rule.min_ability_level_staff_count = self.cleaned_data["min_ability_level_staff_count"]
-        weekday_rule.memo = self.cleaned_data["memo"].strip()
         weekday_rule.save()
         self.instance = weekday_rule
         return weekday_rule
@@ -381,19 +366,13 @@ class DateShiftRuleForm(forms.Form):
         required=False,
         coerce=int,
         empty_value=None,
-        choices=(("", ""), *StaffMember.AbilityLevelChoices.choices),
+        choices=(("", ""), *ABILITY_LEVEL_CHOICES),
     )
     min_ability_level_staff_count = forms.IntegerField(
         label="必要人数",
         min_value=1,
         required=False,
     )
-    memo = forms.CharField(
-        label="メモ",
-        required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
-    )
-
     def __init__(self, *args, shift_plan, instance=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.shift_plan = shift_plan
@@ -412,13 +391,6 @@ class DateShiftRuleForm(forms.Form):
         for field_name in ("required_day_staff", "required_night_staff", "required_leader_staff", "min_ability_level_staff_count"):
             set_widget_attrs(self.fields[field_name], **{"class": INPUT_CLASS})
         set_widget_attrs(self.fields["min_ability_level"], **{"class": SELECT_CLASS})
-        set_widget_attrs(
-            self.fields["memo"],
-            **{
-                "class": TEXTAREA_CLASS,
-                "placeholder": "必要なメモがあれば入力",
-            },
-        )
 
         # POST後の再表示では、ユーザー入力を initial で上書きしない。
         if not self.is_bound and instance:
@@ -432,7 +404,6 @@ class DateShiftRuleForm(forms.Form):
                     "required_leader_staff": instance.required_leader_staff,
                     "min_ability_level": instance.min_ability_level,
                     "min_ability_level_staff_count": instance.min_ability_level_staff_count,
-                    "memo": instance.memo,
                 }
             )
 
@@ -459,7 +430,6 @@ class DateShiftRuleForm(forms.Form):
             self.data.get(self.add_prefix("required_leader_staff"), ""),
             self.data.get(self.add_prefix("min_ability_level"), ""),
             self.data.get(self.add_prefix("min_ability_level_staff_count"), ""),
-            self.data.get(self.add_prefix("memo"), ""),
         ]
         return any(str(value).strip() for value in raw_fields)
 
@@ -505,7 +475,6 @@ class DateShiftRuleForm(forms.Form):
         date_rule.required_leader_staff = self.cleaned_data["required_leader_staff"]
         date_rule.min_ability_level = self.cleaned_data["min_ability_level"]
         date_rule.min_ability_level_staff_count = self.cleaned_data["min_ability_level_staff_count"]
-        date_rule.memo = self.cleaned_data["memo"].strip()
         date_rule.save()
         self.instance = date_rule
         return date_rule
