@@ -17,7 +17,14 @@ from .forms import (
     ShiftRuleForm,
     WeekdayShiftRuleForm,
 )
-from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule
+from .models import (
+    DayOffRequest,
+    ShiftCarryover,
+    ShiftPlan,
+    ShiftResult,
+    ShiftRule,
+    WeekdayShiftRule,
+)
 from .services import (
     MonthBoundaryConflictError,
     OFF_LIKE_SHIFT_TYPES,
@@ -93,6 +100,7 @@ BASE_FIXED_SOURCE_LABELS = {
     "month_boundary": "前月勤務の引き継ぎ",
 }
 WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
+WEEKDAY_CONDITION_LABELS = [*WEEKDAY_LABELS, "祝日"]
 
 
 def build_day_headers(month_dates, holiday_dates=frozenset()): # 画面用の日付加工
@@ -275,7 +283,11 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         return StaffMember.objects.filter(
             user=self.request.user,
             is_active=True,
-        ).prefetch_related("regular_days_off").order_by("id")
+        ).prefetch_related("regular_days_off").order_by(
+            "-ability_level",
+            "role",
+            "id",
+        )
 
     def get_submitted_excluded_staff_members(self, staff_members):
         """画面に表示している有効スタッフだけを対象外として受け付ける。"""
@@ -333,7 +345,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
                 instance=weekday_rules.get(day_of_week),
                 initial_rule=previous_weekday_rules.get(day_of_week),
             )
-            for day_of_week in range(7)
+            for day_of_week in range(WeekdayShiftRule.DayOfWeekChoices.HOLIDAY + 1)
         ]
 
     def get_date_rule_forms(self, shift_plan, data=None):
@@ -722,12 +734,23 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             "rule_form": rule_form,
             "weekday_form_rows": [
                 {
-                    "label": WEEKDAY_LABELS[index],
+                    "label": WEEKDAY_CONDITION_LABELS[index],
                     "form": form,
                     "is_selected": form.is_selected(),
+                    "is_saturday": index == WeekdayShiftRule.DayOfWeekChoices.SATURDAY,
+                    "is_sunday_or_holiday": index in (
+                        WeekdayShiftRule.DayOfWeekChoices.SUNDAY,
+                        WeekdayShiftRule.DayOfWeekChoices.HOLIDAY,
+                    ),
+                    "is_holiday_condition": (
+                        index == WeekdayShiftRule.DayOfWeekChoices.HOLIDAY
+                    ),
                 }
                 for index, form in enumerate(weekday_forms)
             ],
+            "holiday_dates": sorted(
+                get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
+            ),
             "date_rule_forms": date_rule_forms,
             "empty_date_rule_form": empty_date_rule_form,
             "date_rule_total_forms": len(date_rule_forms),

@@ -524,6 +524,17 @@ class EffectiveShiftRuleTests(TestCase):
         self.assertEqual(effective_rule.min_ability_level, 4)
         self.assertEqual(effective_rule.min_ability_level_staff_count, 2)
 
+    def test_holiday_rule_overrides_weekday_rule(self):
+        WeekdayShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            day_of_week=WeekdayShiftRule.DayOfWeekChoices.HOLIDAY,
+            required_day_staff=8,
+        )
+
+        effective_rule = get_effective_rule_for_date(self.shift_plan, date(2026, 8, 11))
+
+        self.assertEqual(effective_rule.required_day_staff, 8)
+
 
 class ShiftRuleWorkflowTests(TestCase):
     def setUp(self):
@@ -564,7 +575,7 @@ class ShiftRuleWorkflowTests(TestCase):
             "night_shift_next_day_off": "True",
             "date_rule_total_forms": "0",
         }
-        for day_of_week in range(7):
+        for day_of_week in range(8):
             prefix = f"weekday-{day_of_week}"
             data[f"{prefix}-selected"] = "0"
             data[f"{prefix}-day_of_week"] = str(day_of_week)
@@ -573,7 +584,6 @@ class ShiftRuleWorkflowTests(TestCase):
             data[f"{prefix}-required_leader_staff"] = ""
             data[f"{prefix}-min_ability_level"] = ""
             data[f"{prefix}-min_ability_level_staff_count"] = ""
-            data[f"{prefix}-memo"] = ""
         data.update(overrides)
         return data
 
@@ -587,7 +597,6 @@ class ShiftRuleWorkflowTests(TestCase):
             f"date-rule-{index}-required_leader_staff": "",
             f"date-rule-{index}-min_ability_level": "",
             f"date-rule-{index}-min_ability_level_staff_count": "",
-            f"date-rule-{index}-memo": "",
         }
         data.update(overrides)
         return data
@@ -767,7 +776,7 @@ class ShiftRuleWorkflowTests(TestCase):
         monday_form = response.context["weekday_form_rows"][0]["form"]
         self.assertEqual(monday_form.initial["selected"], "1")
         self.assertEqual(monday_form.initial["required_day_staff"], 8)
-        self.assertEqual(monday_form.initial["memo"], "前月の月曜条件")
+        self.assertNotIn("memo", monday_form.fields)
         self.assertEqual(response.context["date_rule_forms"], [])
         self.assertFalse(ShiftRule.objects.filter(shift_plan=self.shift_plan).exists())
         self.assertFalse(WeekdayShiftRule.objects.filter(shift_plan=self.shift_plan).exists())
@@ -867,6 +876,24 @@ class ShiftRuleWorkflowTests(TestCase):
         self.assertEqual(weekday_rule.min_ability_level, 3)
         self.assertEqual(weekday_rule.min_ability_level_staff_count, 2)
 
+    def test_holiday_rule_can_be_saved(self):
+        response = self.client.post(
+            reverse("shifts:conditions", kwargs={"pk": self.shift_plan.pk}),
+            self.build_conditions_post_data(
+                **{
+                    "weekday-7-selected": "1",
+                    "weekday-7-required_day_staff": "7",
+                }
+            ),
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        holiday_rule = WeekdayShiftRule.objects.get(
+            shift_plan=self.shift_plan,
+            day_of_week=WeekdayShiftRule.DayOfWeekChoices.HOLIDAY,
+        )
+        self.assertEqual(holiday_rule.required_day_staff, 7)
+
     def test_weekday_rule_unique_constraint_exists(self):
         WeekdayShiftRule.objects.create(
             shift_plan=self.shift_plan,
@@ -894,7 +921,6 @@ class ShiftRuleWorkflowTests(TestCase):
                             "date-rule-0-required_night_staff": "3",
                             "date-rule-0-min_ability_level": "4",
                             "date-rule-0-min_ability_level_staff_count": "2",
-                            "date-rule-0-memo": "処置件数が多い日",
                         }
                     ),
                 }

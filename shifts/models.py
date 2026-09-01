@@ -90,9 +90,9 @@ class ShiftRule(models.Model):
 
 
 class WeekdayShiftRule(models.Model):
-    """曜日ごとに月共通条件を上書きする追加条件。
+    """曜日・祝日ごとに月共通条件を上書きする追加条件。
 
-    同じシフト表の中では、1つの曜日に対して1レコードだけを持つ。
+    同じシフト表の中では、1つの曜日・祝日に対して1レコードだけを持つ。
     人数系のフィールドで None を使うのは「0人にする」ではなく、
     この曜日では上書きせず月共通条件を使う、という意味。
     """
@@ -105,13 +105,14 @@ class WeekdayShiftRule(models.Model):
         FRIDAY = 4, "金"
         SATURDAY = 5, "土"
         SUNDAY = 6, "日"
+        HOLIDAY = 7, "祝日"
 
     shift_plan = models.ForeignKey(
         ShiftPlan,
         on_delete=models.CASCADE,
         related_name="weekday_rules",
     )
-    day_of_week = models.IntegerField("曜日", choices=DayOfWeekChoices.choices)
+    day_of_week = models.IntegerField("曜日・祝日", choices=DayOfWeekChoices.choices)
     required_day_staff = models.IntegerField("必要日勤人数", null=True, blank=True)
     required_night_staff = models.IntegerField("必要夜勤人数", null=True, blank=True)
     required_leader_staff = models.IntegerField("必要リーダー人数", null=True, blank=True)
@@ -137,13 +138,14 @@ class WeekdayShiftRule(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.shift_plan} - {self.get_day_of_week_display()}曜日"
+        suffix = "" if self.day_of_week == self.DayOfWeekChoices.HOLIDAY else "曜日"
+        return f"{self.shift_plan} - {self.get_day_of_week_display()}{suffix}"
 
 
 class DateShiftRule(models.Model):
     """特定の日付だけに適用する最優先の追加条件。
 
-    条件の優先順位は「特定日条件 > 曜日条件 > 月共通条件」。
+    条件の優先順位は「特定日条件 > 祝日条件 > 曜日条件 > 月共通条件」。
     ここでも None は「0」ではなく、下位条件へフォールバックすることを表す。
     """
 

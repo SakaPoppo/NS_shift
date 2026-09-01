@@ -8,7 +8,7 @@ from jpholiday import JPHoliday
 
 from staff.models import StaffMember
 
-from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult
+from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, WeekdayShiftRule
 
 """画面表示以外の共通業務ロジック用ファイル"""
 
@@ -63,8 +63,17 @@ def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
 
     if weekday_rule_map is not None:
         weekday_rule = weekday_rule_map.get(target_date.weekday())
+        holiday_rule = weekday_rule_map.get(WeekdayShiftRule.DayOfWeekChoices.HOLIDAY)
     else:
         weekday_rule = shift_plan.weekday_rules.filter(day_of_week=target_date.weekday()).first()
+        holiday_rule = shift_plan.weekday_rules.filter(
+            day_of_week=WeekdayShiftRule.DayOfWeekChoices.HOLIDAY
+        ).first()
+
+    if target_date not in get_japanese_holiday_dates(
+        shift_plan.year, shift_plan.month
+    ):
+        holiday_rule = None
 
     if date_rule_map is not None:
         date_rule = date_rule_map.get(target_date)
@@ -75,6 +84,8 @@ def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
         # None は「0」ではなく「この条件では上書きしない」を意味する。
         if date_rule and getattr(date_rule, field_name) is not None:
             return getattr(date_rule, field_name)
+        if holiday_rule and getattr(holiday_rule, field_name) is not None:
+            return getattr(holiday_rule, field_name)
         if weekday_rule and getattr(weekday_rule, field_name) is not None:
             return getattr(weekday_rule, field_name)
         return default_value
