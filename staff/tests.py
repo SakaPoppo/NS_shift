@@ -1,10 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from unittest.mock import patch
 
 from .constants import MAX_ACTIVE_STAFF_COUNT
-from .forms import StaffMemberForm
-from .models import StaffMember
+from .forms import BulkStaffSetupForm, StaffMemberForm
+from .models import StaffMember, StaffRegularDayOff
 
 
 class StaffMemberModelTests(TestCase):
@@ -257,3 +258,305 @@ class StaffMemberActiveLimitTests(TestCase):
             f"登録スタッフ数：{MAX_ACTIVE_STAFF_COUNT + 5} / {MAX_ACTIVE_STAFF_COUNT}人",
         )
         self.assertContains(response, "登録できる在籍スタッフは40人までです。")
+
+
+class BulkStaffSetupFormTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="bulk-setup-user",
+            password="password123",
+        )
+
+    def setup_data(self, **overrides):
+        data = {}
+        for level in range(5, 0, -1):
+            data.update(
+                {
+                    f"level_{level}_count": 0,
+                    f"level_{level}_leader_count": 0,
+                    f"level_{level}_night_off_count": 0,
+                }
+            )
+        data.update(overrides)
+        return data
+
+    def test_generates_members_in_descending_level_order_without_saving(self):
+        form = BulkStaffSetupForm(
+            data=self.setup_data(
+                level_5_count=1,
+                level_4_count=5,
+                level_4_leader_count=2,
+                level_4_night_off_count=3,
+                level_2_count=1,
+            ),
+            user=self.user,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        initial_data = form.build_member_initial_data()
+
+        self.assertEqual(StaffMember.objects.count(), 0)
+        self.assertEqual([item["name"] for item in initial_data], [
+            "スタッフ01", "スタッフ02", "スタッフ03", "スタッフ04", "スタッフ05", "スタッフ06", "スタッフ07",
+        ])
+        self.assertEqual([item["ability_level"] for item in initial_data], [5, 4, 4, 4, 4, 4, 2])
+        self.assertEqual(
+            [item["role"] for item in initial_data[1:6]],
+            ["leader", "leader", "member", "member", "member"],
+        )
+        self.assertEqual(
+            [item["can_night_shift"] for item in initial_data[1:6]],
+            [False, False, False, True, True],
+        )
+        self.assertTrue(all(item["gender"] == "female" for item in initial_data))
+        self.assertTrue(all(item["job"] == "nurse" for item in initial_data))
+        self.assertTrue(all(item["regular_days_off"] == [] for item in initial_data))
+        self.assertTrue(all(item["is_holiday_off"] is False for item in initial_data))
+
+    def test_rejects_leader_count_greater_than_count_for_the_level(self):
+        form = BulkStaffSetupForm(
+            data=self.setup_data(level_3_count=1, level_3_leader_count=2),
+            user=self.user,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("level_3_leader_count", form.errors)
+        self.assertIn("Lv3", form.errors["level_3_leader_count"][0])
+
+    def test_rejects_night_off_count_greater_than_count_for_the_level(self):
+        form = BulkStaffSetupForm(
+            data=self.setup_data(level_1_count=1, level_1_night_off_count=2),
+            user=self.user,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("level_1_night_off_count", form.errors)
+        self.assertIn("Lv1", form.errors["level_1_night_off_count"][0])
+
+    def test_rejects_zero_total_count(self):
+        form = BulkStaffSetupForm(data=self.setup_data(), user=self.user)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("スタッフ数の合計は1人以上", form.non_field_errors()[0])
+
+    def test_rejects_count_exceeding_active_staff_limit(self):
+        StaffMember.objects.bulk_create(
+            [StaffMember(user=self.user, name=f"既存{index}") for index in range(39)]
+        )
+        form = BulkStaffSetupForm(
+            data=self.setup_data(level_2_count=2),
+            user=self.user,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("40人以下", form.non_field_errors()[0])
+
+
+class BulkStaffCreateViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="bulk-create-user",
+            password="password123",
+        )
+        self.other_user = get_user_model().objects.create_user(
+            username="other-user",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+
+    def setup_data(self, **overrides):
+        data = {}
+        for level in range(5, 0, -1):
+            data.update(
+                {
+                    f"level_{level}_count": "0",
+                    f"level_{level}_leader_count": "0",
+                    f"level_{level}_night_off_count": "0",
+                }
+            )
+        data.update(overrides)
+        return data
+
+    def start_bulk_create(self, **overrides):
+        response = self.client.post(
+            reverse("staff:bulk_create"),
+            self.setup_data(**overrides),
+        )
+        self.assertRedirects(response, reverse("staff:bulk_create_confirm"))
+        return self.client.session["bulk_staff_member_initial_data"]
+
+    def formset_post_data(self, initial_data, changes=None, total_forms=None):
+        changes = changes or {}
+        total_forms = len(initial_data) if total_forms is None else total_forms
+        data = {
+            "form-TOTAL_FORMS": str(total_forms),
+            "form-INITIAL_FORMS": "0",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": str(MAX_ACTIVE_STAFF_COUNT),
+        }
+        for index, initial in enumerate(initial_data):
+            values = {**initial, **changes.get(index, {})}
+            prefix = f"form-{index}"
+            data.update(
+                {
+                    f"{prefix}-name": values["name"],
+                    f"{prefix}-gender": values["gender"],
+                    f"{prefix}-job": values["job"],
+                    f"{prefix}-role": values["role"],
+                    f"{prefix}-ability_level": str(values["ability_level"]),
+                    f"{prefix}-can_night_shift": str(values["can_night_shift"]),
+                }
+            )
+            if values.get("is_holiday_off"):
+                data[f"{prefix}-is_holiday_off"] = "on"
+            if values.get("regular_days_off"):
+                data[f"{prefix}-regular_days_off"] = values["regular_days_off"]
+        return data
+
+    def test_setup_generates_formset_without_creating_staff(self):
+        initial_data = self.start_bulk_create(level_5_count="1", level_3_count="2")
+
+        self.assertEqual(StaffMember.objects.filter(user=self.user).count(), 0)
+        self.assertEqual(len(initial_data), 3)
+        response = self.client.get(reverse("staff:bulk_create_confirm"))
+        self.assertEqual(len(response.context["formset"].forms), 3)
+
+    def test_post_uses_session_initial_data_and_rejects_an_empty_staff_row(self):
+        initial_data = self.start_bulk_create(level_2_count="2")
+        empty_row = {
+            "name": "",
+            "gender": "",
+            "job": "",
+            "role": "",
+            "ability_level": "",
+            "can_night_shift": "",
+        }
+
+        response = self.client.post(
+            reverse("staff:bulk_create_confirm"),
+            self.formset_post_data(initial_data, changes={0: empty_row}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        formset = response.context["formset"]
+        self.assertEqual(formset.forms[0].initial["name"], "スタッフ01")
+        self.assertIn("name", formset.errors[0])
+        self.assertFalse(StaffMember.objects.filter(user=self.user).exists())
+
+    def test_rejects_total_forms_tampering_that_adds_a_staff_member(self):
+        initial_data = self.start_bulk_create(level_2_count="2")
+
+        response = self.client.post(
+            reverse("staff:bulk_create_confirm"),
+            self.formset_post_data(initial_data, total_forms=3),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "登録対象のスタッフ数が不正です。")
+        self.assertFalse(StaffMember.objects.filter(user=self.user).exists())
+
+    def test_rejects_total_forms_tampering_that_removes_a_staff_member(self):
+        initial_data = self.start_bulk_create(level_2_count="2")
+
+        response = self.client.post(
+            reverse("staff:bulk_create_confirm"),
+            self.formset_post_data(initial_data, total_forms=1),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "登録対象のスタッフ数が不正です。")
+        self.assertFalse(StaffMember.objects.filter(user=self.user).exists())
+
+    def test_bulk_create_saves_members_with_expected_levels_roles_and_days_off(self):
+        initial_data = self.start_bulk_create(
+            level_4_count="5",
+            level_4_leader_count="2",
+            level_4_night_off_count="3",
+            level_1_count="1",
+        )
+
+        response = self.client.post(
+            reverse("staff:bulk_create_confirm"),
+            self.formset_post_data(
+                initial_data,
+                changes={0: {"regular_days_off": [0, 2], "is_holiday_off": True}},
+            ),
+        )
+
+        self.assertRedirects(response, reverse("staff:list"))
+        staff_members = list(StaffMember.objects.filter(user=self.user).order_by("id"))
+        self.assertEqual(len(staff_members), 6)
+        self.assertEqual([member.name for member in staff_members], [
+            "スタッフ01", "スタッフ02", "スタッフ03", "スタッフ04", "スタッフ05", "スタッフ06",
+        ])
+        self.assertEqual([member.ability_level for member in staff_members], [4, 4, 4, 4, 4, 1])
+        self.assertEqual([member.role for member in staff_members[:5]], [
+            "leader", "leader", "member", "member", "member",
+        ])
+        self.assertEqual([member.can_night_shift for member in staff_members[:5]], [
+            False, False, False, True, True,
+        ])
+        self.assertTrue(staff_members[0].is_holiday_off)
+        self.assertEqual(
+            list(
+                StaffRegularDayOff.objects.filter(staff_member=staff_members[0])
+                .order_by("day_of_week")
+                .values_list("day_of_week", flat=True)
+            ),
+            [0, 2],
+        )
+        self.assertTrue(all(member.user == self.user for member in staff_members))
+        self.assertFalse(StaffMember.objects.filter(user=self.other_user).exists())
+
+    def test_save_rechecks_active_staff_limit_and_creates_nothing_when_it_is_exceeded(self):
+        initial_data = self.start_bulk_create(level_2_count="2")
+        StaffMember.objects.bulk_create(
+            [StaffMember(user=self.user, name=f"既存{index}") for index in range(39)]
+        )
+
+        response = self.client.post(
+            reverse("staff:bulk_create_confirm"),
+            self.formset_post_data(initial_data),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "登録できる在籍スタッフは40人までです。")
+        self.assertEqual(StaffMember.objects.filter(user=self.user).count(), 39)
+
+    def test_failure_during_bulk_save_rolls_back_every_staff_member(self):
+        initial_data = self.start_bulk_create(level_2_count="2")
+
+        with patch(
+            "staff.views.sync_regular_days_off",
+            side_effect=[None, RuntimeError("固定休の保存に失敗")],
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse("staff:bulk_create_confirm"),
+                    self.formset_post_data(initial_data),
+                )
+
+        self.assertFalse(StaffMember.objects.filter(user=self.user).exists())
+
+    def test_existing_normal_create_and_edit_flow_still_works(self):
+        create_data = {
+            "name": "通常登録スタッフ",
+            "gender": "female",
+            "job": "nurse",
+            "role": "member",
+            "ability_level": "2",
+            "can_night_shift": "True",
+        }
+        response = self.client.post(reverse("staff:create"), create_data)
+        self.assertRedirects(response, reverse("staff:list"))
+
+        staff_member = StaffMember.objects.get(user=self.user, name="通常登録スタッフ")
+        create_data["name"] = "通常編集スタッフ"
+        response = self.client.post(
+            reverse("staff:edit", args=[staff_member.pk]),
+            create_data,
+        )
+
+        self.assertRedirects(response, reverse("staff:list"))
+        staff_member.refresh_from_db()
+        self.assertEqual(staff_member.name, "通常編集スタッフ")

@@ -1,0 +1,18 @@
+{% extends "core/base.html" %}
+
+{% block title %}スタッフ一括登録の確認 | Ns Shift{% endblock %}
+
+{% block content %}
+  <h1>スタッフ一括登録の確認</h1>
+  <form method="post">
+    {% csrf_token %}
+    {{ formset.non_form_errors }}
+    {{ formset.management_form }}
+    {% for form in formset %}
+      <fieldset>
+        {{ form.as_p }}
+      </fieldset>
+    {% endfor %}
+    <button type="submit">一括登録する</button>
+  </form>
+{% endblock %}
