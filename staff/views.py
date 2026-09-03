@@ -3,12 +3,12 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.http import HttpResponseRedirect
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
-from django.views.generic import CreateView, DeleteView, ListView, UpdateView
+from django.views.generic import CreateView, DeleteView, FormView, ListView, TemplateView, UpdateView
 
 from .constants import MAX_ACTIVE_STAFF_COUNT, active_staff_limit_message
-from .forms import StaffMemberForm
+from .forms import BulkStaffMemberFormSet, BulkStaffSetupForm, StaffMemberForm
 from .models import StaffMember, StaffRegularDayOff
 
 
@@ -102,6 +102,99 @@ class StaffMemberCreateView(ActiveStaffLimitMixin, LoginRequiredMixin, CreateVie
             )
 
         return HttpResponseRedirect(self.get_success_url())
+
+
+class BulkStaffSetupView(LoginRequiredMixin, FormView):
+    """人数設定を受け付け、確認用フォームの初期値だけをセッションに保持する。"""
+
+    form_class = BulkStaffSetupForm
+    template_name = "staff/bulk_staff_setup.html"
+    success_url = reverse_lazy("staff:bulk_create_confirm")
+    session_key = "bulk_staff_member_initial_data"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        # この段階では StaffMember を保存せず、確認用フォームの初期値だけを保持する。
+        # フォーム1の再送信は新しい一括登録の開始として、以前の確認データを置き換える。
+        self.request.session.pop(self.session_key, None)
+        self.request.session[self.session_key] = form.build_member_initial_data()
+        return super().form_valid(form)
+
+
+class BulkStaffCreateConfirmView(LoginRequiredMixin, TemplateView):
+    """一括登録の確認・保存を行う。"""
+
+    template_name = "staff/bulk_staff_confirm.html"
+    session_key = BulkStaffSetupView.session_key
+
+    def get_initial_data(self):
+        return self.request.session.get(self.session_key, [])
+
+    def dispatch(self, request, *args, **kwargs):
+        if not self.get_initial_data():
+            messages.error(request, "先に一括登録するスタッフ数を入力してください。")
+            return redirect("staff:bulk_create")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_formset(self, data=None):
+        initial_data = self.get_initial_data()
+        kwargs = {
+            "queryset": StaffMember.objects.none(),
+            "expected_form_count": len(initial_data),
+            "initial": initial_data,
+        }
+        if data is not None:
+            kwargs["data"] = data
+        return BulkStaffMemberFormSet(**kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.setdefault("formset", self.get_formset())
+        return context
+
+    def get(self, request, *args, **kwargs):
+        return self.render_to_response(self.get_context_data())
+
+    def post(self, request, *args, **kwargs):
+        formset = self.get_formset(data=request.POST)
+
+        if not formset.is_valid():
+            return render(request, self.template_name, {"formset": formset})
+
+        if not self.save_formset(formset):
+            messages.error(request, active_staff_limit_message())
+            return render(request, self.template_name, {"formset": formset})
+
+        self.request.session.pop(self.session_key, None)
+        messages.success(request, f"{formset.total_form_count()}人のスタッフを登録しました。")
+        return redirect("staff:list")
+
+    def save_formset(self, formset):
+        """上限確認とスタッフ・固定休の保存を同一トランザクションで行う。"""
+        with transaction.atomic():
+            # 単体登録と同じく、ユーザー行をロックして上限判定を直列化する。
+            user = get_user_model().objects.select_for_update().get(pk=self.request.user.pk)
+            active_staff_count = StaffMember.objects.filter(
+                user=user,
+                is_active=True,
+            ).count()
+            if active_staff_count + formset.total_form_count() > MAX_ACTIVE_STAFF_COUNT:
+                return False
+
+            for form in formset.forms:
+                staff_member = form.save(commit=False)
+                staff_member.user = user
+                staff_member.save()
+                sync_regular_days_off(
+                    staff_member,
+                    form.cleaned_data.get("regular_days_off", []),
+                )
+
+        return True
 
 
 class StaffMemberUpdateView(UserStaffMemberQuerysetMixin, UpdateView):

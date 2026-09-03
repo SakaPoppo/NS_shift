@@ -1,6 +1,102 @@
 from django import forms
+from django.forms import BaseModelFormSet, modelformset_factory
 
+from .constants import MAX_ACTIVE_STAFF_COUNT
 from .models import StaffMember, StaffRegularDayOff
+
+
+BULK_STAFF_LEVELS = range(5, 0, -1)
+
+
+class BulkStaffSetupForm(forms.Form):
+    """一括登録するスタッフのLv別内訳を受け付けるフォーム。"""
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+        for level in BULK_STAFF_LEVELS:
+            self.fields[f"level_{level}_count"] = forms.IntegerField(
+                label=f"Lv{level}の人数",
+                min_value=0,
+                initial=0,
+            )
+            self.fields[f"level_{level}_leader_count"] = forms.IntegerField(
+                label=f"Lv{level}のリーダー数",
+                min_value=0,
+                initial=0,
+            )
+            self.fields[f"level_{level}_night_off_count"] = forms.IntegerField(
+                label=f"Lv{level}の夜勤不可人数",
+                min_value=0,
+                initial=0,
+            )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        total_count = 0
+
+        for level in BULK_STAFF_LEVELS:
+            count = cleaned_data.get(f"level_{level}_count")
+            leader_count = cleaned_data.get(f"level_{level}_leader_count")
+            night_off_count = cleaned_data.get(f"level_{level}_night_off_count")
+
+            if count is not None:
+                total_count += count
+            if count is not None and leader_count is not None and leader_count > count:
+                self.add_error(
+                    f"level_{level}_leader_count",
+                    f"Lv{level}のリーダー数は人数以下にしてください。",
+                )
+            if count is not None and night_off_count is not None and night_off_count > count:
+                self.add_error(
+                    f"level_{level}_night_off_count",
+                    f"Lv{level}の夜勤不可人数は人数以下にしてください。",
+                )
+
+        if total_count == 0:
+            raise forms.ValidationError("スタッフ数の合計は1人以上にしてください。")
+
+        if self.user and (
+            StaffMember.objects.filter(user=self.user, is_active=True).count() + total_count
+            > MAX_ACTIVE_STAFF_COUNT
+        ):
+            raise forms.ValidationError(
+                f"現在の在籍スタッフ数と今回の登録人数の合計は{MAX_ACTIVE_STAFF_COUNT}人以下にしてください。"
+            )
+
+        return cleaned_data
+
+    def build_member_initial_data(self):
+        """入力されたLv別の人数から、確認用フォームの初期値を生成する。"""
+        if not self.is_valid():
+            raise ValueError("有効な一括登録設定フォームからのみ初期値を生成できます。")
+
+        initial_data = []
+        staff_number = 1
+        for level in BULK_STAFF_LEVELS:
+            count = self.cleaned_data[f"level_{level}_count"]
+            leader_count = self.cleaned_data[f"level_{level}_leader_count"]
+            night_off_count = self.cleaned_data[f"level_{level}_night_off_count"]
+            for index in range(count):
+                initial_data.append(
+                    {
+                        "name": f"スタッフ{staff_number:02d}",
+                        "gender": StaffMember.GenderChoices.FEMALE,
+                        "job": StaffMember.JobChoices.NURSE,
+                        "role": (
+                            StaffMember.RoleChoices.LEADER
+                            if index < leader_count
+                            else StaffMember.RoleChoices.MEMBER
+                        ),
+                        "ability_level": level,
+                        "can_night_shift": index >= night_off_count,
+                        "regular_days_off": [],
+                        "is_holiday_off": False,
+                    }
+                )
+                staff_number += 1
+
+        return initial_data
 
 
 class StaffMemberForm(forms.ModelForm):
@@ -93,3 +189,42 @@ class StaffMemberForm(forms.ModelForm):
 
 
 StaffMemberCreateForm = StaffMemberForm
+
+
+class BulkStaffMemberForm(StaffMemberForm):
+    """一括登録・一括編集で再利用するスタッフ1人分のフォーム。"""
+
+
+class BaseBulkStaffMemberFormSet(BaseModelFormSet):
+    """フォーム1で決まった人数分だけ、未保存スタッフ用フォームを表示する。"""
+
+    def __init__(self, *args, expected_form_count=0, **kwargs):
+        self.expected_form_count = expected_form_count
+        self.extra = expected_form_count
+        super().__init__(*args, **kwargs)
+
+    def _construct_form(self, index, **kwargs):
+        form = super()._construct_form(index, **kwargs)
+        # DB未保存のModelFormsetでは全行が extra form 扱いになるため、
+        # フォーム1で生成した行は空欄でも無視されないよう必須検証を行う。
+        if index < self.expected_form_count:
+            form.empty_permitted = False
+        return form
+
+    def clean(self):
+        super().clean()
+
+        if self.total_form_count() != self.expected_form_count:
+            raise forms.ValidationError(
+                "登録対象のスタッフ数が不正です。最初からやり直してください。"
+            )
+
+
+BulkStaffMemberFormSet = modelformset_factory(
+    StaffMember,
+    form=BulkStaffMemberForm,
+    formset=BaseBulkStaffMemberFormSet,
+    extra=0,
+    max_num=MAX_ACTIVE_STAFF_COUNT,
+    validate_max=True,
+)
