@@ -117,6 +117,19 @@ class BulkStaffSetupView(LoginRequiredMixin, FormView):
         kwargs["user"] = self.request.user
         return kwargs
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active_staff_count = StaffMember.objects.filter(
+            user=self.request.user,
+            is_active=True,
+        ).count()
+        context.update(
+            active_staff_count=active_staff_count,
+            remaining_staff_count=max(MAX_ACTIVE_STAFF_COUNT - active_staff_count, 0),
+            max_active_staff_count=MAX_ACTIVE_STAFF_COUNT,
+        )
+        return context
+
     def form_valid(self, form):
         # この段階では StaffMember を保存せず、確認用フォームの初期値だけを保持する。
         # フォーム1の再送信は新しい一括登録の開始として、以前の確認データを置き換える。
@@ -154,6 +167,7 @@ class BulkStaffCreateConfirmView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.setdefault("formset", self.get_formset())
+        context.setdefault("registration_count", len(self.get_initial_data()))
         return context
 
     def get(self, request, *args, **kwargs):
@@ -163,11 +177,25 @@ class BulkStaffCreateConfirmView(LoginRequiredMixin, TemplateView):
         formset = self.get_formset(data=request.POST)
 
         if not formset.is_valid():
-            return render(request, self.template_name, {"formset": formset})
+            return render(
+                request,
+                self.template_name,
+                {
+                    "formset": formset,
+                    "registration_count": len(self.get_initial_data()),
+                },
+            )
 
         if not self.save_formset(formset):
             messages.error(request, active_staff_limit_message())
-            return render(request, self.template_name, {"formset": formset})
+            return render(
+                request,
+                self.template_name,
+                {
+                    "formset": formset,
+                    "registration_count": len(self.get_initial_data()),
+                },
+            )
 
         self.request.session.pop(self.session_key, None)
         messages.success(request, f"{formset.total_form_count()}人のスタッフを登録しました。")
