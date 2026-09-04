@@ -6,6 +6,13 @@ from .models import StaffMember, StaffRegularDayOff
 
 
 BULK_STAFF_LEVELS = range(5, 0, -1)
+BULK_STAFF_LEVEL_LABELS = {
+    5: "Lv5 管理者",
+    4: "Lv4 重症対応",
+    3: "Lv3 指導者",
+    2: "Lv2 自立",
+    1: "Lv1 新人",
+}
 
 
 class BulkStaffSetupForm(forms.Form):
@@ -19,17 +26,55 @@ class BulkStaffSetupForm(forms.Form):
                 label=f"Lv{level}の人数",
                 min_value=0,
                 initial=0,
+                widget=forms.NumberInput(
+                    attrs={
+                        "class": "hidden",
+                        "data-staff-count-input": "true",
+                    }
+                ),
+            )
+            self.fields[f"level_{level}_all_leaders"] = forms.BooleanField(
+                label=f"Lv{level}を全員リーダーにする",
+                required=False,
+                widget=forms.CheckboxInput(
+                    attrs={"class": "checkbox checkbox-primary checkbox-sm rounded-md"}
+                ),
+            )
+            self.fields[f"level_{level}_use_leader_count"] = forms.BooleanField(
+                label=f"Lv{level}で指定数だけリーダーにする",
+                required=False,
+                widget=forms.CheckboxInput(
+                    attrs={"class": "checkbox checkbox-primary checkbox-sm rounded-md"}
+                ),
             )
             self.fields[f"level_{level}_leader_count"] = forms.IntegerField(
                 label=f"Lv{level}のリーダー数",
                 min_value=0,
+                required=False,
                 initial=0,
+                widget=forms.NumberInput(
+                    attrs={
+                        "class": "hidden",
+                        "data-leader-count-input": "true",
+                    }
+                ),
             )
-            self.fields[f"level_{level}_night_off_count"] = forms.IntegerField(
-                label=f"Lv{level}の夜勤不可人数",
-                min_value=0,
-                initial=0,
-            )
+
+    @property
+    def level_rows(self):
+        """テンプレートが動的なフィールド名を組み立てずに済む表示用データ。"""
+        return [
+            {
+                "level": level,
+                "label": BULK_STAFF_LEVEL_LABELS[level],
+                "short_label": BULK_STAFF_LEVEL_LABELS[level].split(" ", 1)[1],
+                "count": self[f"level_{level}_count"],
+                "all_leaders": self[f"level_{level}_all_leaders"],
+                "use_leader_count": self[f"level_{level}_use_leader_count"],
+                "leader_count": self[f"level_{level}_leader_count"],
+            }
+            for level in BULK_STAFF_LEVELS
+        ]
 
     def clean(self):
         cleaned_data = super().clean()
@@ -37,20 +82,20 @@ class BulkStaffSetupForm(forms.Form):
 
         for level in BULK_STAFF_LEVELS:
             count = cleaned_data.get(f"level_{level}_count")
-            leader_count = cleaned_data.get(f"level_{level}_leader_count")
-            night_off_count = cleaned_data.get(f"level_{level}_night_off_count")
+            all_leaders = cleaned_data.get(f"level_{level}_all_leaders")
+            use_leader_count = cleaned_data.get(f"level_{level}_use_leader_count")
+            leader_count = cleaned_data.get(f"level_{level}_leader_count") or 0
 
             if count is not None:
                 total_count += count
-            if count is not None and leader_count is not None and leader_count > count:
+            if all_leaders and use_leader_count:
+                message = f"Lv{level}は全員リーダーと指定数だけリーダーを同時に選択できません。"
+                self.add_error(f"level_{level}_all_leaders", message)
+                self.add_error(f"level_{level}_use_leader_count", message)
+            if count is not None and leader_count > count:
                 self.add_error(
                     f"level_{level}_leader_count",
-                    f"Lv{level}のリーダー数は人数以下にしてください。",
-                )
-            if count is not None and night_off_count is not None and night_off_count > count:
-                self.add_error(
-                    f"level_{level}_night_off_count",
-                    f"Lv{level}の夜勤不可人数は人数以下にしてください。",
+                    f"Lv{level}の指定リーダー数は人数以下にしてください。",
                 )
 
         if total_count == 0:
@@ -72,15 +117,19 @@ class BulkStaffSetupForm(forms.Form):
             raise ValueError("有効な一括登録設定フォームからのみ初期値を生成できます。")
 
         initial_data = []
-        staff_number = 1
         for level in BULK_STAFF_LEVELS:
             count = self.cleaned_data[f"level_{level}_count"]
-            leader_count = self.cleaned_data[f"level_{level}_leader_count"]
-            night_off_count = self.cleaned_data[f"level_{level}_night_off_count"]
+            if self.cleaned_data[f"level_{level}_all_leaders"]:
+                leader_count = count
+            elif self.cleaned_data[f"level_{level}_use_leader_count"]:
+                leader_count = self.cleaned_data[f"level_{level}_leader_count"] or 0
+            else:
+                leader_count = 0
+
             for index in range(count):
                 initial_data.append(
                     {
-                        "name": f"スタッフ{staff_number:02d}",
+                        "name": "No name",
                         "gender": StaffMember.GenderChoices.FEMALE,
                         "job": StaffMember.JobChoices.NURSE,
                         "role": (
@@ -89,12 +138,11 @@ class BulkStaffSetupForm(forms.Form):
                             else StaffMember.RoleChoices.MEMBER
                         ),
                         "ability_level": level,
-                        "can_night_shift": index >= night_off_count,
+                        "can_night_shift": True,
                         "regular_days_off": [],
                         "is_holiday_off": False,
                     }
                 )
-                staff_number += 1
 
         return initial_data
 
@@ -194,6 +242,57 @@ StaffMemberCreateForm = StaffMemberForm
 class BulkStaffMemberForm(StaffMemberForm):
     """一括登録・一括編集で再利用するスタッフ1人分のフォーム。"""
 
+    can_night_shift = forms.TypedChoiceField(
+        label="夜勤の可否",
+        choices=((True, "可"), (False, "不可")),
+        coerce=lambda value: value in {True, "True", "true", "1", "on"},
+        required=True,
+        initial=True,
+        widget=forms.Select,
+    )
+
+    class Meta(StaffMemberForm.Meta):
+        fields = (
+            "name",
+            "gender",
+            "job",
+            "role",
+            "ability_level",
+            "can_night_shift",
+            "is_holiday_off",
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        compact_select_class = (
+            "select select-bordered h-10 min-h-10 w-full rounded-lg border-slate-300 "
+            "bg-white px-2 text-xs font-semibold text-slate-700 focus:border-sky-600 focus:outline-none"
+        )
+        self.fields["name"].widget.attrs.update(
+            {
+                "class": "input input-bordered h-10 w-full rounded-lg border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 focus:border-sky-600 focus:outline-none",
+                "placeholder": "氏名",
+                "data-name-input": "true",
+            }
+        )
+        self.fields["name"].help_text = ""
+        for field_name in ("gender", "job", "role", "ability_level", "can_night_shift"):
+            field = self.fields[field_name]
+            field.widget = forms.Select(choices=field.choices, attrs={"class": compact_select_class})
+            field.help_text = ""
+        self.fields["gender"].widget.attrs["data-gender-select"] = "true"
+        self.fields["role"].widget.attrs["data-role-select"] = "true"
+        self.fields["ability_level"].choices = tuple(
+            (level, f"Lv{level}") for level in BULK_STAFF_LEVELS
+        )
+        self.fields["ability_level"].widget.attrs["data-ability-level-select"] = "true"
+        self.fields["can_night_shift"].widget.attrs["data-night-select"] = "true"
+        self.fields["regular_days_off"].widget.attrs.update(
+            {"class": "checkbox checkbox-primary checkbox-sm rounded-md"}
+        )
+        self.fields["is_holiday_off"].widget.attrs.update(
+            {"class": "checkbox checkbox-primary checkbox-sm rounded-md"}
+        )
 
 class BaseBulkStaffMemberFormSet(BaseModelFormSet):
     """フォーム1で決まった人数分だけ、未保存スタッフ用フォームを表示する。"""

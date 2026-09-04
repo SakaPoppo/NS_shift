@@ -23,21 +23,21 @@
             登録スタッフ数：{{ active_staff_count }} / {{ max_active_staff_count }}人
           </p>
           {% if can_create_staff %}
-            <a
-              href="{% url 'staff:create' %}"
-              class="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-sky-700 px-8 text-sm font-bold text-white shadow-sm transition hover:bg-sky-800"
-            >
-              <span class="text-2xl leading-none">＋</span>
-              新規スタッフ登録
-            </a>
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <a href="{% url 'staff:bulk_create' %}" class="inline-flex h-12 items-center justify-center rounded-full border border-sky-300 bg-white px-6 text-sm font-bold text-sky-700 shadow-sm transition hover:border-sky-400 hover:bg-sky-50">一括登録</a>
+              <a href="{% url 'staff:create' %}" class="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-sky-700 px-8 text-sm font-bold text-white shadow-sm transition hover:bg-sky-800">
+                <span class="text-2xl leading-none">＋</span>
+                新規スタッフ登録
+              </a>
+            </div>
           {% else %}
-            <span
-              aria-disabled="true"
-              class="inline-flex h-12 cursor-not-allowed items-center justify-center gap-2 rounded-full bg-slate-200 px-8 text-sm font-bold text-slate-500"
-            >
-              <span class="text-2xl leading-none">＋</span>
-              新規スタッフ登録
-            </span>
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <span aria-disabled="true" class="inline-flex h-12 cursor-not-allowed items-center justify-center rounded-full border border-slate-200 bg-slate-100 px-6 text-sm font-bold text-slate-400">一括登録</span>
+              <span aria-disabled="true" class="inline-flex h-12 cursor-not-allowed items-center justify-center gap-2 rounded-full bg-slate-200 px-8 text-sm font-bold text-slate-500">
+                <span class="text-2xl leading-none">＋</span>
+                新規スタッフ登録
+              </span>
+            </div>
           {% endif %}
         </div>
       </div>

@@ -3,16 +3,115 @@
 {% block title %}スタッフ一括登録の確認 | Ns Shift{% endblock %}
 
 {% block content %}
-  <h1>スタッフ一括登録の確認</h1>
-  <form method="post">
-    {% csrf_token %}
-    {{ formset.non_form_errors }}
-    {{ formset.management_form }}
-    {% for form in formset %}
-      <fieldset>
-        {{ form.as_p }}
-      </fieldset>
-    {% endfor %}
-    <button type="submit">一括登録する</button>
-  </form>
+  <section class="mx-auto w-full max-w-[1680px] px-5 py-8 sm:px-8 lg:px-10">
+    <div class="space-y-6">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p class="text-sm font-semibold text-slate-500">スタッフ管理 &gt; 一括登録 &gt; 確認</p>
+          <h1 class="mt-2 text-[1.9rem] font-black tracking-tight text-slate-900">登録内容を確認</h1>
+          <p class="mt-2 text-sm font-medium text-slate-600">登録前のスタッフ情報一覧です。必要な項目を修正してから登録してください。</p>
+        </div>
+      </div>
+
+      {% if formset.non_form_errors %}
+        <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{{ formset.non_form_errors|join:" " }}</div>
+      {% endif %}
+
+      <form method="post" id="bulk-staff-confirm-form" class="space-y-5">
+        {% csrf_token %}
+        {{ formset.management_form }}
+        <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table class="w-full min-w-[1240px] table-fixed border-separate border-spacing-0 text-sm">
+            <colgroup>
+              <col class="w-16">
+              <col class="w-[210px]">
+              <col class="w-[110px]">
+              <col class="w-[110px]">
+              <col class="w-[110px]">
+              <col class="w-[110px]">
+              <col class="w-[110px]">
+              <col class="w-[380px]">
+            </colgroup>
+            <thead class="bg-slate-50 text-xs font-bold text-slate-500">
+              <tr>
+                <th class="border-b border-slate-200 px-3 py-3 text-center">#</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">名前</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">性別</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">職種</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">役割</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">Lv</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">夜勤</th>
+                <th class="border-b border-slate-200 px-3 py-3 text-left">固定休</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for form in formset %}
+                <tr data-staff-row class="align-top transition hover:bg-sky-50/40">
+                  <td class="align-middle border-b border-slate-100 px-3 py-3 text-center text-sm font-black text-slate-500">
+                    {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+                    {{ forloop.counter|stringformat:"02d" }}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3">
+                    <div class="{% if form.name.errors %}[&>input]:border-red-500 [&>input]:bg-red-50{% endif %}">{{ form.name }}</div>
+                    {% for error in form.name.errors %}<p class="mt-1 text-xs font-bold text-red-600">名前：{{ error }}</p>{% endfor %}
+                    {% for error in form.non_field_errors %}<p class="mt-1 text-xs font-bold text-red-600">{{ error }}</p>{% endfor %}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3">
+                    <div class="{% if form.gender.errors %}[&>select]:border-red-500 [&>select]:bg-red-50{% endif %}">{{ form.gender }}</div>
+                    {% for error in form.gender.errors %}<p class="mt-1 text-xs font-bold text-red-600">{{ error }}</p>{% endfor %}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3">
+                    <div class="{% if form.job.errors %}[&>select]:border-red-500 [&>select]:bg-red-50{% endif %}">{{ form.job }}</div>
+                    {% for error in form.job.errors %}<p class="mt-1 text-xs font-bold text-red-600">{{ error }}</p>{% endfor %}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3">
+                    <div class="{% if form.role.errors %}[&>select]:border-red-500 [&>select]:bg-red-50{% endif %}">{{ form.role }}</div>
+                    {% for error in form.role.errors %}<p class="mt-1 text-xs font-bold text-red-600">役割：{{ error }}</p>{% endfor %}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3">
+                    <div class="{% if form.ability_level.errors %}[&>select]:border-red-500 [&>select]:bg-red-50{% endif %}">{{ form.ability_level }}</div>
+                    {% for error in form.ability_level.errors %}<p class="mt-1 text-xs font-bold text-red-600">{{ error }}</p>{% endfor %}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3">
+                    <div class="{% if form.can_night_shift.errors %}[&>select]:border-red-500 [&>select]:bg-red-50{% endif %}">{{ form.can_night_shift }}</div>
+                    {% for error in form.can_night_shift.errors %}<p class="mt-1 text-xs font-bold text-red-600">{{ error }}</p>{% endfor %}
+                  </td>
+                  <td class="overflow-hidden border-b border-slate-100 px-3 py-3 text-center align-middle">
+                    <div class="flex items-center justify-center gap-2 whitespace-nowrap">
+                      {% for checkbox in form.regular_days_off %}
+                        <label class="inline-flex cursor-pointer items-center gap-1 text-xs font-bold {% if checkbox.choice_label == '土' %}text-sky-600{% elif checkbox.choice_label == '日' %}text-red-600{% else %}text-slate-600{% endif %}">{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label>
+                      {% endfor %}
+                      <span class="mx-1 h-4 border-l border-slate-200"></span>
+                      <label class="inline-flex cursor-pointer items-center gap-1 text-xs font-bold text-red-600">{{ form.is_holiday_off }}<span>祝</span></label>
+                    </div>
+                    {% for error in form.regular_days_off.errors %}<p class="mt-1 text-xs font-bold text-red-600">固定休：{{ error }}</p>{% endfor %}
+                    {% for error in form.is_holiday_off.errors %}<p class="mt-1 text-xs font-bold text-red-600">{{ error }}</p>{% endfor %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <a href="{% url 'staff:bulk_create' %}" class="btn btn-outline h-11 rounded-lg border-slate-300 bg-white px-6 text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700">人数入力へ戻る</a>
+          <button type="submit" data-bulk-submit class="btn btn-primary h-11 rounded-lg border-sky-700 bg-sky-700 px-7 text-white hover:border-sky-800 hover:bg-sky-800">{{ registration_count }}人を一括登録</button>
+        </div>
+      </form>
+    </div>
+  </section>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (() => {
+      const form = document.getElementById("bulk-staff-confirm-form");
+      const submitButton = document.querySelector("[data-bulk-submit]");
+      form?.addEventListener("submit", () => {
+        if (submitButton?.disabled) return;
+        submitButton.disabled = true;
+        submitButton.textContent = "登録しています...";
+      });
+    })();
+  </script>
 {% endblock %}
