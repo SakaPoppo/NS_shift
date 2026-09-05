@@ -8,7 +8,12 @@ from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, FormView, ListView, TemplateView, UpdateView
 
 from .constants import MAX_ACTIVE_STAFF_COUNT, active_staff_limit_message
-from .forms import BulkStaffMemberFormSet, BulkStaffSetupForm, StaffMemberForm
+from .forms import (
+    BulkStaffEditFormSet,
+    BulkStaffMemberFormSet,
+    BulkStaffSetupForm,
+    StaffMemberForm,
+)
 from .models import StaffMember, StaffRegularDayOff
 
 
@@ -223,6 +228,74 @@ class BulkStaffCreateConfirmView(LoginRequiredMixin, TemplateView):
                 )
 
         return True
+
+
+class BulkStaffEditView(LoginRequiredMixin, TemplateView):
+    """在籍スタッフをまとめて更新・論理削除する。"""
+
+    template_name = "staff/bulk_staff_edit.html"
+
+    def get_queryset(self):
+        return (
+            StaffMember.objects.filter(
+                user=self.request.user,
+                is_active=True,
+            )
+            .prefetch_related("regular_days_off")
+            .order_by("-ability_level", "id")
+        )
+
+    def get_formset(self, data=None):
+        queryset = self.get_queryset()
+        expected_staff_ids = list(queryset.values_list("pk", flat=True))
+        kwargs = {
+            "queryset": queryset,
+            "expected_form_count": len(expected_staff_ids),
+            "expected_staff_ids": expected_staff_ids,
+        }
+        if data is not None:
+            kwargs["data"] = data
+        return BulkStaffEditFormSet(**kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.setdefault("formset", self.get_formset())
+        return context
+
+    def get(self, request, *args, **kwargs):
+        return self.render_to_response(self.get_context_data())
+
+    def post(self, request, *args, **kwargs):
+        formset = self.get_formset(data=request.POST)
+        if not formset.is_valid():
+            return render(request, self.template_name, {"formset": formset})
+
+        deleted_count = self.save_formset(formset)
+        message = "スタッフ情報を更新しました。"
+        if deleted_count:
+            message += f"{deleted_count}名を削除しました。"
+        messages.success(request, message)
+        return redirect("staff:list")
+
+    def save_formset(self, formset):
+        """通常更新・固定休同期・論理削除を一括で反映する。"""
+        deleted_count = 0
+        with transaction.atomic():
+            for form in formset.forms:
+                staff_member = form.instance
+                if form.cleaned_data.get("delete_staff"):
+                    staff_member.is_active = False
+                    staff_member.save(update_fields=["is_active"])
+                    deleted_count += 1
+                    continue
+
+                staff_member = form.save()
+                sync_regular_days_off(
+                    staff_member,
+                    form.cleaned_data.get("regular_days_off", []),
+                )
+
+        return deleted_count
 
 
 class StaffMemberUpdateView(UserStaffMemberQuerysetMixin, UpdateView):

@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     BulkStaffCreateConfirmView,
+    BulkStaffEditView,
     BulkStaffSetupView,
     StaffMemberCreateView,
     StaffMemberDeleteView,
@@ -16,6 +17,7 @@ urlpatterns = [
     path("create/", StaffMemberCreateView.as_view(), name="create"),
     path("bulk-create/", BulkStaffSetupView.as_view(), name="bulk_create"),
     path("bulk-create/confirm/", BulkStaffCreateConfirmView.as_view(), name="bulk_create_confirm"),
+    path("bulk-edit/", BulkStaffEditView.as_view(), name="bulk_edit"),
     path("<int:pk>/edit/", StaffMemberUpdateView.as_view(), name="edit"),
     path("<int:pk>/delete/", StaffMemberDeleteView.as_view(), name="delete"),
 ]
