@@ -104,7 +104,9 @@ class StaffMemberListTests(TestCase):
         response = self.client.get(reverse("staff:list"))
 
         self.assertContains(response, reverse("staff:bulk_create"))
+        self.assertContains(response, reverse("staff:bulk_edit"))
         self.assertContains(response, "一括登録")
+        self.assertContains(response, "一括編集")
 
     def test_staff_members_are_grouped_by_ability_level(self):
         user = get_user_model().objects.create_user(username="ability-list-user", password="x")
@@ -499,7 +501,7 @@ class BulkStaffCreateViewTests(TestCase):
         response = self.client.get(reverse("staff:bulk_create_confirm"))
 
         self.assertContains(response, "登録内容を確認")
-        self.assertContains(response, "登録予定：2人")
+        self.assertContains(response, "登録前のスタッフ情報一覧")
         self.assertContains(response, "固定休")
         self.assertContains(response, "役割")
         self.assertNotContains(response, "リーダー一括設定")
@@ -642,3 +644,188 @@ class BulkStaffCreateViewTests(TestCase):
         self.assertRedirects(response, reverse("staff:list"))
         staff_member.refresh_from_db()
         self.assertEqual(staff_member.name, "通常編集スタッフ")
+
+
+class BulkStaffEditViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="bulk-edit-user",
+            password="password123",
+        )
+        self.other_user = get_user_model().objects.create_user(
+            username="bulk-edit-other-user",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+
+    def create_staff(self, name, *, user=None, ability_level=2, is_active=True):
+        return StaffMember.objects.create(
+            user=user or self.user,
+            name=name,
+            gender=StaffMember.GenderChoices.FEMALE,
+            job=StaffMember.JobChoices.NURSE,
+            role=StaffMember.RoleChoices.MEMBER,
+            ability_level=ability_level,
+            can_night_shift=True,
+            is_active=is_active,
+        )
+
+    def formset_post_data(self, staff_members, changes=None):
+        changes = changes or {}
+        data = {
+            "form-TOTAL_FORMS": str(len(staff_members)),
+            "form-INITIAL_FORMS": str(len(staff_members)),
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+        }
+        for index, staff_member in enumerate(staff_members):
+            values = {
+                "id": staff_member.pk,
+                "name": staff_member.name,
+                "gender": staff_member.gender,
+                "job": staff_member.job,
+                "role": staff_member.role,
+                "ability_level": staff_member.ability_level,
+                "can_night_shift": staff_member.can_night_shift,
+                "regular_days_off": list(
+                    staff_member.regular_days_off.values_list("day_of_week", flat=True)
+                ),
+                "is_holiday_off": staff_member.is_holiday_off,
+                "delete_staff": False,
+            }
+            values.update(changes.get(index, {}))
+            prefix = f"form-{index}"
+            data.update(
+                {
+                    f"{prefix}-id": values["id"],
+                    f"{prefix}-name": values["name"],
+                    f"{prefix}-gender": values["gender"],
+                    f"{prefix}-job": values["job"],
+                    f"{prefix}-role": values["role"],
+                    f"{prefix}-ability_level": values["ability_level"],
+                    f"{prefix}-can_night_shift": str(values["can_night_shift"]),
+                }
+            )
+            if values["regular_days_off"]:
+                data[f"{prefix}-regular_days_off"] = values["regular_days_off"]
+            if values["is_holiday_off"]:
+                data[f"{prefix}-is_holiday_off"] = "on"
+            if values["delete_staff"]:
+                data[f"{prefix}-delete_staff"] = "on"
+        return data
+
+    def active_staff_members(self):
+        return list(
+            StaffMember.objects.filter(user=self.user, is_active=True).order_by(
+                "-ability_level", "id"
+            )
+        )
+
+    def test_displays_only_logged_in_users_active_staff_members(self):
+        visible_staff = self.create_staff("表示スタッフ")
+        self.create_staff("非表示スタッフ", is_active=False)
+        self.create_staff("他ユーザースタッフ", user=self.other_user)
+
+        response = self.client.get(reverse("staff:bulk_edit"))
+
+        self.assertContains(response, visible_staff.name)
+        self.assertNotContains(response, "非表示スタッフ")
+        self.assertNotContains(response, "他ユーザースタッフ")
+        self.assertContains(response, "削除予定：")
+
+    def test_updates_staff_fields_and_regular_days_off(self):
+        staff_member = self.create_staff("更新前")
+        staff_members = self.active_staff_members()
+
+        response = self.client.post(
+            reverse("staff:bulk_edit"),
+            self.formset_post_data(
+                staff_members,
+                changes={
+                    0: {
+                        "name": "更新後",
+                        "role": StaffMember.RoleChoices.LEADER,
+                        "ability_level": 5,
+                        "can_night_shift": False,
+                        "regular_days_off": [0, 2],
+                    }
+                },
+            ),
+        )
+
+        self.assertRedirects(response, reverse("staff:list"))
+        staff_member.refresh_from_db()
+        self.assertEqual(staff_member.name, "更新後")
+        self.assertEqual(staff_member.role, StaffMember.RoleChoices.LEADER)
+        self.assertEqual(staff_member.ability_level, 5)
+        self.assertFalse(staff_member.can_night_shift)
+        self.assertEqual(
+            list(staff_member.regular_days_off.values_list("day_of_week", flat=True)),
+            [0, 2],
+        )
+
+    def test_logically_deletes_marked_staff_without_touching_regular_days_off(self):
+        deleted_staff = self.create_staff("削除対象")
+        deleted_staff.regular_days_off.create(day_of_week=1)
+        updated_staff = self.create_staff("更新対象")
+        staff_members = self.active_staff_members()
+        deleted_index = staff_members.index(deleted_staff)
+        updated_index = staff_members.index(updated_staff)
+
+        response = self.client.post(
+            reverse("staff:bulk_edit"),
+            self.formset_post_data(
+                staff_members,
+                changes={
+                    deleted_index: {"delete_staff": True, "name": "保存しない変更"},
+                    updated_index: {"name": "通常更新後"},
+                },
+            ),
+        )
+
+        self.assertRedirects(response, reverse("staff:list"))
+        deleted_staff.refresh_from_db()
+        updated_staff.refresh_from_db()
+        self.assertFalse(deleted_staff.is_active)
+        self.assertEqual(deleted_staff.name, "削除対象")
+        self.assertTrue(StaffMember.objects.filter(pk=deleted_staff.pk).exists())
+        self.assertEqual(
+            list(deleted_staff.regular_days_off.values_list("day_of_week", flat=True)),
+            [1],
+        )
+        self.assertEqual(updated_staff.name, "通常更新後")
+
+    def test_rejects_other_users_staff_member_id(self):
+        own_staff = self.create_staff("自分のスタッフ")
+        other_staff = self.create_staff("他人のスタッフ", user=self.other_user)
+        data = self.formset_post_data(self.active_staff_members())
+        data["form-0-id"] = other_staff.pk
+        data["form-0-name"] = "不正更新"
+
+        response = self.client.post(reverse("staff:bulk_edit"), data)
+
+        self.assertEqual(response.status_code, 200)
+        own_staff.refresh_from_db()
+        other_staff.refresh_from_db()
+        self.assertEqual(own_staff.name, "自分のスタッフ")
+        self.assertEqual(other_staff.name, "他人のスタッフ")
+
+    def test_rolls_back_updates_and_logical_deletions_when_saving_fails(self):
+        deleted_staff = self.create_staff("削除対象", ability_level=5)
+        updated_staff = self.create_staff("更新対象", ability_level=2)
+        staff_members = self.active_staff_members()
+
+        with patch("staff.views.sync_regular_days_off", side_effect=RuntimeError("保存失敗")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse("staff:bulk_edit"),
+                    self.formset_post_data(
+                        staff_members,
+                        changes={0: {"delete_staff": True}, 1: {"name": "更新後"}},
+                    ),
+                )
+
+        deleted_staff.refresh_from_db()
+        updated_staff.refresh_from_db()
+        self.assertTrue(deleted_staff.is_active)
+        self.assertEqual(updated_staff.name, "更新対象")

@@ -294,6 +294,23 @@ class BulkStaffMemberForm(StaffMemberForm):
             {"class": "checkbox checkbox-primary checkbox-sm rounded-md"}
         )
 
+
+class BulkStaffEditForm(BulkStaffMemberForm):
+    """既存スタッフの一括編集だけで使用する削除指定付きフォーム。"""
+
+    delete_staff = forms.BooleanField(
+        label="削除",
+        required=False,
+        widget=forms.CheckboxInput(
+            attrs={
+                "class": "checkbox checkbox-error checkbox-sm rounded-md text-white",
+                "data-delete-checkbox": "true",
+                "aria-label": "削除対象にする",
+            }
+        ),
+    )
+
+
 class BaseBulkStaffMemberFormSet(BaseModelFormSet):
     """フォーム1で決まった人数分だけ、未保存スタッフ用フォームを表示する。"""
 
@@ -326,4 +343,43 @@ BulkStaffMemberFormSet = modelformset_factory(
     extra=0,
     max_num=MAX_ACTIVE_STAFF_COUNT,
     validate_max=True,
+)
+
+
+class BaseBulkStaffEditFormSet(BaseModelFormSet):
+    """既存スタッフだけを対象にする一括編集用FormSet。"""
+
+    def __init__(
+        self,
+        *args,
+        expected_form_count=0,
+        expected_staff_ids=(),
+        **kwargs,
+    ):
+        self.expected_form_count = expected_form_count
+        self.expected_staff_ids = set(expected_staff_ids)
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+
+        if (
+            self.total_form_count() != self.expected_form_count
+            or self.initial_form_count() != self.expected_form_count
+        ):
+            raise forms.ValidationError(
+                "編集対象のスタッフ数が不正です。最初からやり直してください。"
+            )
+
+        if any(form.instance.pk not in self.expected_staff_ids for form in self.forms):
+            raise forms.ValidationError(
+                "編集対象のスタッフに不正なデータが含まれています。最初からやり直してください。"
+            )
+
+
+BulkStaffEditFormSet = modelformset_factory(
+    StaffMember,
+    form=BulkStaffEditForm,
+    formset=BaseBulkStaffEditFormSet,
+    extra=0,
 )
