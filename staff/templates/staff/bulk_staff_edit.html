@@ -124,7 +124,7 @@
       const updateDeleteState = () => {
         const count = deleteCheckboxes.filter((checkbox) => checkbox.checked).length;
         deleteCount.textContent = count;
-        saveButton.textContent = count ? `変更を保存（${count}名削除）` : "変更を保存";
+        saveButton.textContent = "変更を保存";
         deleteCheckboxes.forEach((checkbox) => {
           const control = checkbox.closest("[data-delete-control]");
           const row = editRows[Number(control?.dataset.rowIndex)];

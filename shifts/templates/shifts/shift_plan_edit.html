@@ -84,13 +84,19 @@
         </div>
       </details>
 
-      <form id="shift-plan-form" method="post" class="space-y-3" aria-busy="false">
+      <form
+        id="shift-plan-form"
+        method="post"
+        class="space-y-3"
+        aria-busy="false"
+        data-night-shift-next-day-off="{{ shift_rule.night_shift_next_day_off|yesno:'true,false' }}"
+      >
         {% csrf_token %}
         <input type="hidden" name="generation_target_selection_submitted" value="1">
 
         {% if missing_previous_staff_members %}
           <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-            前月シフトを取得できないスタッフは月を跨いだ連続勤務を自動では考慮できません。前月末が夜勤だった場合は、月初1日に「明」を手入力してください。
+            前月シフトを取得できないスタッフは月を跨いだ連続勤務を自動では考慮できません。前月末が夜勤だった場合の月初の勤務は、前月シフトを確認して設定してください。
           </div>
         {% endif %}
 
@@ -236,6 +242,10 @@
                       <td class="border-b border-r border-slate-200 px-0.5 py-0.5 align-middle">
                         {% if cell.is_base_fixed %}
                           <div
+                            data-shift-cell
+                            data-staff-id="{{ row.staff_member.id }}"
+                            data-date="{{ cell.date|date:'Y-m-d' }}"
+                            data-shift-value="{{ cell.value }}"
                             class="relative flex h-8 items-center justify-center rounded-lg border text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] {{ cell.display_classes }}"
                             title="{% if cell.has_conflict %}{{ cell.conflict_message }}{% else %}{{ cell.display_label }}{% endif %}"
                           >
@@ -253,8 +263,16 @@
                           <select
                             name="{{ cell.field_name }}"
                             data-shift-select
+                            data-shift-cell
+                            data-staff-id="{{ row.staff_member.id }}"
+                            data-date="{{ cell.date|date:'Y-m-d' }}"
+                            data-shift-value="{{ cell.value }}"
+                            data-night-shift-auto="{{ cell.is_night_shift_auto|yesno:'true,false' }}"
                             class="h-8 w-full appearance-none rounded-lg border px-0 text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] outline-none transition focus:scale-[1.02] focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20 {{ cell.display_classes }}"
                           >
+                            {% if cell.value == "after_night" %}
+                              <option value="after_night" selected>明</option>
+                            {% endif %}
                             {% for value, label in shift_select_options %}
                               <option value="{{ value }}" {% if cell.value == value %}selected{% endif %}>{{ label }}</option>
                             {% endfor %}
@@ -386,15 +404,156 @@
         "border-emerald-200", "bg-emerald-100", "text-emerald-800",
       ];
 
-      document.querySelectorAll("[data-shift-select]").forEach((select) => {
-        const applyClasses = () => {
-          select.classList.remove(...removableClasses);
-          const classes = classMap[select.value] || classMap[""];
-          select.classList.add(...classes);
-        };
+      const shiftForm = document.getElementById("shift-plan-form");
+      const shiftSelects = [...document.querySelectorAll("[data-shift-select]")];
+      const nightShiftNextDayOff =
+        shiftForm.dataset.nightShiftNextDayOff === "true";
+      const selectKey = (staffId, date) => `${staffId}:${date}`;
+      const selectsByKey = new Map(
+        shiftSelects.map((select) => [
+          selectKey(select.dataset.staffId, select.dataset.date),
+          select,
+        ])
+      );
+      const getSelect = (staffId, date) =>
+        selectsByKey.get(selectKey(staffId, date));
+      const shiftCellsByKey = new Map(
+        [...document.querySelectorAll("[data-shift-cell]")].map((cell) => [
+          selectKey(cell.dataset.staffId, cell.dataset.date),
+          cell,
+        ])
+      );
+      const getShiftCellValue = (staffId, date) =>
+        shiftCellsByKey.get(selectKey(staffId, date))?.dataset.shiftValue || "";
+      const getDateWithOffset = (dateString, offset) => {
+        const date = new Date(`${dateString}T00:00:00`);
+        date.setDate(date.getDate() + offset);
+        return [
+          date.getFullYear(),
+          String(date.getMonth() + 1).padStart(2, "0"),
+          String(date.getDate()).padStart(2, "0"),
+        ].join("-");
+      };
+      const applyClasses = (select) => {
+        select.classList.remove(...removableClasses);
+        const classes = classMap[select.value] || classMap[""];
+        select.classList.add(...classes);
+      };
+      const ensureAfterNightOption = (select) => {
+        let option = [...select.options].find(
+          (candidate) => candidate.value === "after_night"
+        );
+        if (!option) {
+          option = new Option("明", "after_night");
+          select.prepend(option);
+        }
+      };
+      const updateAutoCellState = (select) => {
+        const isAuto = select.dataset.nightShiftAuto === "true";
+        select.style.pointerEvents = isAuto ? "none" : "";
+        select.tabIndex = isAuto ? -1 : 0;
+        select.setAttribute("aria-readonly", isAuto ? "true" : "false");
+      };
+      const setShiftValue = (select, value, { autoOrigin = null } = {}) => {
+        if (!select) return;
+        if (value === "after_night") ensureAfterNightOption(select);
+        select.value = value;
+        select.dataset.shiftValue = value;
+        select.dataset.nightShiftAuto = autoOrigin ? "true" : "false";
+        if (autoOrigin) {
+          select.dataset.nightShiftAutoOrigin = autoOrigin;
+        } else {
+          delete select.dataset.nightShiftAutoOrigin;
+        }
+        updateAutoCellState(select);
+        applyClasses(select);
+      };
+      const clearAutoFollowups = (nightSelect) => {
+        const origin = selectKey(
+          nightSelect.dataset.staffId,
+          nightSelect.dataset.date
+        );
+        shiftSelects.forEach((select) => {
+          if (
+            select.dataset.nightShiftAuto === "true" &&
+            select.dataset.nightShiftAutoOrigin === origin
+          ) {
+            setShiftValue(select, "");
+          }
+        });
+      };
+      const applyNightShiftSequence = (nightSelect) => {
+        const { staffId, date } = nightSelect.dataset;
+        const origin = selectKey(staffId, date);
+        clearAutoFollowups(nightSelect);
+        setShiftValue(getSelect(staffId, getDateWithOffset(date, 1)), "after_night", {
+          autoOrigin: origin,
+        });
+      };
+      const canApplyNightShiftSequence = (nightSelect) => {
+        const afterNightDate = getDateWithOffset(nightSelect.dataset.date, 1);
+        return !getShiftCellValue(nightSelect.dataset.staffId, afterNightDate);
+      };
+      const initializeAutoOrigins = () => {
+        shiftSelects.forEach((select) => {
+          if (select.dataset.nightShiftAuto !== "true") return;
+          const offset = select.value === "after_night" ? -1 : -2;
+          const originDate = getDateWithOffset(select.dataset.date, offset);
+          const nightSelect = getSelect(select.dataset.staffId, originDate);
+          if (nightSelect?.value === "night") {
+            select.dataset.nightShiftAutoOrigin = selectKey(
+              nightSelect.dataset.staffId,
+              nightSelect.dataset.date
+            );
+          } else {
+            // 保存済みの不完全な連動情報は、次の編集時に通常入力として扱う。
+            select.dataset.nightShiftAuto = "false";
+          }
+        });
+      };
 
-        select.addEventListener("change", applyClasses);
-        applyClasses();
+      initializeAutoOrigins();
+      shiftSelects.forEach((select) => {
+        select.dataset.previousValue = select.value;
+        select.addEventListener("change", () => {
+          const previousValue = select.dataset.previousValue;
+          const wasNightShiftAuto = select.dataset.nightShiftAuto === "true";
+          const autoOrigin = select.dataset.nightShiftAutoOrigin;
+
+          if (select.value === "night" && !canApplyNightShiftSequence(select)) {
+            window.alert("夜勤は、翌日の明けセルが空白の場合にのみ入力できます。");
+            setShiftValue(select, previousValue);
+            return;
+          }
+
+          // 「明」は通常の選択肢には含めない。既存の明セルを変更した後に戻す
+          // ような操作も、夜勤を選んだ場合にだけ許可する。
+          if (select.value === "after_night" && !wasNightShiftAuto) {
+            setShiftValue(select, "");
+          }
+
+          if (wasNightShiftAuto && select.value !== previousValue) {
+            const selectedValue = select.value;
+            const [staffId, originDate] = autoOrigin.split(":");
+            const nightSelect = getSelect(staffId, originDate);
+            if (nightSelect) {
+              setShiftValue(nightSelect, "");
+              clearAutoFollowups(nightSelect);
+            }
+            // 現在の選択はユーザーが設定した通常勤務として残す。
+            setShiftValue(select, selectedValue);
+          } else if (previousValue === "night" && select.value !== "night") {
+            clearAutoFollowups(select);
+          }
+
+          if (select.value === "night") applyNightShiftSequence(select);
+          select.dataset.shiftValue = select.value;
+          updateAutoCellState(select);
+          applyClasses(select);
+          select.dataset.previousValue = select.value;
+        });
+        updateAutoCellState(select);
+        applyClasses(select);
       });
 
       const generationTargetCheckboxes = document.querySelectorAll(
@@ -422,7 +581,6 @@
       });
       updateGenerationTargetDisplay();
 
-      const shiftForm = document.getElementById("shift-plan-form");
       const generateButton = document.querySelector("[data-generate-shift]");
       const loadingOverlay = document.getElementById("shift-generation-loading");
       const originalBodyOverflow = document.body.style.overflow;
