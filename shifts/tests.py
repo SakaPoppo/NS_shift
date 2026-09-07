@@ -1134,6 +1134,325 @@ class ShiftRuleWorkflowTests(TestCase):
             ).exists()
         )
 
+    def test_manual_night_sets_only_after_night_with_auto_marker(self):
+        self.create_common_rule()
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        results = {
+            result.date: result
+            for result in ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date__in=[date(2026, 8, 10), date(2026, 8, 11)],
+            )
+        }
+        self.assertEqual(results[date(2026, 8, 10)].shift_type, ShiftResult.ShiftTypeChoices.NIGHT)
+        self.assertEqual(results[date(2026, 8, 11)].shift_type, ShiftResult.ShiftTypeChoices.AFTER_NIGHT)
+        self.assertEqual(results[date(2026, 8, 11)].memo, "__night_shift_auto__")
+        self.assertFalse(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 12),
+        ).exists())
+
+    def test_false_night_rule_sets_only_after_night(self):
+        rule = self.create_common_rule()
+        rule.night_shift_next_day_off = False
+        rule.save(update_fields=["night_shift_next_day_off"])
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+            shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        ).exists())
+        self.assertFalse(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 12),
+        ).exists())
+
+    def test_removing_night_clears_only_its_auto_followups(self):
+        self.create_common_rule()
+        edit_url = reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        response = self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": "",
+            },
+        )
+
+        self.assertRedirects(response, edit_url)
+        self.assertFalse(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date__in=[date(2026, 8, 10), date(2026, 8, 11), date(2026, 8, 12)],
+        ).exists())
+
+    def test_changing_saved_night_clears_its_auto_after_night(self):
+        self.create_common_rule()
+        edit_url = reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        response = self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.DAY
+                ),
+            },
+        )
+
+        self.assertRedirects(response, edit_url)
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 10),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        ).exists())
+        self.assertFalse(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+        ).exists())
+
+    def test_saved_auto_after_night_is_marked_for_non_editable_display(self):
+        self.create_common_rule()
+        edit_url = reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        response = self.client.get(edit_url)
+        row = next(
+            row for row in response.context["staff_rows"]
+            if row["staff_member"] == self.staff_member
+        )
+        after_night_cell = next(
+            cell for cell in row["cells"] if cell["date"] == date(2026, 8, 11)
+        )
+        self.assertTrue(after_night_cell["is_night_shift_auto"])
+
+    def test_saved_auto_after_night_cannot_be_changed_without_changing_night(self):
+        self.create_common_rule()
+        edit_url = reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        response = self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-11": (
+                    ShiftResult.ShiftTypeChoices.DAY
+                ),
+            },
+        )
+
+        self.assertRedirects(response, edit_url)
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 10),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        ).exists())
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+            shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            memo="__night_shift_auto__",
+        ).exists())
+
+    def test_removing_night_keeps_followup_changed_to_normal_shift(self):
+        self.create_common_rule()
+        edit_url = reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        response = self.client.post(
+            edit_url,
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": "",
+                f"shift_{self.staff_member.id}_2026-08-12": (
+                    ShiftResult.ShiftTypeChoices.DAY
+                ),
+            },
+        )
+
+        self.assertRedirects(response, edit_url)
+        self.assertFalse(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+        ).exists())
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 12),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        ).exists())
+
+    def test_manual_night_at_month_end_does_not_require_hidden_followups(self):
+        self.create_common_rule()
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-31": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        ).exists())
+
+    def test_edit_screen_does_not_offer_after_night_for_blank_cell(self):
+        self.create_common_rule()
+
+        response = self.client.get(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertNotContains(response, '<option value="after_night"')
+
+    def test_manual_night_can_replace_existing_shift_when_after_night_cell_is_blank(self):
+        self.create_common_rule()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 10),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 10),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        ).exists())
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+            shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        ).exists())
+
+    def test_manual_night_is_rejected_when_after_night_cell_has_existing_shift(self):
+        self.create_common_rule()
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        response = self.client.post(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "action": "save",
+                f"shift_{self.staff_member.id}_2026-08-10": (
+                    ShiftResult.ShiftTypeChoices.NIGHT
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "翌日の明けセルに勤務が入力されています。")
+        self.assertFalse(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 10),
+        ).exists())
+        self.assertTrue(ShiftResult.objects.filter(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 8, 11),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        ).exists())
+
     def test_save_keeps_generated_result_when_value_is_unchanged(self):
         self.create_common_rule()
         result = ShiftResult.objects.create(
