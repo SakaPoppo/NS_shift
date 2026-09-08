@@ -21,6 +21,7 @@ from .shift_generation.results import (
     format_generation_violation_messages,
 )
 from .shift_generation.types import (
+    GenerationContext,
     ShiftGenerationError,
     ShiftGenerationResult,
     ShiftGenerationViolation,
@@ -35,7 +36,9 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
     return generate_with_local_optimizer(context)
 
 
-def generate_with_local_optimizer(context) -> ShiftGenerationResult:
+def generate_with_local_optimizer(
+    context: GenerationContext,
+) -> ShiftGenerationResult:
     """読み込み済みの生成コンテキストをローカル最適化器で生成する。"""
 
     optimization = optimize_shift(context)
