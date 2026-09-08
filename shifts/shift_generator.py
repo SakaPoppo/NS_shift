@@ -32,6 +32,12 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
     """シフト表1か月分の勤務を自動生成し、結果をメモリ上で返す。"""
 
     context = load_generation_context(shift_plan)
+    return generate_with_local_optimizer(context)
+
+
+def generate_with_local_optimizer(context) -> ShiftGenerationResult:
+    """読み込み済みの生成コンテキストをローカル最適化器で生成する。"""
+
     optimization = optimize_shift(context)
 
     shifts = _build_generated_shifts(
