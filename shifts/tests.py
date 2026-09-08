@@ -1698,6 +1698,23 @@ class ShiftGeneratorTests(TestCase):
                     f"{staff_member.name} の {target_date} までの連勤が上限を超えています。",
                 )
 
+    def test_generate_shift_delegates_loaded_context_to_local_optimizer(self):
+        context = SimpleNamespace()
+        expected_result = ShiftGenerationResult(status="success", shifts=[])
+
+        with patch(
+            "shifts.shift_generator.load_generation_context",
+            return_value=context,
+        ) as mock_load_context, patch(
+            "shifts.shift_generator.generate_with_local_optimizer",
+            return_value=expected_result,
+        ) as mock_generate:
+            result = generate_shift(self.shift_plan)
+
+        self.assertIs(result, expected_result)
+        mock_load_context.assert_called_once_with(self.shift_plan)
+        mock_generate.assert_called_once_with(context)
+
     def test_generate_shift_returns_all_days_and_exact_off_days(self):
         self.create_rule()
         staff_member = self.create_staff_member()
