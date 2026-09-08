@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 from dataclasses import fields
 from datetime import date
@@ -30,6 +31,7 @@ from .shift_generation.optimization import (
     LONG_STREAK_WEIGHTS,
     _build_day_staffing_balance_data,
 )
+from .shift_generation.payload import build_optimizer_payload
 from .shift_generation.results import (
     _build_day_staffing_imbalance_violation,
     _build_night_count_imbalance_violation,
@@ -39,11 +41,13 @@ from .shift_generation.results import (
 from .shift_generation.types import (
     AbilityDistributionData,
     DayStaffingBalanceData,
+    GenerationContext,
     OptimizationPhaseResult,
     ShiftOptimizationSummary,
 )
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
+    EffectiveShiftRule,
     WORKLIKE_SHIFT_TYPES,
     build_shift_carryovers,
     calculate_previous_consecutive_work_days,
@@ -133,6 +137,107 @@ class ShiftGenerationContextTests(TestCase):
             "シフト生成対象のスタッフを1名以上選択してください。",
         ):
             load_generation_context(self.shift_plan)
+
+    def test_build_optimizer_payload_serializes_generation_context(self):
+        target_date = date(2026, 9, 1)
+        next_date = date(2026, 9, 2)
+        staff_member = StaffMember.objects.create(
+            user=self.user,
+            name="payload対象",
+            role=StaffMember.RoleChoices.LEADER,
+            ability_level=4,
+            can_night_shift=True,
+        )
+        StaffRegularDayOff.objects.create(
+            staff_member=staff_member,
+            day_of_week=StaffRegularDayOff.DayOfWeekChoices.MONDAY,
+        )
+        effective_rule = EffectiveShiftRule(
+            required_day_staff=8,
+            required_night_staff=3,
+            required_leader_staff=1,
+            min_ability_level=4,
+            min_ability_level_staff_count=2,
+            max_consecutive_work_days=5,
+            night_shift_next_day_off=True,
+        )
+        context = GenerationContext(
+            shift_rule=self.shift_plan.shift_rule,
+            month_dates=[target_date, next_date],
+            staff_members=[staff_member],
+            fixed_assignments={(staff_member.id, target_date): "night"},
+            effective_rules={
+                target_date: effective_rule,
+                next_date: effective_rule,
+            },
+            previous_consecutive_work_days={staff_member.id: 2},
+            effective_off_days={staff_member.id: 9},
+        )
+
+        payload = build_optimizer_payload(context)
+
+        self.assertEqual(payload["month_dates"], ["2026-09-01", "2026-09-02"])
+        self.assertEqual(
+            payload["staff_members"],
+            [
+                {
+                    "id": staff_member.id,
+                    "role": StaffMember.RoleChoices.LEADER,
+                    "ability_level": 4,
+                    "can_night_shift": True,
+                    "regular_days_off": [0],
+                }
+            ],
+        )
+        self.assertEqual(
+            payload["fixed_assignments"],
+            [
+                {
+                    "staff_id": staff_member.id,
+                    "date": "2026-09-01",
+                    "shift_type": "night",
+                }
+            ],
+        )
+        self.assertEqual(
+            payload["effective_rules"],
+            [
+                {
+                    "date": "2026-09-01",
+                    "required_day_staff": 8,
+                    "required_night_staff": 3,
+                    "required_leader_staff": 1,
+                    "min_ability_level": 4,
+                    "min_ability_level_staff_count": 2,
+                    "max_consecutive_work_days": 5,
+                    "night_shift_next_day_off": True,
+                },
+                {
+                    "date": "2026-09-02",
+                    "required_day_staff": 8,
+                    "required_night_staff": 3,
+                    "required_leader_staff": 1,
+                    "min_ability_level": 4,
+                    "min_ability_level_staff_count": 2,
+                    "max_consecutive_work_days": 5,
+                    "night_shift_next_day_off": True,
+                },
+            ],
+        )
+        self.assertEqual(
+            payload["previous_consecutive_work_days"],
+            [
+                {
+                    "staff_id": staff_member.id,
+                    "previous_consecutive_work_days": 2,
+                }
+            ],
+        )
+        self.assertEqual(
+            payload["effective_off_days"],
+            [{"staff_id": staff_member.id, "off_days": 9}],
+        )
+        json.dumps(payload)
 
 
 class ShiftPlanCsvExportViewTests(TestCase):
