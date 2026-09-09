@@ -3,6 +3,8 @@ import csv
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
+from django.forms import formset_factory
+from django.forms.utils import ErrorList
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -13,6 +15,7 @@ from staff.models import StaffMember
 
 from .forms import (
     DateShiftRuleForm,
+    ShiftCarryoverEntryForm,
     ShiftPlanCreateForm,
     ShiftRuleForm,
     WeekdayShiftRuleForm,
@@ -29,9 +32,12 @@ from .services import (
     MonthBoundaryConflictError,
     OFF_LIKE_SHIFT_TYPES,
     build_shift_carryovers,
+    get_previous_plan_carryover_values,
     get_japanese_holiday_dates,
     get_month_dates,
     get_previous_month_year_and_month,
+    get_usable_previous_shift_plan,
+    save_manual_shift_carryovers,
     sync_month_boundary_assignments,
     sync_next_month_boundary_assignments,
 )
@@ -105,6 +111,7 @@ BASE_FIXED_SOURCE_LABELS = {
 }
 WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
 WEEKDAY_CONDITION_LABELS = [*WEEKDAY_LABELS, "祝日"]
+ShiftCarryoverFormSet = formset_factory(ShiftCarryoverEntryForm, extra=0)
 
 
 def build_day_headers(month_dates, holiday_dates=frozenset()): # 画面用の日付加工
@@ -329,6 +336,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
     def get_edit_url(self, shift_plan):
         return reverse("shifts:edit", kwargs={"pk": shift_plan.pk})
 
+    def get_carryover_url(self, shift_plan):
+        return reverse("shifts:carryover", kwargs={"pk": shift_plan.pk})
+
+    def get_carryover_choice_url(self, shift_plan):
+        return reverse("shifts:carryover_choice", kwargs={"pk": shift_plan.pk})
+
     def get_ordered_date_rules(self, shift_plan):
         return shift_plan.date_rules.order_by("target_date", "id")
 
@@ -496,11 +509,10 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         )
         shift_rule = self.get_shift_rule(shift_plan)
         carryover_staff_ids = set(
-            shift_plan.carryovers.filter(
-                staff_member__in=staff_members,
-                source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            shift_plan.carryovers.filter(staff_member__in=staff_members).values_list(
+                "staff_member_id",
+                flat=True,
             )
-            .values_list("staff_member_id", flat=True)
         )
         return {
             "shift_plan": shift_plan,
@@ -974,12 +986,6 @@ class ShiftPlanCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.user = self.request.user
         self.object = form.save()
-        build_shift_carryovers(self.object)
-        try:
-            sync_month_boundary_assignments(self.object)
-        except MonthBoundaryConflictError:
-            # 条件未設定・月初競合は編集画面で確認できるよう、作成自体は完了させる。
-            pass
         return HttpResponseRedirect(
             reverse("shifts:conditions", kwargs={"pk": self.object.pk})
         )
@@ -1045,7 +1051,155 @@ class ShiftRuleEditView(UserShiftPlanMixin, View):
                 date_rule_form.save(shift_plan)
 
         messages.success(request, self.condition_success_message)
-        return HttpResponseRedirect(self.get_edit_url(shift_plan))
+        if get_usable_previous_shift_plan(shift_plan):
+            return HttpResponseRedirect(self.get_carryover_choice_url(shift_plan))
+        return HttpResponseRedirect(self.get_carryover_url(shift_plan))
+
+
+class ShiftCarryoverChoiceView(UserShiftPlanMixin, View):
+    """利用可能な前月シフト表を自動取得するか選択する。"""
+
+    template_name = "shifts/shift_carryover_choice.html"
+
+    def get(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        previous_plan = get_usable_previous_shift_plan(shift_plan)
+        if previous_plan is None:
+            return redirect("shifts:carryover", pk=shift_plan.pk)
+        return render(
+            request,
+            self.template_name,
+            {"shift_plan": shift_plan, "previous_plan": previous_plan},
+        )
+
+    def post(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        previous_plan = get_usable_previous_shift_plan(shift_plan)
+        if previous_plan is None or request.POST.get("use_previous_plan") != "yes":
+            return redirect("shifts:carryover", pk=shift_plan.pk)
+
+        try:
+            with transaction.atomic():
+                build_shift_carryovers(shift_plan, force=True)
+                sync_month_boundary_assignments(shift_plan)
+        except MonthBoundaryConflictError as error:
+            messages.error(request, f"月跨ぎ勤務を反映できません。 {error}")
+            return render(
+                request,
+                self.template_name,
+                {"shift_plan": shift_plan, "previous_plan": previous_plan},
+            )
+
+        return redirect("shifts:edit", pk=shift_plan.pk)
+
+
+class ShiftCarryoverEditView(UserShiftPlanMixin, View):
+    """前月末の勤務と連勤数を手入力する。"""
+
+    template_name = "shifts/shift_carryover_form.html"
+
+    def get_staff_members_and_initial(self, shift_plan):
+        staff_members = list(self.get_staff_members())
+        saved_carryovers = {
+            carryover.staff_member_id: carryover
+            for carryover in shift_plan.carryovers.filter(
+                staff_member__in=staff_members,
+            )
+        }
+        previous_plan = get_usable_previous_shift_plan(shift_plan)
+        previous_values = (
+            get_previous_plan_carryover_values(previous_plan, staff_members)
+            if previous_plan
+            else {}
+        )
+        allowed_shift_types = {
+            ShiftResult.ShiftTypeChoices.NIGHT,
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        }
+        initial = []
+        for staff_member in staff_members:
+            carryover = saved_carryovers.get(staff_member.id)
+            if carryover:
+                shift_type = carryover.previous_last_shift_type
+                consecutive = carryover.previous_consecutive_work_days
+            else:
+                shift_type, consecutive = previous_values.get(
+                    staff_member.id,
+                    (None, 0),
+                )
+            initial.append(
+                {
+                    "staff_member_id": staff_member.id,
+                    "previous_last_shift_type": (
+                        shift_type if shift_type in allowed_shift_types else ""
+                    ),
+                    "previous_consecutive_work_days": consecutive,
+                }
+            )
+        return staff_members, initial
+
+    def build_context(self, shift_plan, formset, staff_members):
+        return {
+            "shift_plan": shift_plan,
+            "formset": formset,
+            "rows": zip(staff_members, formset.forms),
+        }
+
+    def get(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        staff_members, initial = self.get_staff_members_and_initial(shift_plan)
+        formset = ShiftCarryoverFormSet(initial=initial)
+        return render(
+            request,
+            self.template_name,
+            self.build_context(shift_plan, formset, staff_members),
+        )
+
+    def post(self, request, *args, **kwargs):
+        shift_plan = self.get_object()
+        staff_members, _ = self.get_staff_members_and_initial(shift_plan)
+        formset = ShiftCarryoverFormSet(request.POST)
+        expected_staff_ids = {staff_member.id for staff_member in staff_members}
+        values = {}
+        if formset.is_valid():
+            for form in formset:
+                staff_member_id = form.cleaned_data["staff_member_id"]
+                if staff_member_id in values or staff_member_id not in expected_staff_ids:
+                    formset._non_form_errors = ErrorList(
+                        ["スタッフ情報が不正です。画面を再読み込みして入力してください。"]
+                    )
+                    break
+                values[staff_member_id] = (
+                    form.cleaned_data["previous_last_shift_type"] or None,
+                    form.cleaned_data["previous_consecutive_work_days"],
+                )
+            if set(values) != expected_staff_ids:
+                formset._non_form_errors = ErrorList(
+                    ["すべてのスタッフの月末情報を入力してください。"]
+                )
+
+        if not formset.is_valid() or formset.non_form_errors():
+            return render(
+                request,
+                self.template_name,
+                self.build_context(shift_plan, formset, staff_members),
+            )
+
+        try:
+            with transaction.atomic():
+                save_manual_shift_carryovers(shift_plan, values)
+                sync_month_boundary_assignments(shift_plan)
+        except MonthBoundaryConflictError as error:
+            formset._non_form_errors = ErrorList(
+                [f"月跨ぎ勤務を反映できません。 {error}"]
+            )
+            return render(
+                request,
+                self.template_name,
+                self.build_context(shift_plan, formset, staff_members),
+            )
+
+        return redirect("shifts:edit", pk=shift_plan.pk)
 
 
 class ShiftPlanEditView(UserShiftPlanMixin, View):

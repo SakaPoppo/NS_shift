@@ -3,7 +3,13 @@ from django.utils import timezone
 
 from staff.models import StaffMember
 
-from .models import DateShiftRule, ShiftPlan, ShiftRule, WeekdayShiftRule
+from .models import (
+    DateShiftRule,
+    ShiftPlan,
+    ShiftResult,
+    ShiftRule,
+    WeekdayShiftRule,
+)
 from .services import get_month_date_range
 
 INPUT_CLASS = (
@@ -99,6 +105,49 @@ class ShiftPlanCreateForm(forms.ModelForm):
             if ShiftPlan.objects.filter(user=self.user, year=year, month=month).exists():
                 self.add_error("month", "選択した年月のシフト表はすでに作成されています。")
         return cleaned_data
+
+
+class ShiftCarryoverEntryForm(forms.Form):
+    """月末情報登録画面のスタッフ1人分の入力。"""
+
+    staff_member_id = forms.IntegerField(widget=forms.HiddenInput)
+    previous_last_shift_type = forms.ChoiceField(
+        label="前月末勤務",
+        required=False,
+        choices=(
+            ("", "夜明け以外"),
+            (ShiftResult.ShiftTypeChoices.NIGHT, "夜勤"),
+            (ShiftResult.ShiftTypeChoices.AFTER_NIGHT, "明け"),
+        ),
+        widget=forms.RadioSelect,
+    )
+    previous_consecutive_work_days = forms.IntegerField(
+        label="月末時点の連続勤務数",
+        min_value=0,
+        max_value=9,
+        widget=forms.NumberInput(attrs={"min": 0, "max": 9}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        set_widget_attrs(
+            self.fields["previous_consecutive_work_days"],
+            **{"class": INPUT_CLASS},
+        )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        shift_type = cleaned_data.get("previous_last_shift_type")
+        consecutive_work_days = cleaned_data.get(
+            "previous_consecutive_work_days"
+        )
+        if shift_type and consecutive_work_days == 0:
+            self.add_error(
+                "previous_consecutive_work_days",
+                "夜勤・明けの場合は1以上を入力してください。",
+            )
+        return cleaned_data
+
 
 class ShiftRuleForm(forms.Form):
     """月共通条件を編集するフォーム。"""

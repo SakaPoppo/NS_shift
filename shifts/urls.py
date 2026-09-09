@@ -6,6 +6,8 @@ from .views import (
     ShiftPlanDeleteView,
     ShiftPlanEditView,
     ShiftPlanListView,
+    ShiftCarryoverChoiceView,
+    ShiftCarryoverEditView,
     ShiftRuleEditView,
 )
 
@@ -18,6 +20,16 @@ urlpatterns = [
     path("", ShiftPlanListView.as_view(), name="list"),
     path("create/", ShiftPlanCreateView.as_view(), name="create"),
     path("<int:pk>/conditions/", ShiftRuleEditView.as_view(), name="conditions"),
+    path(
+        "<int:pk>/carryover/choice/",
+        ShiftCarryoverChoiceView.as_view(),
+        name="carryover_choice",
+    ),
+    path(
+        "<int:pk>/carryover/",
+        ShiftCarryoverEditView.as_view(),
+        name="carryover",
+    ),
     path("<int:pk>/edit/", ShiftPlanEditView.as_view(), name="edit"),
     path("<int:pk>/delete/", ShiftPlanDeleteView.as_view(), name="delete"),
     path("<int:pk>/export/csv/", ShiftPlanCsvExportView.as_view(), name="export_csv"),

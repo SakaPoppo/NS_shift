@@ -53,7 +53,13 @@
             </div>
           </div>
 
-          <div class="mt-5 flex justify-end">
+          <div class="mt-5 flex flex-wrap justify-end gap-3">
+            <a
+              href="{% url 'shifts:carryover' shift_plan.pk %}"
+              class="btn btn-outline h-11 rounded-lg border-slate-300 bg-white px-5 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+            >
+              前月末情報を編集
+            </a>
             <a
               href="{% url 'shifts:conditions' shift_plan.pk %}"
               class="btn btn-primary h-11 rounded-lg border-brand-500 bg-brand-500 px-5 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
@@ -210,7 +216,7 @@
 
               <tbody>
                 {% for row in staff_rows %}
-                  <tr{% if row.is_excluded %} class="grayscale brightness-75"{% endif %}>
+                  <tr{% if row.is_excluded %} class="bg-slate-200/70 grayscale-[0.4] brightness-[0.95] [&>td]:!bg-slate-200/70 [&>th]:!bg-slate-200/70"{% endif %}>
                     <td class="sticky left-0 z-10 w-[52px] min-w-[52px] border-b border-r border-slate-200 bg-white px-1 py-2 text-center align-middle">
                       <input
                         type="checkbox"
@@ -565,6 +571,13 @@
       const excludedStaffCount = document.querySelector(
         "[data-excluded-staff-count]"
       );
+      const excludedRowClasses = [
+        "bg-slate-200/70",
+        "grayscale-[0.4]",
+        "brightness-[0.95]",
+        "[&>td]:!bg-slate-200/70",
+        "[&>th]:!bg-slate-200/70",
+      ];
       const updateGenerationTargetDisplay = () => {
         const targetCount = [...generationTargetCheckboxes].filter(
           (checkbox) => checkbox.checked
@@ -572,8 +585,10 @@
         generationTargetCount.textContent = targetCount;
         excludedStaffCount.textContent = generationTargetCheckboxes.length - targetCount;
         generationTargetCheckboxes.forEach((checkbox) => {
-          checkbox.closest("tr")?.classList.toggle("grayscale", !checkbox.checked);
-          checkbox.closest("tr")?.classList.toggle("brightness-75", !checkbox.checked);
+          const row = checkbox.closest("tr");
+          excludedRowClasses.forEach((className) => {
+            row?.classList.toggle(className, !checkbox.checked);
+          });
         });
       };
       generationTargetCheckboxes.forEach((checkbox) => {

@@ -156,13 +156,13 @@ def calculate_previous_consecutive_work_days(
     return count
 
 
-def build_shift_carryovers(shift_plan: ShiftPlan) -> list[ShiftCarryover]:
-    """利用可能な前月結果がある在籍スタッフだけを自動引き継ぎする。"""
-    previous_plan = get_usable_previous_shift_plan(shift_plan)
-    if previous_plan is None:
-        return []
+def get_previous_plan_carryover_values(
+    previous_plan: ShiftPlan,
+    staff_members: list[StaffMember],
+) -> dict[int, tuple[str | None, int]]:
+    """前月シフト表から、月末勤務と連勤数をスタッフ別に取り出す。"""
+
     last_date = get_month_dates(previous_plan.year, previous_plan.month)[-1]
-    staff_members = list(StaffMember.objects.filter(user=shift_plan.user, is_active=True))
     last_results = {
         result.staff_member_id: result
         for result in ShiftResult.objects.filter(
@@ -171,22 +171,60 @@ def build_shift_carryovers(shift_plan: ShiftPlan) -> list[ShiftCarryover]:
             date=last_date,
         )
     }
-    carryovers = []
+    values = {}
     for staff_member in staff_members:
         last_result = last_results.get(staff_member.id)
-        if last_result is None:
-            continue
+        last_shift_type = last_result.shift_type if last_result else None
         consecutive = (
-            calculate_previous_consecutive_work_days(previous_plan, staff_member)
-            if last_result.shift_type in WORKLIKE_SHIFT_TYPES else 0
+            calculate_previous_consecutive_work_days(
+                previous_plan,
+                staff_member,
+            )
+            if last_shift_type in WORKLIKE_SHIFT_TYPES
+            else 0
         )
+        values[staff_member.id] = (last_shift_type, consecutive)
+    return values
+
+
+def build_shift_carryovers(
+    shift_plan: ShiftPlan,
+    *,
+    force: bool = False,
+) -> list[ShiftCarryover]:
+    """前月シフト表から引き継ぐ。通常同期では手入力を保護する。"""
+
+    previous_plan = get_usable_previous_shift_plan(shift_plan)
+    if previous_plan is None:
+        return []
+    staff_members = list(
+        StaffMember.objects.filter(user=shift_plan.user, is_active=True)
+    )
+    values = get_previous_plan_carryover_values(previous_plan, staff_members)
+    existing_carryovers = {
+        carryover.staff_member_id: carryover
+        for carryover in ShiftCarryover.objects.filter(
+            shift_plan=shift_plan,
+            staff_member__in=staff_members,
+        )
+    }
+    carryovers = []
+    for staff_member in staff_members:
+        existing_carryover = existing_carryovers.get(staff_member.id)
+        if (
+            existing_carryover
+            and existing_carryover.source == ShiftCarryover.SourceChoices.MANUAL
+            and not force
+        ):
+            continue
+        last_shift_type, consecutive = values[staff_member.id]
         carryover, _ = ShiftCarryover.objects.update_or_create(
             shift_plan=shift_plan,
             staff_member=staff_member,
             defaults={
                 "source": ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
                 "previous_shift_plan": previous_plan,
-                "previous_last_shift_type": last_result.shift_type,
+                "previous_last_shift_type": last_shift_type,
                 "previous_consecutive_work_days": consecutive,
             },
         )
@@ -194,20 +232,23 @@ def build_shift_carryovers(shift_plan: ShiftPlan) -> list[ShiftCarryover]:
     return carryovers
 
 
-def save_manual_shift_carryovers(shift_plan: ShiftPlan, values: dict[int, tuple[str, int]]) -> None:
+def save_manual_shift_carryovers(
+    shift_plan: ShiftPlan,
+    values: dict[int, tuple[str | None, int]],
+) -> None:
+    """月末情報登録画面の値を、手入力として保存する。"""
+
     for staff_member in StaffMember.objects.filter(
         user=shift_plan.user, is_active=True, id__in=values
     ):
         shift_type, consecutive = values[staff_member.id]
-        if shift_type in OFF_LIKE_SHIFT_TYPES or not shift_type:
-            consecutive = 0
         ShiftCarryover.objects.update_or_create(
             shift_plan=shift_plan,
             staff_member=staff_member,
             defaults={
                 "source": ShiftCarryover.SourceChoices.MANUAL,
                 "previous_shift_plan": None,
-                "previous_last_shift_type": shift_type or None,
+                "previous_last_shift_type": shift_type,
                 "previous_consecutive_work_days": consecutive,
             },
         )
@@ -234,13 +275,15 @@ def _boundary_assignments(shift_plan: ShiftPlan, carryover: ShiftCarryover) -> d
 @transaction.atomic
 def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
     """必要な月初勤務を冪等同期する。競合時は既存境界勤務も保持する。"""
-    excluded_staff_ids = shift_plan.get_excluded_staff_ids()
     carryovers = list(
         shift_plan.carryovers.select_related("staff_member").filter(
             staff_member__user=shift_plan.user,
             staff_member__is_active=True,
-            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
-        ).exclude(staff_member_id__in=excluded_staff_ids)
+            source__in=(
+                ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+                ShiftCarryover.SourceChoices.MANUAL,
+            ),
+        )
     )
     wanted = {
         (carryover.staff_member_id, target_date): (carryover, shift_type)
@@ -284,7 +327,9 @@ def sync_month_boundary_assignments(shift_plan: ShiftPlan) -> list[ShiftResult]:
     boundary_qs = ShiftResult.objects.filter(
         shift_plan=shift_plan,
         lock_reason=ShiftResult.LockReasonChoices.MONTH_BOUNDARY,
-    ).exclude(staff_member_id__in=excluded_staff_ids)
+        staff_member__user=shift_plan.user,
+        staff_member__is_active=True,
+    )
     obsolete_ids = [result.id for result in boundary_qs if (result.staff_member_id, result.date) not in wanted]
     if obsolete_ids:
         ShiftResult.objects.filter(id__in=obsolete_ids).delete()

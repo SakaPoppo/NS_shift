@@ -4,7 +4,7 @@ from django.db.models import Q
 
 from staff.models import StaffMember
 
-from ..models import DayOffRequest, ShiftResult
+from ..models import DayOffRequest, ShiftCarryover, ShiftResult
 from ..services import (
     OFF_LIKE_SHIFT_TYPES,
     get_effective_rule_for_date,
@@ -97,7 +97,10 @@ def load_generation_context(shift_plan) -> GenerationContext:
 
     previous_consecutive_work_days = {
         carryover.staff_member_id: carryover.previous_consecutive_work_days
-        for carryover in shift_plan.carryovers.filter(staff_member__in=staff_members)
+        for carryover in shift_plan.carryovers.filter(
+            staff_member__in=staff_members,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+        )
     }
     mandatory_off_counts = {
         staff.id: len(
