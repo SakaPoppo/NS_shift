@@ -18,7 +18,7 @@ from .shift_generation import optimization as shift_optimization
 from .shift_generation import results as shift_results
 from .shift_generation.context import load_generation_context
 from .shift_generation.persistence import save_generated_shift_results
-from .forms import ShiftPlanCreateForm, ShiftRuleForm
+from .forms import ShiftCarryoverEntryForm, ShiftPlanCreateForm, ShiftRuleForm
 from .shift_generator import (
     ShiftGenerationError,
     ShiftGenerationResult,
@@ -55,6 +55,7 @@ from .services import (
     get_japanese_holiday_dates,
     get_month_dates,
     get_usable_previous_shift_plan,
+    save_manual_shift_carryovers,
     sync_month_boundary_assignments,
 )
 from .views import (
@@ -137,6 +138,31 @@ class ShiftGenerationContextTests(TestCase):
             "シフト生成対象のスタッフを1名以上選択してください。",
         ):
             load_generation_context(self.shift_plan)
+
+    def test_context_uses_only_previous_plan_carryover_for_consecutive_work_days(self):
+        ShiftCarryover.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            source=ShiftCarryover.SourceChoices.MANUAL,
+            previous_consecutive_work_days=4,
+        )
+        ShiftCarryover.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.excluded_staff,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_consecutive_work_days=2,
+        )
+
+        context = load_generation_context(self.shift_plan)
+
+        self.assertNotIn(
+            self.target_staff.id,
+            context.previous_consecutive_work_days,
+        )
+        self.assertEqual(
+            context.previous_consecutive_work_days[self.excluded_staff.id],
+            2,
+        )
 
     def test_build_optimizer_payload_serializes_generation_context(self):
         target_date = date(2026, 9, 1)
@@ -806,7 +832,7 @@ class ShiftRuleWorkflowTests(TestCase):
             self.build_conditions_post_data(),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         shift_rule = self.shift_plan.shift_rule
         self.assertEqual(shift_rule.required_day_staff, 6)
         self.assertTrue(shift_rule.night_shift_next_day_off)
@@ -941,7 +967,7 @@ class ShiftRuleWorkflowTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         weekday_rule = WeekdayShiftRule.objects.get(shift_plan=self.shift_plan, day_of_week=0)
         self.assertEqual(weekday_rule.required_day_staff, 7)
         self.assertIsNone(weekday_rule.required_night_staff)
@@ -959,7 +985,7 @@ class ShiftRuleWorkflowTests(TestCase):
             self.build_conditions_post_data(),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         self.assertFalse(
             WeekdayShiftRule.objects.filter(shift_plan=self.shift_plan, day_of_week=0).exists()
         )
@@ -976,7 +1002,7 @@ class ShiftRuleWorkflowTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         weekday_rule = WeekdayShiftRule.objects.get(shift_plan=self.shift_plan, day_of_week=2)
         self.assertEqual(weekday_rule.min_ability_level, 3)
         self.assertEqual(weekday_rule.min_ability_level_staff_count, 2)
@@ -992,7 +1018,7 @@ class ShiftRuleWorkflowTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         holiday_rule = WeekdayShiftRule.objects.get(
             shift_plan=self.shift_plan,
             day_of_week=WeekdayShiftRule.DayOfWeekChoices.HOLIDAY,
@@ -1032,7 +1058,7 @@ class ShiftRuleWorkflowTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         date_rule = DateShiftRule.objects.get(shift_plan=self.shift_plan, target_date="2026-08-12")
         self.assertIsNone(date_rule.required_day_staff)
         self.assertEqual(date_rule.required_night_staff, 3)
@@ -1131,7 +1157,7 @@ class ShiftRuleWorkflowTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         date_rule.refresh_from_db()
         self.assertEqual(date_rule.required_day_staff, 8)
         self.assertIsNone(date_rule.required_night_staff)
@@ -1175,7 +1201,7 @@ class ShiftRuleWorkflowTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        self.assertRedirects(response, reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}))
         self.assertEqual(DateShiftRule.objects.filter(shift_plan=self.shift_plan).count(), 2)
 
     def test_edit_screen_displays_saved_conditions_and_counts(self):
@@ -1744,6 +1770,199 @@ class ShiftRuleWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "翌日の2日が曜日固定休のため、夜勤明けを配置できません。")
+
+
+class ShiftCarryoverWorkflowTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="carryover-workflow-user",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+        self.shift_plan = ShiftPlan.objects.create(
+            user=self.user,
+            year=2026,
+            month=8,
+        )
+        self.staff_member = StaffMember.objects.create(
+            user=self.user,
+            name="月末情報スタッフ",
+        )
+
+    def create_rule(self):
+        return ShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            required_day_staff=0,
+            required_night_staff=0,
+            required_leader_staff=0,
+            off_days_per_staff=9,
+            max_consecutive_work_days=5,
+            night_shift_next_day_off=True,
+        )
+
+    def carryover_post_data(self, *, shift_type="", consecutive_work_days="0"):
+        return {
+            "form-TOTAL_FORMS": "1",
+            "form-INITIAL_FORMS": "0",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+            "form-0-staff_member_id": str(self.staff_member.id),
+            "form-0-previous_last_shift_type": shift_type,
+            "form-0-previous_consecutive_work_days": consecutive_work_days,
+        }
+
+    def test_no_previous_plan_redirects_to_carryover_form_after_condition_save(self):
+        self.create_rule()
+
+        response = self.client.get(
+            reverse("shifts:carryover_choice", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}),
+        )
+
+    def test_previous_plan_choice_yes_saves_previous_plan_carryover(self):
+        previous_plan = ShiftPlan.objects.create(
+            user=self.user,
+            year=2026,
+            month=7,
+            status=ShiftPlan.StatusChoices.GENERATED,
+        )
+        ShiftResult.objects.create(
+            shift_plan=previous_plan,
+            staff_member=self.staff_member,
+            date=date(2026, 7, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        self.create_rule()
+
+        response = self.client.post(
+            reverse("shifts:carryover_choice", kwargs={"pk": self.shift_plan.pk}),
+            {"use_previous_plan": "yes"},
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        carryover = self.shift_plan.carryovers.get(staff_member=self.staff_member)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.PREVIOUS_PLAN)
+        self.assertEqual(carryover.previous_shift_plan, previous_plan)
+        self.assertTrue(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=self.staff_member,
+                date=date(2026, 8, 1),
+                shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            ).exists()
+        )
+
+    def test_carryover_form_saves_excluded_staff_manual_value(self):
+        excluded_staff = StaffMember.objects.create(
+            user=self.user,
+            name="生成対象外スタッフ",
+        )
+        self.shift_plan.excluded_staffs.add(excluded_staff)
+        self.create_rule()
+
+        response = self.client.get(
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertContains(response, excluded_staff.name)
+        response = self.client.post(
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}),
+            {
+                "form-TOTAL_FORMS": "2",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-staff_member_id": str(self.staff_member.id),
+                "form-0-previous_last_shift_type": "",
+                "form-0-previous_consecutive_work_days": "0",
+                "form-1-staff_member_id": str(excluded_staff.id),
+                "form-1-previous_last_shift_type": ShiftResult.ShiftTypeChoices.NIGHT,
+                "form-1-previous_consecutive_work_days": "1",
+            },
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        carryover = self.shift_plan.carryovers.get(staff_member=excluded_staff)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.MANUAL)
+        self.assertTrue(
+            ShiftResult.objects.filter(
+                shift_plan=self.shift_plan,
+                staff_member=excluded_staff,
+                date=date(2026, 8, 1),
+                shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            ).exists()
+        )
+
+    def test_carryover_form_saves_manual_none_and_consecutive_work_days(self):
+        self.create_rule()
+
+        response = self.client.post(
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}),
+            self.carryover_post_data(consecutive_work_days="4"),
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        carryover = self.shift_plan.carryovers.get(staff_member=self.staff_member)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.MANUAL)
+        self.assertIsNone(carryover.previous_last_shift_type)
+        self.assertEqual(carryover.previous_consecutive_work_days, 4)
+
+    def test_carryover_form_saves_manual_night_and_syncs_month_start(self):
+        self.create_rule()
+
+        response = self.client.post(
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}),
+            self.carryover_post_data(
+                shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+                consecutive_work_days="1",
+            ),
+        )
+
+        self.assertRedirects(response, reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}))
+        carryover = self.shift_plan.carryovers.get(staff_member=self.staff_member)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.MANUAL)
+        self.assertEqual(
+            carryover.previous_last_shift_type,
+            ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        self.assertEqual(
+            list(
+                ShiftResult.objects.filter(
+                    shift_plan=self.shift_plan,
+                    staff_member=self.staff_member,
+                )
+                .order_by("date")
+                .values_list("date", "shift_type")
+            ),
+            [
+                (date(2026, 8, 1), ShiftResult.ShiftTypeChoices.AFTER_NIGHT),
+                (date(2026, 8, 2), ShiftResult.ShiftTypeChoices.OFF),
+            ],
+        )
+
+    def test_carryover_form_reuses_saved_manual_values(self):
+        ShiftCarryover.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.staff_member,
+            source=ShiftCarryover.SourceChoices.MANUAL,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            previous_consecutive_work_days=2,
+        )
+
+        response = self.client.get(
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        form = response.context["formset"].forms[0]
+        self.assertEqual(
+            form.initial["previous_last_shift_type"],
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        )
+        self.assertEqual(form.initial["previous_consecutive_work_days"], 2)
 
 
 class ShiftGeneratorTests(TestCase):
@@ -6469,6 +6688,43 @@ class HolidayOffTests(TestCase):
             )
 
 
+class ShiftCarryoverEntryFormTests(SimpleTestCase):
+    def test_night_and_after_night_require_at_least_one_consecutive_work_day(self):
+        for shift_type in (
+            ShiftResult.ShiftTypeChoices.NIGHT,
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        ):
+            with self.subTest(shift_type=shift_type):
+                form = ShiftCarryoverEntryForm(
+                    data={
+                        "staff_member_id": "1",
+                        "previous_last_shift_type": shift_type,
+                        "previous_consecutive_work_days": "0",
+                    }
+                )
+                self.assertFalse(form.is_valid())
+                self.assertIn("previous_consecutive_work_days", form.errors)
+
+    def test_none_allows_nonzero_consecutive_work_days(self):
+        for shift_type, consecutive_work_days in (
+            ("", "4"),
+            (ShiftResult.ShiftTypeChoices.NIGHT, "1"),
+            (ShiftResult.ShiftTypeChoices.AFTER_NIGHT, "1"),
+        ):
+            with self.subTest(shift_type=shift_type):
+                form = ShiftCarryoverEntryForm(
+                    data={
+                        "staff_member_id": "1",
+                        "previous_last_shift_type": shift_type,
+                        "previous_consecutive_work_days": (
+                            consecutive_work_days
+                        ),
+                    }
+                )
+
+                self.assertTrue(form.is_valid(), form.errors)
+
+
 class ShiftCarryoverServiceTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="carry-user", password="x")
@@ -6497,6 +6753,139 @@ class ShiftCarryoverServiceTests(TestCase):
         carryover = self.current.carryovers.get(staff_member=self.staff)
         self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.PREVIOUS_PLAN)
         self.assertEqual(carryover.previous_consecutive_work_days, 3)
+
+    def test_normal_build_does_not_overwrite_manual_carryover(self):
+        ShiftResult.objects.create(
+            shift_plan=self.previous,
+            staff_member=self.staff,
+            date=date(2025, 12, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.MANUAL,
+            previous_last_shift_type=None,
+            previous_consecutive_work_days=4,
+        )
+
+        build_shift_carryovers(self.current)
+
+        carryover = self.current.carryovers.get(staff_member=self.staff)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.MANUAL)
+        self.assertIsNone(carryover.previous_last_shift_type)
+        self.assertEqual(carryover.previous_consecutive_work_days, 4)
+
+    def test_normal_build_updates_previous_plan_carryover(self):
+        ShiftResult.objects.create(
+            shift_plan=self.previous,
+            staff_member=self.staff,
+            date=date(2025, 12, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        build_shift_carryovers(self.current)
+        ShiftResult.objects.filter(
+            shift_plan=self.previous,
+            staff_member=self.staff,
+            date=date(2025, 12, 31),
+        ).update(shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT)
+
+        build_shift_carryovers(self.current)
+
+        carryover = self.current.carryovers.get(staff_member=self.staff)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.PREVIOUS_PLAN)
+        self.assertEqual(
+            carryover.previous_last_shift_type,
+            ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+        )
+
+    def test_forced_build_replaces_manual_carryover_with_previous_plan(self):
+        ShiftResult.objects.create(
+            shift_plan=self.previous,
+            staff_member=self.staff,
+            date=date(2025, 12, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.MANUAL,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            previous_consecutive_work_days=2,
+        )
+
+        build_shift_carryovers(self.current, force=True)
+
+        carryover = self.current.carryovers.get(staff_member=self.staff)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.PREVIOUS_PLAN)
+        self.assertEqual(
+            carryover.previous_last_shift_type,
+            ShiftResult.ShiftTypeChoices.NIGHT,
+        )
+
+    def test_manual_carryover_is_reflected_in_month_boundary_assignments(self):
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.MANUAL,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            previous_consecutive_work_days=1,
+        )
+
+        sync_month_boundary_assignments(self.current)
+
+        result = ShiftResult.objects.get(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            date=date(2026, 1, 1),
+        )
+        self.assertEqual(result.shift_type, ShiftResult.ShiftTypeChoices.OFF)
+
+    def test_excluded_staff_manual_carryover_is_reflected_at_month_start(self):
+        self.current.excluded_staffs.add(self.staff)
+        ShiftRule.objects.create(
+            shift_plan=self.current,
+            off_days_per_staff=9,
+            max_consecutive_work_days=5,
+            required_day_staff=0,
+            required_night_staff=0,
+            night_shift_next_day_off=True,
+        )
+        ShiftCarryover.objects.create(
+            shift_plan=self.current,
+            staff_member=self.staff,
+            source=ShiftCarryover.SourceChoices.MANUAL,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            previous_consecutive_work_days=1,
+        )
+
+        sync_month_boundary_assignments(self.current)
+
+        self.assertEqual(
+            list(
+                ShiftResult.objects.filter(
+                    shift_plan=self.current,
+                    staff_member=self.staff,
+                )
+                .order_by("date")
+                .values_list("date", "shift_type")
+            ),
+            [
+                (date(2026, 1, 1), ShiftResult.ShiftTypeChoices.AFTER_NIGHT),
+                (date(2026, 1, 2), ShiftResult.ShiftTypeChoices.OFF),
+            ],
+        )
+
+    def test_manual_none_with_consecutive_work_days_is_preserved(self):
+        save_manual_shift_carryovers(
+            self.current,
+            {self.staff.id: (None, 4)},
+        )
+
+        carryover = self.current.carryovers.get(staff_member=self.staff)
+        self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.MANUAL)
+        self.assertIsNone(carryover.previous_last_shift_type)
+        self.assertEqual(carryover.previous_consecutive_work_days, 4)
 
     def test_previous_night_creates_locked_after_night_and_current_rule_second_day(self):
         ShiftCarryover.objects.create(

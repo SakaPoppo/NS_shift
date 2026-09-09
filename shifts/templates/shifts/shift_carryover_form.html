@@ -1,0 +1,79 @@
+{% extends "core/base.html" %}
+
+{% block title %}前月末情報 | Ns Shift{% endblock %}
+
+{% block content %}
+  <section class="mx-auto w-full max-w-[1180px] px-5 py-8 sm:px-8 lg:px-10">
+    <div class="mb-6">
+      <p class="text-sm font-semibold text-slate-500">シフト管理 &gt; 前月末情報</p>
+      <h1 class="mt-2 text-[1.9rem] font-black tracking-tight text-slate-900">前月末情報</h1>
+      <p class="mt-2 text-sm font-medium leading-6 text-slate-600">
+        前月から続く勤務があるスタッフの情報を入力してください。該当しない場合も、月末時点の連勤数があれば入力できます。
+      </p>
+    </div>
+
+    <form method="post" class="space-y-5">
+      {% csrf_token %}
+      {{ formset.management_form }}
+      {% if formset.non_form_errors %}
+        <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+          {{ formset.non_form_errors|join:" " }}
+        </div>
+      {% endif %}
+
+      <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table class="w-full min-w-[760px] table-fixed text-sm">
+          <colgroup>
+            <col class="w-[28%]">
+            <col class="w-[48%]">
+            <col class="w-[24%]">
+          </colgroup>
+          <thead class="bg-slate-50 text-xs font-bold text-slate-500">
+            <tr>
+              <th class="border-b border-slate-200 px-4 py-3 text-left">スタッフ</th>
+              <th class="border-b border-slate-200 px-4 py-3 text-left">前月末勤務</th>
+              <th class="border-b border-slate-200 px-4 py-3 text-left">月末時点の連続勤務数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for staff_member, form in rows %}
+              <tr class="align-top transition hover:bg-sky-50/40">
+                <th class="border-b border-slate-100 px-4 py-4 text-left font-black text-slate-900">
+                  {{ form.staff_member_id }}
+                  {{ staff_member.name }}
+                </th>
+                <td class="border-b border-slate-100 px-4 py-3">
+                  <div class="flex flex-wrap gap-x-5 gap-y-2">
+                    {% for radio in form.previous_last_shift_type %}
+                      <label class="inline-flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-700">
+                        {{ radio.tag }}<span>{{ radio.choice_label }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                  {% for error in form.previous_last_shift_type.errors %}
+                    <p class="mt-2 text-xs font-bold text-red-600">{{ error }}</p>
+                  {% endfor %}
+                </td>
+                <td class="border-b border-slate-100 px-4 py-3">
+                  <div class="max-w-28 {% if form.previous_consecutive_work_days.errors %}[&>input]:border-red-500 [&>input]:bg-red-50{% endif %}">
+                    {{ form.previous_consecutive_work_days }}
+                  </div>
+                  {% for error in form.previous_consecutive_work_days.errors %}
+                    <p class="mt-2 text-xs font-bold text-red-600">{{ error }}</p>
+                  {% endfor %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3" class="px-4 py-12 text-center text-sm font-bold text-slate-500">在籍スタッフはいません。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <a href="{% url 'shifts:conditions' shift_plan.pk %}" class="btn btn-outline h-11 rounded-lg border-slate-300 bg-white px-6 text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700">条件設定へ戻る</a>
+        <button type="submit" class="btn btn-primary h-11 rounded-lg border-brand-600 bg-brand-600 px-7 text-white hover:border-brand-700 hover:bg-brand-700">保存して次へ</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}
