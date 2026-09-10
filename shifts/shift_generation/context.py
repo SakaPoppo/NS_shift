@@ -107,7 +107,10 @@ def load_generation_context(shift_plan) -> GenerationContext:
         carryover.staff_member_id: carryover.previous_consecutive_work_days
         for carryover in shift_plan.carryovers.filter(
             staff_member__in=staff_members,
-            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            source__in=(
+                ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+                ShiftCarryover.SourceChoices.MANUAL,
+            ),
         )
     }
     mandatory_off_counts = {
