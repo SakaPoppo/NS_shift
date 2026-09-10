@@ -164,6 +164,44 @@ class ShiftGenerationContextTests(TestCase):
             2,
         )
 
+    def test_context_marks_only_manual_and_user_locked_results_as_user_overrides(self):
+        manual_date = date(2026, 7, 1)
+        user_locked_date = date(2026, 7, 2)
+        boundary_date = date(2026, 7, 3)
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=manual_date,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=user_locked_date,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            is_locked=True,
+            lock_reason=ShiftResult.LockReasonChoices.USER,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=boundary_date,
+            shift_type=ShiftResult.ShiftTypeChoices.OFF,
+            is_locked=True,
+            lock_reason=ShiftResult.LockReasonChoices.MONTH_BOUNDARY,
+        )
+
+        context = load_generation_context(self.shift_plan)
+
+        self.assertEqual(
+            context.user_override_assignment_keys,
+            {
+                (self.target_staff.id, manual_date),
+                (self.target_staff.id, user_locked_date),
+            },
+        )
+
     def test_build_optimizer_payload_serializes_generation_context(self):
         target_date = date(2026, 9, 1)
         next_date = date(2026, 9, 2)
@@ -263,6 +301,7 @@ class ShiftGenerationContextTests(TestCase):
             payload["effective_off_days"],
             [{"staff_id": staff_member.id, "off_days": 9}],
         )
+        self.assertEqual(payload["user_override_assignment_keys"], [])
         json.dumps(payload)
 
 
@@ -2628,6 +2667,207 @@ class ShiftGeneratorTests(TestCase):
             shifts=result.shifts,
             staff_members=staff_members,
             max_consecutive_work_days=5,
+        )
+
+    def test_five_manual_work_days_force_next_generated_day_off(self):
+        self.create_rule(max_consecutive_work_days=5)
+        staff_member = self.create_staff_member()
+        for day in range(1, 6):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, day),
+                shift_type=ShiftResult.ShiftTypeChoices.DAY,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            [
+                shift_map[(staff_member.id, date(2026, 7, day))]
+                for day in range(1, 7)
+            ],
+            [
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.OFF,
+            ],
+        )
+
+    def test_six_manual_work_days_are_preserved_and_force_next_generated_day_off(self):
+        self.create_rule(max_consecutive_work_days=5)
+        staff_member = self.create_staff_member()
+        for day in range(1, 7):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, day),
+                shift_type=ShiftResult.ShiftTypeChoices.DAY,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            [
+                shift_map[(staff_member.id, date(2026, 7, day))]
+                for day in range(1, 8)
+            ],
+            [
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.DAY,
+                ShiftResult.ShiftTypeChoices.OFF,
+            ],
+        )
+
+    def test_manual_night_and_after_night_force_following_generated_day_off(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        DateShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            target_date=date(2026, 7, 1),
+            required_night_staff=1,
+        )
+        for day, shift_type in (
+            (1, ShiftResult.ShiftTypeChoices.NIGHT),
+            (2, ShiftResult.ShiftTypeChoices.AFTER_NIGHT),
+        ):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, day),
+                shift_type=shift_type,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 3))],
+            ShiftResult.ShiftTypeChoices.OFF,
+        )
+
+    def test_manual_night_after_night_pattern_is_preserved_and_followed_by_off(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        for day in (1, 3):
+            DateShiftRule.objects.create(
+                shift_plan=self.shift_plan,
+                target_date=date(2026, 7, day),
+                required_night_staff=1,
+            )
+        for day, shift_type in (
+            (1, ShiftResult.ShiftTypeChoices.NIGHT),
+            (2, ShiftResult.ShiftTypeChoices.AFTER_NIGHT),
+            (3, ShiftResult.ShiftTypeChoices.NIGHT),
+            (4, ShiftResult.ShiftTypeChoices.AFTER_NIGHT),
+        ):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, day),
+                shift_type=shift_type,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            [
+                shift_map[(staff_member.id, date(2026, 7, day))]
+                for day in range(1, 6)
+            ],
+            [
+                ShiftResult.ShiftTypeChoices.NIGHT,
+                ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                ShiftResult.ShiftTypeChoices.NIGHT,
+                ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                ShiftResult.ShiftTypeChoices.OFF,
+            ],
+        )
+
+    def test_generated_night_still_requires_after_night_and_off(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        DateShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            target_date=date(2026, 7, 1),
+            required_night_staff=1,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            [
+                shift_map[(staff_member.id, date(2026, 7, day))]
+                for day in range(1, 4)
+            ],
+            [
+                ShiftResult.ShiftTypeChoices.NIGHT,
+                ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                ShiftResult.ShiftTypeChoices.OFF,
+            ],
+        )
+
+    def test_manual_night_followed_by_day_is_rejected(self):
+        self.create_rule()
+        staff_member = self.create_staff_member()
+        for day, shift_type in (
+            (1, ShiftResult.ShiftTypeChoices.NIGHT),
+            (2, ShiftResult.ShiftTypeChoices.DAY),
+        ):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=date(2026, 7, day),
+                shift_type=shift_type,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        with self.assertRaises(ShiftGenerationError):
+            generate_shift(self.shift_plan)
+
+    def test_previous_plan_streak_with_manual_work_forces_next_generated_day_off(self):
+        self.create_rule(max_consecutive_work_days=5)
+        staff_member = self.create_staff_member()
+        ShiftCarryover.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            previous_last_shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            previous_consecutive_work_days=5,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=staff_member,
+            date=date(2026, 7, 1),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 1))],
+            ShiftResult.ShiftTypeChoices.DAY,
+        )
+        self.assertEqual(
+            shift_map[(staff_member.id, date(2026, 7, 2))],
+            ShiftResult.ShiftTypeChoices.OFF,
         )
 
     def test_generate_shift_rejects_unavoidable_max_consecutive_work(self):

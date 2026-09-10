@@ -78,4 +78,10 @@ def build_optimizer_payload(context: GenerationContext) -> dict:
             {"staff_id": staff_id, "off_days": off_days}
             for staff_id, off_days in sorted(context.effective_off_days.items())
         ],
+        "user_override_assignment_keys": [
+            {"staff_id": staff_id, "date": target_date.isoformat()}
+            for staff_id, target_date in sorted(
+                context.user_override_assignment_keys,
+            )
+        ],
     }
