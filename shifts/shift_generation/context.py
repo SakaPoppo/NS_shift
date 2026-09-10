@@ -68,6 +68,14 @@ def load_generation_context(shift_plan) -> GenerationContext:
             Q(input_type=ShiftResult.InputTypeChoices.MANUAL) | Q(is_locked=True)
         )
     }
+    user_override_assignment_keys = {
+        cell_key
+        for cell_key, result in fixed_results.items()
+        if (
+            result.input_type == ShiftResult.InputTypeChoices.MANUAL
+            or result.lock_reason == ShiftResult.LockReasonChoices.USER
+        )
+    }
     regular_day_offs = {
         staff.id: {
             day_off.day_of_week for day_off in staff.regular_days_off.all()
@@ -141,6 +149,7 @@ def load_generation_context(shift_plan) -> GenerationContext:
         month_dates=month_dates,
         fixed_assignments=fixed_assignments,
         effective_rules=effective_rules,
+        user_override_assignment_keys=user_override_assignment_keys,
     )
     return GenerationContext(
         shift_rule=shift_rule,
@@ -150,6 +159,7 @@ def load_generation_context(shift_plan) -> GenerationContext:
         effective_rules=effective_rules,
         previous_consecutive_work_days=previous_consecutive_work_days,
         effective_off_days=effective_off_days,
+        user_override_assignment_keys=user_override_assignment_keys,
     )
 
 
@@ -193,7 +203,12 @@ def _build_fixed_assignments(
 
 
 def _validate_fixed_assignments(
-    *, staff_members, month_dates, fixed_assignments, effective_rules
+    *,
+    staff_members,
+    month_dates,
+    fixed_assignments,
+    effective_rules,
+    user_override_assignment_keys=frozenset(),
 ):
     for staff in staff_members:
         for index, target_date in enumerate(month_dates):
@@ -253,14 +268,16 @@ def _validate_fixed_assignments(
                 )
             if index + 2 >= len(month_dates):
                 continue
+            third_key = (staff.id, month_dates[index + 2])
             third_shift_type = fixed_assignments.get(
-                (staff.id, month_dates[index + 2])
+                third_key
             )
             rule = effective_rules[target_date]
             if rule.night_shift_next_day_off:
                 if (
                     third_shift_type is not None
                     and third_shift_type not in OFF_LIKE_SHIFT_TYPES
+                    and third_key not in user_override_assignment_keys
                 ):
                     raise ShiftGenerationError(
                         f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、2日後の固定勤務と整合しません。"

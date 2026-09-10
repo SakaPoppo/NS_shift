@@ -172,6 +172,9 @@ class GenerationContext:
     effective_rules: dict[date, object]
     previous_consecutive_work_days: dict[int, int]
     effective_off_days: dict[int, int]
+    user_override_assignment_keys: set[tuple[int, date]] = field(
+        default_factory=set
+    )
 
 
 class ShiftGenerationError(Exception):

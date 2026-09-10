@@ -86,6 +86,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         shift_vars=shift_vars,
         fixed_assignments=context.fixed_assignments,
         effective_rules=context.effective_rules,
+        user_override_assignment_keys=context.user_override_assignment_keys,
     )
     _add_monthly_off_day_constraints(
         model=model,
@@ -134,6 +135,7 @@ def optimize_shift(context: GenerationContext) -> ShiftOptimizationOutput:
         fixed_assignments=context.fixed_assignments,
         max_consecutive_work_days=context.shift_rule.max_consecutive_work_days,
         previous_consecutive_work_days=context.previous_consecutive_work_days,
+        user_override_assignment_keys=context.user_override_assignment_keys,
     )
     night_eligible_staff = [
         staff
@@ -531,6 +533,7 @@ def _add_night_pattern_constraints(
     shift_vars,
     fixed_assignments,
     effective_rules,
+    user_override_assignment_keys=frozenset(),
 ):
     """夜勤後の勤務を連動させ、False時の明け翌日夜勤を月1回に制限する。
 
@@ -607,7 +610,10 @@ def _add_night_pattern_constraints(
                 if third_fixed_shift_type == ShiftResult.ShiftTypeChoices.OFF_REQUEST:
                     continue
                 if third_fixed_shift_type is not None:
-                    if third_fixed_shift_type != ShiftResult.ShiftTypeChoices.OFF:
+                    if (
+                        third_fixed_shift_type != ShiftResult.ShiftTypeChoices.OFF
+                        and third_key not in user_override_assignment_keys
+                    ):
                         model.Add(night_var == 0)
                     continue
                 model.Add(
@@ -838,8 +844,9 @@ def _add_max_consecutive_work_constraints(
     fixed_assignments,
     max_consecutive_work_days,
     previous_consecutive_work_days,
+    user_override_assignment_keys=frozenset(),
 ) -> None:
-    """前月からの勤務も含め、最大連勤数を超える配置を禁止する。"""
+    """ユーザー操作だけの既存連勤を除き、最大連勤を超える配置を禁止する。"""
 
     window_size = max_consecutive_work_days + 1
     for staff_member in staff_members:
@@ -849,6 +856,18 @@ def _add_max_consecutive_work_constraints(
         )
         timeline = [None] * prefix_count + month_dates
         for start_index in range(0, len(timeline) - window_size + 1):
+            window = timeline[start_index : start_index + window_size]
+            current_month_dates = [
+                current_date for current_date in window if current_date is not None
+            ]
+            if current_month_dates and all(
+                (staff_member.id, current_date)
+                in user_override_assignment_keys
+                for current_date in current_month_dates
+            ):
+                # 手入力だけで既に超過している連勤は保持する。後続に自動生成
+                # セルが含まれる次のウィンドウでは通常どおり休みを強制する。
+                continue
             work_terms = [
                 1
                 if current_date is None
@@ -858,9 +877,7 @@ def _add_max_consecutive_work_constraints(
                     staff_member.id,
                     current_date,
                 )
-                for current_date in timeline[
-                    start_index : start_index + window_size
-                ]
+                for current_date in window
             ]
 
             model.Add(sum(work_terms) <= max_consecutive_work_days)
