@@ -4,8 +4,10 @@ DB読み込み、OR-Tools最適化、結果整形、保存の各責務を順番�
 """
 
 from django.db import transaction
+from django.conf import settings
 
 from .models import ShiftPlan
+from .shift_generation.client import generate_with_optimizer_api
 from .shift_generation.context import load_generation_context
 from .shift_generation.optimization import optimize_shift
 from .shift_generation.persistence import (
@@ -33,6 +35,8 @@ def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:
     """シフト表1か月分の勤務を自動生成し、結果をメモリ上で返す。"""
 
     context = load_generation_context(shift_plan)
+    if settings.OPTIMIZER_API_URL:
+        return generate_with_optimizer_api(context)
     return generate_with_local_optimizer(context)
 
 

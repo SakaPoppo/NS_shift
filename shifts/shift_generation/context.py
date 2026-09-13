@@ -6,6 +6,7 @@ from staff.models import StaffMember
 
 from ..models import DayOffRequest, ShiftCarryover, ShiftResult
 from ..services import (
+    MONTHLY_OFF_SHIFT_TYPES,
     OFF_LIKE_SHIFT_TYPES,
     get_effective_rule_for_date,
     get_japanese_holiday_dates,
@@ -138,7 +139,8 @@ def load_generation_context(shift_plan) -> GenerationContext:
     }
     for staff in staff_members:
         fixed_off_count = sum(
-            fixed_assignments.get((staff.id, target_date)) in OFF_LIKE_SHIFT_TYPES
+            fixed_assignments.get((staff.id, target_date))
+            in MONTHLY_OFF_SHIFT_TYPES
             for target_date in month_dates
         )
         if fixed_off_count > effective_off_days[staff.id]:

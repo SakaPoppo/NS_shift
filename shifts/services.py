@@ -27,6 +27,14 @@ OFF_LIKE_SHIFT_TYPES = {
     ShiftResult.ShiftTypeChoices.PAID_LEAVE,
     ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE,
 }
+MONTHLY_OFF_SHIFT_TYPES = {
+    ShiftResult.ShiftTypeChoices.OFF,
+    ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+}
+# OFF は最適化変数として月休日数に含まれるため、固定値として別途加算するのは希望休のみ。
+FIXED_NON_GENERATED_MONTHLY_OFF_SHIFT_TYPES = {
+    ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+}
 
 
 class MonthBoundaryConflictError(ValueError):
