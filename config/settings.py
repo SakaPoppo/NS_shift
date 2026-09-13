@@ -167,3 +167,9 @@ TAILWIND_APP_NAME = "theme"
 LOGIN_URL = "accounts:login"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Cloud Run の最適化APIは、URLが設定された環境だけで使用する。
+# ローカル開発・既存テストは未設定のまま従来のローカル最適化器を利用できる。
+OPTIMIZER_API_URL = os.getenv("OPTIMIZER_API_URL", "").rstrip("/")
+OPTIMIZER_API_KEY = os.getenv("OPTIMIZER_API_KEY", "")
+OPTIMIZER_API_TIMEOUT = env_int("OPTIMIZER_API_TIMEOUT", 330)

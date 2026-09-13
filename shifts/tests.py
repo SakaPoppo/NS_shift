@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import secrets
 from dataclasses import fields
 from datetime import date
 from types import SimpleNamespace
@@ -17,6 +18,10 @@ from staff.models import StaffMember, StaffRegularDayOff
 from .shift_generation import optimization as shift_optimization
 from .shift_generation import results as shift_results
 from .shift_generation.context import load_generation_context
+from .shift_generation.client import (
+    OptimizerAPIError,
+    generate_with_optimizer_api,
+)
 from .shift_generation.persistence import save_generated_shift_results
 from .forms import ShiftCarryoverEntryForm, ShiftPlanCreateForm, ShiftRuleForm
 from .shift_generator import (
@@ -220,6 +225,25 @@ class ShiftGenerationContextTests(TestCase):
             },
         )
 
+    def test_context_does_not_count_paid_or_special_leave_as_monthly_off_days(self):
+        self.shift_plan.shift_rule.off_days_per_staff = 1
+        self.shift_plan.shift_rule.save(update_fields=["off_days_per_staff"])
+        for target_date, shift_type in (
+            (date(2026, 7, 1), ShiftResult.ShiftTypeChoices.PAID_LEAVE),
+            (date(2026, 7, 2), ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE),
+        ):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=self.target_staff,
+                date=target_date,
+                shift_type=shift_type,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        context = load_generation_context(self.shift_plan)
+
+        self.assertEqual(context.effective_off_days[self.target_staff.id], 1)
+
     def test_build_optimizer_payload_serializes_generation_context(self):
         target_date = date(2026, 9, 1)
         next_date = date(2026, 9, 2)
@@ -339,6 +363,69 @@ class ShiftGenerationContextTests(TestCase):
             },
             payload["previous_consecutive_work_days"],
         )
+
+    def test_optimizer_api_client_sends_payload_and_authentication_header(self):
+        context = load_generation_context(self.shift_plan)
+        api_key = secrets.token_urlsafe(32)
+        response_payload = {
+            "status": "success",
+            "solver_status": "OPTIMAL",
+            "shifts": [
+                {
+                    "staff_id": staff_member.id,
+                    "date": target_date.isoformat(),
+                    "shift_type": ShiftResult.ShiftTypeChoices.OFF,
+                }
+                for staff_member in context.staff_members
+                for target_date in context.month_dates
+            ],
+            "phase_results": [],
+        }
+        response = Mock(status_code=200)
+        response.json.return_value = response_payload
+
+        with self.settings(
+            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+            OPTIMIZER_API_KEY=api_key,
+            OPTIMIZER_API_TIMEOUT=330,
+        ):
+            with patch(
+                "shifts.shift_generation.client.requests.post",
+                return_value=response,
+            ) as mock_post:
+                result = generate_with_optimizer_api(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(len(result.shifts), len(response_payload["shifts"]))
+        mock_post.assert_called_once_with(
+            "https://optimizer.example.run.app/generate",
+            json=build_optimizer_payload(context),
+            headers={
+                "Content-Type": "application/json",
+                "X-API-Key": api_key,
+            },
+            timeout=330,
+        )
+
+    def test_optimizer_api_client_hides_authentication_response_details(self):
+        context = load_generation_context(self.shift_plan)
+        api_key = secrets.token_urlsafe(32)
+        response = Mock(status_code=401)
+
+        with self.settings(
+            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+            OPTIMIZER_API_KEY=api_key,
+            OPTIMIZER_API_TIMEOUT=330,
+        ):
+            with patch(
+                "shifts.shift_generation.client.requests.post",
+                return_value=response,
+            ):
+                with self.assertRaisesMessage(
+                    OptimizerAPIError,
+                    "シフト最適化サービスの認証に失敗しました。",
+                ):
+                    generate_with_optimizer_api(context)
 
 
 class ShiftPlanCsvExportViewTests(TestCase):
@@ -2449,6 +2536,36 @@ class ShiftGeneratorTests(TestCase):
 
         with self.assertRaisesMessage(ShiftGenerationError, "月休日数 1 日を超えています"):
             generate_shift(self.shift_plan)
+
+    def test_generate_shift_counts_only_off_and_off_request_as_monthly_off_days(self):
+        self.create_rule(off_days_per_staff=1, max_consecutive_work_days=31)
+        staff_member = self.create_staff_member()
+        for target_date, shift_type in (
+            (date(2026, 7, 1), ShiftResult.ShiftTypeChoices.PAID_LEAVE),
+            (date(2026, 7, 2), ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE),
+        ):
+            ShiftResult.objects.create(
+                shift_plan=self.shift_plan,
+                staff_member=staff_member,
+                date=target_date,
+                shift_type=shift_type,
+                input_type=ShiftResult.InputTypeChoices.MANUAL,
+            )
+
+        result = generate_shift(self.shift_plan)
+        shift_map = self.build_shift_map(result.shifts)
+
+        self.assertEqual(
+            sum(
+                shift_map[(staff_member.id, target_date)]
+                in {
+                    ShiftResult.ShiftTypeChoices.OFF,
+                    ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+                }
+                for target_date in get_month_dates(2026, 7)
+            ),
+            1,
+        )
 
     def test_generate_shift_matches_day_staff_requirement_when_feasible(self):
         self.create_rule(

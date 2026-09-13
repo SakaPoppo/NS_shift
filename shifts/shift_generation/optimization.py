@@ -19,7 +19,11 @@ from ortools.sat.python import cp_model
 from staff.models import StaffMember
 
 from ..models import ShiftResult
-from ..services import OFF_LIKE_SHIFT_TYPES, WORKLIKE_SHIFT_TYPES
+from ..services import (
+    FIXED_NON_GENERATED_MONTHLY_OFF_SHIFT_TYPES,
+    OFF_LIKE_SHIFT_TYPES,
+    WORKLIKE_SHIFT_TYPES,
+)
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     AbilityDistributionData,
@@ -669,11 +673,7 @@ def _add_monthly_off_day_constraints(
             1
             for target_date in month_dates
             if fixed_assignments.get((staff_member.id, target_date))
-            in {
-                ShiftResult.ShiftTypeChoices.OFF_REQUEST,
-                ShiftResult.ShiftTypeChoices.PAID_LEAVE,
-                ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE,
-            }
+            in FIXED_NON_GENERATED_MONTHLY_OFF_SHIFT_TYPES
         )
         model.Add(
             sum(
