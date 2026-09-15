@@ -16,18 +16,13 @@ from .shift_generation.persistence import (
 )
 from .shift_generation.results import (
     _build_generated_shifts,
-    _build_generation_violations,
     _build_optimization_summary,
-    build_day_staffing_adjustment_message,
-    build_optimization_incomplete_message,
-    format_generation_violation_messages,
+    build_generation_issues,
 )
 from .shift_generation.types import (
     GenerationContext,
     ShiftGenerationError,
     ShiftGenerationResult,
-    ShiftGenerationViolation,
-    ShiftGenerationViolationType,
 )
 
 
@@ -61,33 +56,16 @@ def generate_with_local_optimizer(
         long_streak_terms=optimization.long_streak_terms,
         phase_results=optimization.phase_results,
     )
-    violations = _build_generation_violations(
-        optimization_summary=optimization_summary,
-    )
-    day_staffing_adjustment_message = (
-        build_day_staffing_adjustment_message(
-            optimization_summary=optimization_summary,
-            required_day_counts=(
-                optimization_summary.required_day_counts.values()
-            ),
-        )
-    )
-    optimization_incomplete_message = (
-        build_optimization_incomplete_message(
-            optimization_summary=optimization_summary,
-        )
-    )
-
     return ShiftGenerationResult(
         status="success",
         shifts=shifts,
-        violations=violations,
+        issues=build_generation_issues(
+            optimization_summary=optimization_summary,
+        ),
         solver_status=optimization.solver_status,
         staff_count=len(context.staff_members),
         target_day_count=len(context.month_dates),
         optimization_summary=optimization_summary,
-        day_staffing_adjustment_message=day_staffing_adjustment_message,
-        optimization_incomplete_message=optimization_incomplete_message,
     )
 
 

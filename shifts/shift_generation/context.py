@@ -6,13 +6,18 @@ from staff.models import StaffMember
 
 from ..models import DayOffRequest, ShiftCarryover, ShiftResult
 from ..services import (
-    MONTHLY_OFF_SHIFT_TYPES,
     OFF_LIKE_SHIFT_TYPES,
     get_effective_rule_for_date,
     get_japanese_holiday_dates,
     get_month_dates,
 )
-from .types import GenerationContext, ShiftGenerationError
+from .types import (
+    GenerationContext,
+    GenerationIssue,
+    GenerationIssueCode,
+    GenerationIssueSeverity,
+    ShiftGenerationError,
+)
 
 
 def load_generation_context(shift_plan) -> GenerationContext:
@@ -20,7 +25,12 @@ def load_generation_context(shift_plan) -> GenerationContext:
 
     shift_rule = getattr(shift_plan, "shift_rule", None)
     if shift_rule is None:
-        raise ShiftGenerationError("シフト条件が未設定のため、自動生成を開始できません。")
+        raise ShiftGenerationError(
+            issue=GenerationIssue(
+                code=GenerationIssueCode.SHIFT_RULE_NOT_CONFIGURED,
+                severity=GenerationIssueSeverity.ERROR,
+            )
+        )
 
     month_dates = get_month_dates(shift_plan.year, shift_plan.month)
     holiday_dates = get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
@@ -33,7 +43,12 @@ def load_generation_context(shift_plan) -> GenerationContext:
         .order_by("id")
     )
     if not all_staff_members:
-        raise ShiftGenerationError("有効なスタッフがいないため、自動生成できません。")
+        raise ShiftGenerationError(
+            issue=GenerationIssue(
+                code=GenerationIssueCode.NO_ACTIVE_STAFF,
+                severity=GenerationIssueSeverity.ERROR,
+            )
+        )
 
     excluded_staff_ids = shift_plan.get_excluded_staff_ids()
     staff_members = [
@@ -43,7 +58,10 @@ def load_generation_context(shift_plan) -> GenerationContext:
     ]
     if not staff_members:
         raise ShiftGenerationError(
-            "シフト生成対象のスタッフを1名以上選択してください。"
+            issue=GenerationIssue(
+                code=GenerationIssueCode.NO_GENERATION_TARGET_STAFF,
+                severity=GenerationIssueSeverity.ERROR,
+            )
         )
 
     weekday_rules = list(shift_plan.weekday_rules.all())
@@ -99,9 +117,15 @@ def load_generation_context(shift_plan) -> GenerationContext:
     for target_date, effective_rule in effective_rules.items():
         if effective_rule.required_night_staff > night_capable_count:
             raise ShiftGenerationError(
-                f"{target_date.month}月{target_date.day}日は夜勤が"
-                f"{effective_rule.required_night_staff}人必要ですが、夜勤を配置できるスタッフが"
-                f"{night_capable_count}人しかいません。"
+                issue=GenerationIssue(
+                    code=GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF,
+                    severity=GenerationIssueSeverity.ERROR,
+                    dates=[target_date],
+                    details={
+                        "required_count": effective_rule.required_night_staff,
+                        "available_count": night_capable_count,
+                    },
+                )
             )
 
     previous_consecutive_work_days = {
@@ -138,15 +162,24 @@ def load_generation_context(shift_plan) -> GenerationContext:
         for staff_id, count in mandatory_off_counts.items()
     }
     for staff in staff_members:
-        fixed_off_count = sum(
-            fixed_assignments.get((staff.id, target_date))
-            in MONTHLY_OFF_SHIFT_TYPES
+        requested_off_dates = [
+            target_date
             for target_date in month_dates
-        )
-        if fixed_off_count > effective_off_days[staff.id]:
+            if (staff.id, target_date) in day_off_requests
+        ]
+        if len(requested_off_dates) > effective_off_days[staff.id]:
             raise ShiftGenerationError(
-                f"{staff.name} は月休日数 {effective_off_days[staff.id]} 日を超えています。"
-                "月休日数または希望休・有給などを見直してください。"
+                issue=GenerationIssue(
+                    code=GenerationIssueCode.TOO_MANY_DAY_OFF_REQUESTS,
+                    severity=GenerationIssueSeverity.ERROR,
+                    dates=requested_off_dates,
+                    staff_ids=[staff.id],
+                    details={
+                        "staff_name": staff.name,
+                        "monthly_off_days": effective_off_days[staff.id],
+                        "requested_off_count": len(requested_off_dates),
+                    },
+                )
             )
 
     _validate_fixed_assignments(
@@ -199,9 +232,23 @@ def _build_fixed_assignments(
             and existing_shift_type != shift_result.shift_type
         ):
             staff_member_id, target_date = cell_key
+            staff_member = next(
+                staff
+                for staff in staff_members
+                if staff.id == staff_member_id
+            )
             raise ShiftGenerationError(
-                f"{target_date:%Y-%m-%d} のスタッフID {staff_member_id} は、"
-                f"固定条件「{existing_shift_type}」と保存済み勤務「{shift_result.shift_type}」が競合しています。"
+                issue=GenerationIssue(
+                    code=GenerationIssueCode.FIXED_ASSIGNMENT_CONFLICT,
+                    severity=GenerationIssueSeverity.ERROR,
+                    dates=[target_date],
+                    staff_ids=[staff_member_id],
+                    details={
+                        "staff_name": staff_member.name,
+                        "fixed_shift_type": existing_shift_type,
+                        "saved_shift_type": shift_result.shift_type,
+                    },
+                )
             )
         fixed_assignments[cell_key] = shift_result.shift_type
     return fixed_assignments
@@ -225,7 +272,13 @@ def _validate_fixed_assignments(
                 and not staff.can_night_shift
             ):
                 raise ShiftGenerationError(
-                    f"{staff.name} は夜勤不可ですが、{target_date:%Y-%m-%d} に夜勤が固定されています。"
+                    issue=GenerationIssue(
+                        code=GenerationIssueCode.NIGHT_SHIFT_NOT_ALLOWED,
+                        severity=GenerationIssueSeverity.ERROR,
+                        dates=[target_date],
+                        staff_ids=[staff.id],
+                        details={"staff_name": staff.name},
+                    )
                 )
             if (
                 fixed_shift_type == ShiftResult.ShiftTypeChoices.AFTER_NIGHT
@@ -239,7 +292,7 @@ def _validate_fixed_assignments(
                     and previous_shift_type != ShiftResult.ShiftTypeChoices.NIGHT
                 ):
                     raise ShiftGenerationError(
-                        f"{staff.name} の {target_date:%Y-%m-%d} の明けは、前日の固定勤務と整合しません。"
+                        issue=_night_sequence_issue(staff, target_date)
                     )
             if (
                 fixed_shift_type == ShiftResult.ShiftTypeChoices.AFTER_NIGHT
@@ -255,7 +308,7 @@ def _validate_fixed_assignments(
                     | {ShiftResult.ShiftTypeChoices.NIGHT}
                 ):
                     raise ShiftGenerationError(
-                        f"{staff.name} の {target_date:%Y-%m-%d} の明けは、翌日の固定勤務と整合しません。"
+                        issue=_night_sequence_issue(staff, target_date)
                     )
             if fixed_shift_type != ShiftResult.ShiftTypeChoices.NIGHT:
                 continue
@@ -269,7 +322,7 @@ def _validate_fixed_assignments(
                 and next_shift_type != ShiftResult.ShiftTypeChoices.AFTER_NIGHT
             ):
                 raise ShiftGenerationError(
-                    f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、翌日の固定勤務と整合しません。"
+                    issue=_night_sequence_issue(staff, target_date)
                 )
             if index + 2 >= len(month_dates):
                 continue
@@ -285,12 +338,22 @@ def _validate_fixed_assignments(
                     and third_key not in user_override_assignment_keys
                 ):
                     raise ShiftGenerationError(
-                        f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、2日後の固定勤務と整合しません。"
+                        issue=_night_sequence_issue(staff, target_date)
                     )
             elif third_shift_type is not None and third_shift_type not in (
                 OFF_LIKE_SHIFT_TYPES
                 | {ShiftResult.ShiftTypeChoices.NIGHT}
             ):
                 raise ShiftGenerationError(
-                    f"{staff.name} の {target_date:%Y-%m-%d} の夜勤は、2日後の固定勤務と整合しません。"
+                    issue=_night_sequence_issue(staff, target_date)
                 )
+
+
+def _night_sequence_issue(staff, target_date) -> GenerationIssue:
+    return GenerationIssue(
+        code=GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT,
+        severity=GenerationIssueSeverity.ERROR,
+        dates=[target_date],
+        staff_ids=[staff.id],
+        details={"staff_name": staff.name},
+    )

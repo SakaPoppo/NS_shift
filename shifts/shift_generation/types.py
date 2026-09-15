@@ -16,11 +16,41 @@ GENERATABLE_SHIFT_TYPES = (
 )
 
 
-class ShiftGenerationViolationType:
-    """生成後の警告表示とテストで共有する違反種別。"""
+class GenerationIssueSeverity:
+    SUCCESS = "success"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
 
-    DAY_STAFFING_IMBALANCE = "day_staffing_imbalance"
-    NIGHT_COUNT_IMBALANCE = "night_count_imbalance"
+
+class GenerationIssueCode:
+    SHIFT_GENERATED = "SHIFT_GENERATED"
+    DAY_STAFFING_ABOVE_REQUIRED = "DAY_STAFFING_ABOVE_REQUIRED"
+    DAY_STAFFING_BELOW_REQUIRED = "DAY_STAFFING_BELOW_REQUIRED"
+    DAY_STAFFING_IMBALANCE = "DAY_STAFFING_IMBALANCE"
+    NIGHT_COUNT_IMBALANCE = "NIGHT_COUNT_IMBALANCE"
+    OPTIMIZATION_INCOMPLETE = "OPTIMIZATION_INCOMPLETE"
+    SHIFT_RULE_NOT_CONFIGURED = "SHIFT_RULE_NOT_CONFIGURED"
+    NO_ACTIVE_STAFF = "NO_ACTIVE_STAFF"
+    NO_GENERATION_TARGET_STAFF = "NO_GENERATION_TARGET_STAFF"
+    INSUFFICIENT_NIGHT_STAFF = "INSUFFICIENT_NIGHT_STAFF"
+    TOO_MANY_DAY_OFF_REQUESTS = "TOO_MANY_DAY_OFF_REQUESTS"
+    NIGHT_SHIFT_NOT_ALLOWED = "NIGHT_SHIFT_NOT_ALLOWED"
+    NIGHT_SEQUENCE_CONFLICT = "NIGHT_SEQUENCE_CONFLICT"
+    FIXED_ASSIGNMENT_CONFLICT = "FIXED_ASSIGNMENT_CONFLICT"
+    GENERATION_INFEASIBLE = "GENERATION_INFEASIBLE"
+    OPTIMIZER_API_ERROR = "OPTIMIZER_API_ERROR"
+
+
+@dataclass(frozen=True)
+class GenerationIssue:
+    """生成処理で発生した事実を、表示文言から分離して保持する。"""
+
+    code: str
+    severity: str
+    dates: list[date] = field(default_factory=list)
+    staff_ids: list[int] = field(default_factory=list)
+    details: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -28,23 +58,6 @@ class GeneratedShift:
     staff_member_id: int
     date: date
     shift_type: str
-
-
-@dataclass(frozen=True)
-class ShiftGenerationViolation:
-    violation_type: str
-    message: str
-    date: date | None = None
-    staff_member_id: int | None = None
-    required_count: int | None = None
-    actual_count: int | None = None
-    amount: int | None = None
-    start_date: date | None = None
-    end_date: date | None = None
-    minimum_count: int | None = None
-    maximum_count: int | None = None
-    count_difference: int | None = None
-    allowed_difference: int | None = None
 
 
 @dataclass(frozen=True)
@@ -72,17 +85,11 @@ class ShiftOptimizationSummary:
 class ShiftGenerationResult:
     status: str
     shifts: list[GeneratedShift]
-    violations: list[ShiftGenerationViolation] = field(default_factory=list)
+    issues: list[GenerationIssue] = field(default_factory=list)
     solver_status: str | None = None
     staff_count: int = 0
     target_day_count: int = 0
     optimization_summary: ShiftOptimizationSummary | None = None
-    day_staffing_adjustment_message: str | None = None
-    optimization_incomplete_message: str | None = None
-
-    @property
-    def has_violations(self) -> bool:
-        return bool(self.violations)
 
 
 @dataclass
@@ -179,3 +186,11 @@ class GenerationContext:
 
 class ShiftGenerationError(Exception):
     """固定条件の矛盾やソルバー不成立を呼び出し元へ伝える例外。"""
+
+    def __init__(self, message: str | None = None, *, issue: GenerationIssue | None = None):
+        self.issue = issue or GenerationIssue(
+            code=GenerationIssueCode.GENERATION_INFEASIBLE,
+            severity=GenerationIssueSeverity.ERROR,
+            details={"reason": message} if message else {},
+        )
+        super().__init__(message or self.issue.code)
