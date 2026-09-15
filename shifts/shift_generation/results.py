@@ -1,126 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 from ..models import ShiftResult
 from .types import (
     GENERATABLE_SHIFT_TYPES,
+    GenerationIssue,
+    GenerationIssueCode,
+    GenerationIssueSeverity,
     GeneratedShift,
-    ShiftGenerationViolation,
-    ShiftGenerationViolationType,
     ShiftOptimizationSummary,
 )
-
-
-DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX = (
-    "設定した必要日勤数ではシフト最適化ができなかったため、"
-)
-OPTIMIZATION_INCOMPLETE_MESSAGES = {
-    "day_ability_balance": (
-        "処理時間の上限に達したため、"
-        "日勤能力配置・連勤配置の調整を完了できませんでした。"
-        "夜勤回数・日勤人数まで調整したシフトを使用しています。"
-    ),
-    "long_streak": (
-        "処理時間の上限に達したため、"
-        "連勤配置の調整を完了できませんでした。"
-        "夜勤回数・日勤人数・能力配置まで調整したシフトを使用しています。"
-    ),
-    "night_ability_balance": (
-    "処理時間の上限に達したため、"
-    "夜勤能力配置の調整を完了できませんでした。"
-    "夜勤回数を調整したシフトを使用しています。"
-),
-}
-
-
-def format_generation_violation_messages(
-    violations: list[ShiftGenerationViolation],
-    *,
-    limit: int = 5,
-) -> list[str]:
-    """messages.warning() 用に違反メッセージを短く整形する。"""
-
-    lines = [f"・{violation.message}" for violation in violations[:limit]]
-    remaining_count = len(violations) - limit
-    if remaining_count > 0:
-        lines.append(f"・そのほか {remaining_count} 件")
-    return lines
-
-
-def build_day_staffing_adjustment_message(
-    *,
-    optimization_summary: ShiftOptimizationSummary,
-    required_day_counts: Iterable[int],
-) -> str | None:
-    """必要日勤人数から調整した結果を、月全体で1件の通知にまとめる。"""
-
-    minimum_delta = optimization_summary.minimum_day_staffing_delta
-    maximum_delta = optimization_summary.maximum_day_staffing_delta
-    if minimum_delta == 0 and maximum_delta == 0:
-        return None
-
-    if len(set(required_day_counts)) == 1:
-        actual_count_range = _format_count_range(
-            optimization_summary.minimum_actual_day_count,
-            optimization_summary.maximum_actual_day_count,
-        )
-        return (
-            f"{DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX}"
-            f"日勤数：{actual_count_range}人で最適化を行なっています。"
-        )
-
-    delta_range = _format_day_staffing_delta_range(
-        minimum_delta,
-        maximum_delta,
-    )
-    range_suffix = "" if minimum_delta == maximum_delta else "の範囲"
-    return (
-        f"{DAY_STAFFING_ADJUSTMENT_MESSAGE_PREFIX}"
-        f"各日の設定人数に対して{delta_range}人{range_suffix}で"
-        "最適化を行なっています。"
-    )
-
-
-def build_optimization_incomplete_message(
-    *, optimization_summary: ShiftOptimizationSummary
-) -> str | None:
-    """後半フェーズのUNKNOWNで採用した途中解について通知する。"""
-
-    for phase_name, message in OPTIMIZATION_INCOMPLETE_MESSAGES.items():
-        if optimization_summary.phase_statuses.get(phase_name) == "UNKNOWN":
-            return message
-    return None
-
-
-def _format_count_range(minimum: int, maximum: int) -> str:
-    if minimum == maximum:
-        return str(minimum)
-    return f"{minimum}〜{maximum}"
-
-
-def _format_day_staffing_delta_range(minimum: int, maximum: int) -> str:
-    """差分の向きが自然に読めるよう、全角符号付きで整形する。"""
-
-    if minimum == maximum:
-        return _format_signed_count(minimum)
-    if minimum > 0:
-        return f"＋{minimum}〜{maximum}"
-    if maximum < 0:
-        return f"－{abs(maximum)}〜{abs(minimum)}"
-    if minimum == 0:
-        return f"0〜＋{maximum}"
-    if maximum == 0:
-        return f"－{abs(minimum)}〜0"
-    return f"－{abs(minimum)}〜＋{maximum}"
-
-
-def _format_signed_count(value: int) -> str:
-    if value > 0:
-        return f"＋{value}"
-    if value < 0:
-        return f"－{abs(value)}"
-    return "0"
 
 
 def _solver_value(solver, expression) -> int:
@@ -232,69 +120,93 @@ def _build_generated_shifts(
     return generated_shifts
 
 
-def _build_generation_violations(
-    *,
-    optimization_summary: ShiftOptimizationSummary,
-) -> list[ShiftGenerationViolation]:
-    violations = []
-    violations.extend(
-        _build_day_staffing_imbalance_violation(optimization_summary)
-    )
-    violations.extend(
-        _build_night_count_imbalance_violation(
-            optimization_summary.night_shift_counts
-        )
-    )
-    return violations
+def build_generation_issues(
+    *, optimization_summary: ShiftOptimizationSummary
+) -> list[GenerationIssue]:
+    """求解結果から画面通知用の構造化データを組み立てる。"""
 
-
-def _build_day_staffing_imbalance_violation(
-    optimization_summary: ShiftOptimizationSummary,
-) -> list[ShiftGenerationViolation]:
-    difference = optimization_summary.day_staffing_delta_range
-    if difference <= 1:
-        return []
-    return [
-        ShiftGenerationViolation(
-            violation_type=(
-                ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
-            ),
-            message=(
-                "固定勤務や勤務条件の影響により、日勤人数を均等に配置できませんでした。"
-                "可能な範囲で均等化しています。"
-            ),
-            minimum_count=(
-                optimization_summary.minimum_day_staffing_delta
-            ),
-            maximum_count=(
-                optimization_summary.maximum_day_staffing_delta
-            ),
-            count_difference=difference,
-            allowed_difference=1,
-            amount=difference - 1,
+    issues = [
+        GenerationIssue(
+            code=GenerationIssueCode.SHIFT_GENERATED,
+            severity=GenerationIssueSeverity.SUCCESS,
         )
     ]
-
-
-def _build_night_count_imbalance_violation(night_shift_counts):
-    if len(night_shift_counts) <= 1:
-        return []
-    minimum = min(night_shift_counts.values())
-    maximum = max(night_shift_counts.values())
-    difference = maximum - minimum
-    if difference <= 1:
-        return []
-    return [
-        ShiftGenerationViolation(
-            violation_type=ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE,
-            message=(
-                f"スタッフ間の夜勤回数差が{difference}回あります。"
-                "目標は1回以内ですが、固定勤務などの影響により調整できませんでした。"
-            ),
-            minimum_count=minimum,
-            maximum_count=maximum,
-            count_difference=difference,
-            allowed_difference=1,
-            amount=difference - 1,
-        )
+    above_dates = [
+        target_date
+        for target_date, delta in optimization_summary.day_staffing_deltas.items()
+        if delta > 0
     ]
+    if above_dates:
+        issues.append(
+            GenerationIssue(
+                code=GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+                severity=GenerationIssueSeverity.INFO,
+                dates=above_dates,
+                details={
+                    "actual_day_counts": optimization_summary.actual_day_counts,
+                    "required_day_counts": optimization_summary.required_day_counts,
+                },
+            )
+        )
+    below_dates = [
+        target_date
+        for target_date, delta in optimization_summary.day_staffing_deltas.items()
+        if delta < 0
+    ]
+    if below_dates:
+        issues.append(
+            GenerationIssue(
+                code=GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                severity=GenerationIssueSeverity.WARNING,
+                dates=below_dates,
+            )
+        )
+    imbalance_dates = [
+        target_date
+        for target_date, delta in optimization_summary.day_staffing_deltas.items()
+        if abs(delta) >= 2
+    ]
+    if imbalance_dates:
+        issues.append(
+            GenerationIssue(
+                code=GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+                severity=GenerationIssueSeverity.WARNING,
+                dates=imbalance_dates,
+                details={
+                    "required_day_counts": optimization_summary.required_day_counts,
+                    "actual_day_counts": optimization_summary.actual_day_counts,
+                    "minimum_delta": optimization_summary.minimum_day_staffing_delta,
+                    "maximum_delta": optimization_summary.maximum_day_staffing_delta,
+                },
+            )
+        )
+    night_counts = optimization_summary.night_shift_counts
+    if len(night_counts) > 1:
+        difference = max(night_counts.values()) - min(night_counts.values())
+        if difference > 1:
+            issues.append(
+                GenerationIssue(
+                    code=GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
+                    severity=GenerationIssueSeverity.WARNING,
+                    staff_ids=list(night_counts),
+                    details={
+                        "count_difference": difference,
+                        "minimum_count": min(night_counts.values()),
+                        "maximum_count": max(night_counts.values()),
+                    },
+                )
+            )
+    incomplete_items = [
+        name
+        for name, status in optimization_summary.phase_statuses.items()
+        if status in {"UNKNOWN", "NOT_RUN"}
+    ]
+    if incomplete_items:
+        issues.append(
+            GenerationIssue(
+                code=GenerationIssueCode.OPTIMIZATION_INCOMPLETE,
+                severity=GenerationIssueSeverity.WARNING,
+                details={"incomplete_items": incomplete_items},
+            )
+        )
+    return issues

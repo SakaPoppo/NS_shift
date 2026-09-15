@@ -43,8 +43,13 @@ from .services import (
 )
 from .shift_generator import (
     ShiftGenerationError,
-    format_generation_violation_messages,
     generate_and_save_shift,
+)
+from .shift_generation.messages import format_generation_issue
+from .shift_generation.types import (
+    GenerationIssue,
+    GenerationIssueCode,
+    GenerationIssueSeverity,
 )
 
 SHIFT_SELECT_OPTIONS = [
@@ -57,6 +62,25 @@ SHIFT_SELECT_OPTIONS = [
     (ShiftResult.ShiftTypeChoices.SPECIAL_LEAVE, "特"),
     (ShiftResult.ShiftTypeChoices.TRAINING, "研"),
 ]
+
+
+GENERATION_ISSUE_MESSAGE_LEVELS = {
+    GenerationIssueSeverity.SUCCESS: messages.SUCCESS,
+    GenerationIssueSeverity.INFO: messages.INFO,
+    GenerationIssueSeverity.WARNING: messages.WARNING,
+    GenerationIssueSeverity.ERROR: messages.ERROR,
+}
+
+
+def add_generation_issue_message(request, issue: GenerationIssue) -> None:
+    """構造化した生成通知をDjango messagesへ渡す。"""
+
+    title, body = format_generation_issue(issue)
+    messages.add_message(
+        request,
+        GENERATION_ISSUE_MESSAGE_LEVELS[issue.severity],
+        f"{title}：{body}",
+    )
 
 # ShiftResult の memo は現在の編集画面では利用していないため、夜勤入力により
 # 連動設定したセルだけを安全に識別する内部マーカーとして使用する。これにより、
@@ -1285,9 +1309,12 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
         if action == "generate":
             shift_plan.excluded_staffs.set(submitted_excluded_staff_members)
             if len(submitted_excluded_staff_members) == len(staff_members):
-                messages.error(
+                add_generation_issue_message(
                     request,
-                    "シフト生成対象のスタッフを1名以上選択してください。",
+                    GenerationIssue(
+                        code=GenerationIssueCode.NO_GENERATION_TARGET_STAFF,
+                        severity=GenerationIssueSeverity.ERROR,
+                    ),
                 )
                 context = self.build_edit_context(
                     shift_plan,
@@ -1307,7 +1334,14 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     generation_result = generate_and_save_shift(shift_plan)
                     sync_next_month_boundary_assignments(shift_plan)
             except (ShiftGenerationError, MonthBoundaryConflictError) as error:
-                messages.error(request, f"シフトを生成できませんでした。 {error}")
+                issue = getattr(error, "issue", None)
+                if issue is None:
+                    issue = GenerationIssue(
+                        code=GenerationIssueCode.GENERATION_INFEASIBLE,
+                        severity=GenerationIssueSeverity.ERROR,
+                        details={"reason": str(error)},
+                    )
+                add_generation_issue_message(request, issue)
                 context = self.build_edit_context(
                     shift_plan,
                     display_assignments=submitted_assignments,
@@ -1315,25 +1349,8 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 )
                 return render(request, self.template_name, context)
 
-            messages.success(request, "シフトを生成しました。")
-            if generation_result.day_staffing_adjustment_message:
-                messages.info(
-                    request,
-                    generation_result.day_staffing_adjustment_message,
-                )
-            if generation_result.optimization_incomplete_message:
-                messages.warning(
-                    request,
-                    generation_result.optimization_incomplete_message,
-                )
-            if generation_result.has_violations:
-                warning_lines = format_generation_violation_messages(
-                    generation_result.violations
-                )
-                messages.warning(
-                    request,
-                    " ".join(warning_lines),
-                )
+            for issue in generation_result.issues:
+                add_generation_issue_message(request, issue)
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
         with transaction.atomic():

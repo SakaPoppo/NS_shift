@@ -25,8 +25,14 @@ services:
       - key: ORTOOLS_NUM_SEARCH_WORKERS
         value: "1"
       - key: GUNICORN_TIMEOUT
-        value: "210"
+        value: "360"
       - key: DJANGO_ALLOWED_HOSTS
         value: "ns-shift.com,www.ns-shift.com"
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         value: "https://ns-shift.com,https://www.ns-shift.com"
+      - key: OPTIMIZER_API_URL
+        sync: false
+      - key: OPTIMIZER_API_KEY
+        sync: false
+      - key: OPTIMIZER_API_TIMEOUT
+        value: "330"

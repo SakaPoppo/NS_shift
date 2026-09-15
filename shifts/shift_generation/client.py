@@ -11,14 +11,13 @@ from django.conf import settings
 from ..models import ShiftResult
 from ..services import WORKLIKE_SHIFT_TYPES
 from .payload import build_optimizer_payload
-from .results import (
-    _build_generation_violations,
-    build_day_staffing_adjustment_message,
-    build_optimization_incomplete_message,
-)
+from .results import build_generation_issues
 from .types import (
     GeneratedShift,
     GenerationContext,
+    GenerationIssue,
+    GenerationIssueCode,
+    GenerationIssueSeverity,
     ShiftGenerationError,
     ShiftGenerationResult,
     ShiftOptimizationSummary,
@@ -27,6 +26,16 @@ from .types import (
 
 class OptimizerAPIError(ShiftGenerationError):
     """外部最適化APIの設定・通信・応答の失敗を画面向けに伝える。"""
+
+    def __init__(self, message: str):
+        super().__init__(
+            message,
+            issue=GenerationIssue(
+                code=GenerationIssueCode.OPTIMIZER_API_ERROR,
+                severity=GenerationIssueSeverity.ERROR,
+                details={"reason": message},
+            ),
+        )
 
 
 def generate_with_optimizer_api(
@@ -74,7 +83,7 @@ def generate_with_optimizer_api(
 
 
 def _get_generate_endpoint() -> str:
-    base_url = settings.OPTIMIZER_API_URL
+    base_url = settings.OPTIMIZER_API_URL.rstrip("/")
     allowed_schemes = (
         ("https://", "http://") if settings.DEBUG else ("https://",)
     )
@@ -122,24 +131,13 @@ def _build_generation_result(
     return ShiftGenerationResult(
         status=status,
         shifts=shifts,
-        violations=_build_generation_violations(
-            optimization_summary=optimization_summary
+        issues=build_generation_issues(
+            optimization_summary=optimization_summary,
         ),
         solver_status=solver_status,
         staff_count=len(context.staff_members),
         target_day_count=len(context.month_dates),
         optimization_summary=optimization_summary,
-        day_staffing_adjustment_message=(
-            build_day_staffing_adjustment_message(
-                optimization_summary=optimization_summary,
-                required_day_counts=optimization_summary.required_day_counts.values(),
-            )
-        ),
-        optimization_incomplete_message=(
-            build_optimization_incomplete_message(
-                optimization_summary=optimization_summary
-            )
-        ),
     )
 
 

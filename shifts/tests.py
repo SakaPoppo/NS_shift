@@ -7,6 +7,7 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.test import RequestFactory, SimpleTestCase, TestCase
@@ -27,8 +28,6 @@ from .forms import ShiftCarryoverEntryForm, ShiftPlanCreateForm, ShiftRuleForm
 from .shift_generator import (
     ShiftGenerationError,
     ShiftGenerationResult,
-    ShiftGenerationViolation,
-    ShiftGenerationViolationType,
     generate_and_save_shift,
     generate_shift,
 )
@@ -37,16 +36,17 @@ from .shift_generation.optimization import (
     _build_day_staffing_balance_data,
 )
 from .shift_generation.payload import build_optimizer_payload
+from .shift_generation.messages import format_generation_issue
 from .shift_generation.results import (
-    _build_day_staffing_imbalance_violation,
-    _build_night_count_imbalance_violation,
-    build_day_staffing_adjustment_message,
-    build_optimization_incomplete_message,
+    build_generation_issues,
 )
 from .shift_generation.types import (
     AbilityDistributionData,
     DayStaffingBalanceData,
     GenerationContext,
+    GenerationIssue,
+    GenerationIssueCode,
+    GenerationIssueSeverity,
     OptimizationPhaseResult,
     ShiftOptimizationSummary,
 )
@@ -114,6 +114,24 @@ class ShiftGenerationContextTests(TestCase):
             name="生成対象外",
         )
 
+    def optimizer_api_success_response(self, context):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "status": "success",
+            "solver_status": "OPTIMAL",
+            "shifts": [
+                {
+                    "staff_id": staff_member.id,
+                    "date": target_date.isoformat(),
+                    "shift_type": ShiftResult.ShiftTypeChoices.OFF,
+                }
+                for staff_member in context.staff_members
+                for target_date in context.month_dates
+            ],
+            "phase_results": [],
+        }
+        return response
+
     def test_context_contains_only_generation_target_staff(self):
         self.shift_plan.excluded_staffs.add(self.excluded_staff)
 
@@ -138,11 +156,48 @@ class ShiftGenerationContextTests(TestCase):
             self.excluded_staff,
         )
 
-        with self.assertRaisesMessage(
-            ShiftGenerationError,
-            "シフト生成対象のスタッフを1名以上選択してください。",
-        ):
+        with self.assertRaises(ShiftGenerationError) as raised:
             load_generation_context(self.shift_plan)
+
+        self.assertEqual(
+            raised.exception.issue.code,
+            GenerationIssueCode.NO_GENERATION_TARGET_STAFF,
+        )
+
+    def test_context_structures_fixed_assignment_conflict(self):
+        target_date = date(2026, 7, 1)
+        DayOffRequest.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=target_date,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=target_date,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        with self.assertRaises(ShiftGenerationError) as raised:
+            load_generation_context(self.shift_plan)
+
+        issue = raised.exception.issue
+        self.assertEqual(
+            issue.code,
+            GenerationIssueCode.FIXED_ASSIGNMENT_CONFLICT,
+        )
+        self.assertEqual(issue.severity, GenerationIssueSeverity.ERROR)
+        self.assertEqual(issue.dates, [target_date])
+        self.assertEqual(issue.staff_ids, [self.target_staff.id])
+        self.assertEqual(issue.details["fixed_shift_type"], ShiftResult.ShiftTypeChoices.OFF_REQUEST)
+        self.assertEqual(issue.details["saved_shift_type"], ShiftResult.ShiftTypeChoices.DAY)
+        self.assertEqual(issue.details["staff_name"], self.target_staff.name)
+        title, body = format_generation_issue(issue)
+        self.assertEqual(title, "勤務条件が競合しています")
+        self.assertIn(self.target_staff.name, body)
+        self.assertIn("希望休", body)
+        self.assertIn("日勤", body)
 
     def test_context_includes_target_carryovers_regardless_of_source(self):
         manual_carryover_staff = StaffMember.objects.create(
@@ -243,6 +298,18 @@ class ShiftGenerationContextTests(TestCase):
         context = load_generation_context(self.shift_plan)
 
         self.assertEqual(context.effective_off_days[self.target_staff.id], 1)
+
+    def test_context_allows_regular_day_offs_even_when_they_exceed_rule_off_days(self):
+        self.shift_plan.shift_rule.off_days_per_staff = 0
+        self.shift_plan.shift_rule.save(update_fields=["off_days_per_staff"])
+        StaffRegularDayOff.objects.create(
+            staff_member=self.target_staff,
+            day_of_week=date(2026, 7, 1).weekday(),
+        )
+
+        context = load_generation_context(self.shift_plan)
+
+        self.assertGreater(context.effective_off_days[self.target_staff.id], 0)
 
     def test_build_optimizer_payload_serializes_generation_context(self):
         target_date = date(2026, 9, 1)
@@ -367,25 +434,10 @@ class ShiftGenerationContextTests(TestCase):
     def test_optimizer_api_client_sends_payload_and_authentication_header(self):
         context = load_generation_context(self.shift_plan)
         api_key = secrets.token_urlsafe(32)
-        response_payload = {
-            "status": "success",
-            "solver_status": "OPTIMAL",
-            "shifts": [
-                {
-                    "staff_id": staff_member.id,
-                    "date": target_date.isoformat(),
-                    "shift_type": ShiftResult.ShiftTypeChoices.OFF,
-                }
-                for staff_member in context.staff_members
-                for target_date in context.month_dates
-            ],
-            "phase_results": [],
-        }
-        response = Mock(status_code=200)
-        response.json.return_value = response_payload
+        response = self.optimizer_api_success_response(context)
 
         with self.settings(
-            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+            OPTIMIZER_API_URL="https://optimizer.example.run.app/",
             OPTIMIZER_API_KEY=api_key,
             OPTIMIZER_API_TIMEOUT=330,
         ):
@@ -396,7 +448,11 @@ class ShiftGenerationContextTests(TestCase):
                 result = generate_with_optimizer_api(context)
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(len(result.shifts), len(response_payload["shifts"]))
+        self.assertEqual(len(result.shifts), len(response.json.return_value["shifts"]))
+        self.assertIn(
+            GenerationIssueCode.SHIFT_GENERATED,
+            [issue.code for issue in result.issues],
+        )
         mock_post.assert_called_once_with(
             "https://optimizer.example.run.app/generate",
             json=build_optimizer_payload(context),
@@ -424,6 +480,134 @@ class ShiftGenerationContextTests(TestCase):
                 with self.assertRaisesMessage(
                     OptimizerAPIError,
                     "シフト最適化サービスの認証に失敗しました。",
+                ):
+                    generate_with_optimizer_api(context)
+
+    def test_optimizer_api_client_does_not_request_when_api_key_is_missing(self):
+        context = load_generation_context(self.shift_plan)
+
+        with self.settings(
+            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+            OPTIMIZER_API_KEY="",
+        ):
+            with patch("shifts.shift_generation.client.requests.post") as mock_post:
+                with self.assertRaisesMessage(
+                    OptimizerAPIError,
+                    "シフト最適化サービスの認証設定が不足しています。",
+                ):
+                    generate_with_optimizer_api(context)
+
+        mock_post.assert_not_called()
+
+    def test_optimizer_api_client_maps_http_errors(self):
+        context = load_generation_context(self.shift_plan)
+        cases = (
+            (401, "シフト最適化サービスの認証に失敗しました。"),
+            (403, "シフト最適化サービスの認証に失敗しました。"),
+            (
+                422,
+                "シフト最適化サービスがリクエストを受け付けませんでした。条件を確認してください。",
+            ),
+            (
+                500,
+                "シフト最適化サービスでエラーが発生しました。時間をおいて再度お試しください。",
+            ),
+        )
+
+        for status_code, message in cases:
+            with self.subTest(status_code=status_code), self.settings(
+                OPTIMIZER_API_URL="https://optimizer.example.run.app",
+                OPTIMIZER_API_KEY=secrets.token_urlsafe(32),
+            ), patch(
+                "shifts.shift_generation.client.requests.post",
+                return_value=Mock(status_code=status_code),
+            ):
+                with self.assertRaisesMessage(OptimizerAPIError, message):
+                    generate_with_optimizer_api(context)
+
+    def test_optimizer_api_client_maps_transport_and_invalid_response_errors(self):
+        context = load_generation_context(self.shift_plan)
+        invalid_json_response = Mock(status_code=200)
+        invalid_json_response.json.side_effect = ValueError()
+        invalid_response = Mock(status_code=200)
+        invalid_response.json.return_value = {"status": "success"}
+        cases = (
+            (
+                requests.exceptions.Timeout(),
+                "シフト最適化サービスの応答がタイムアウトしました。時間をおいて再度お試しください。",
+            ),
+            (
+                requests.exceptions.ConnectionError(),
+                "シフト最適化サービスへ接続できませんでした。時間をおいて再度お試しください。",
+            ),
+            (
+                invalid_json_response,
+                "シフト最適化サービスから不正な応答が返されました。時間をおいて再度お試しください。",
+            ),
+            (
+                invalid_response,
+                "シフト最適化サービスから不正な応答が返されました。時間をおいて再度お試しください。",
+            ),
+        )
+
+        for response_or_error, message in cases:
+            with self.subTest(response_or_error=type(response_or_error).__name__), self.settings(
+                OPTIMIZER_API_URL="https://optimizer.example.run.app",
+                OPTIMIZER_API_KEY=secrets.token_urlsafe(32),
+            ), patch("shifts.shift_generation.client.requests.post") as mock_post:
+                if isinstance(response_or_error, requests.exceptions.RequestException):
+                    mock_post.side_effect = response_or_error
+                else:
+                    mock_post.return_value = response_or_error
+
+                with self.assertRaisesMessage(OptimizerAPIError, message):
+                    generate_with_optimizer_api(context)
+
+    def test_optimizer_api_client_rejects_invalid_shift_results(self):
+        context = load_generation_context(self.shift_plan)
+        base_payload = self.optimizer_api_success_response(context).json.return_value
+        cases = (
+            ("status", lambda payload: payload.update(status="failed")),
+            ("solver_status", lambda payload: payload.pop("solver_status")),
+            ("phase_results", lambda payload: payload.update(phase_results={})),
+            (
+                "unknown_staff",
+                lambda payload: payload["shifts"][0].update(staff_id=999999),
+            ),
+            (
+                "outside_month",
+                lambda payload: payload["shifts"][0].update(date="2026-08-01"),
+            ),
+            (
+                "duplicate",
+                lambda payload: payload["shifts"].append(payload["shifts"][0].copy()),
+            ),
+            (
+                "invalid_shift_type",
+                lambda payload: payload["shifts"][0].update(shift_type="不正"),
+            ),
+            ("missing", lambda payload: payload["shifts"].pop()),
+        )
+
+        for name, invalidate in cases:
+            payload = {
+                **base_payload,
+                "shifts": [shift.copy() for shift in base_payload["shifts"]],
+                "phase_results": list(base_payload["phase_results"]),
+            }
+            invalidate(payload)
+            response = Mock(status_code=200)
+            response.json.return_value = payload
+            with self.subTest(name=name), self.settings(
+                OPTIMIZER_API_URL="https://optimizer.example.run.app",
+                OPTIMIZER_API_KEY=secrets.token_urlsafe(32),
+            ), patch(
+                "shifts.shift_generation.client.requests.post",
+                return_value=response,
+            ):
+                with self.assertRaisesMessage(
+                    OptimizerAPIError,
+                    "シフト最適化サービスから不正な応答が返されました。時間をおいて再度お試しください。",
                 ):
                     generate_with_optimizer_api(context)
 
@@ -2188,11 +2372,30 @@ class ShiftGeneratorTests(TestCase):
         context = SimpleNamespace()
         expected_result = ShiftGenerationResult(status="success", shifts=[])
 
-        with patch(
+        with self.settings(OPTIMIZER_API_URL=""), patch(
             "shifts.shift_generator.load_generation_context",
             return_value=context,
         ) as mock_load_context, patch(
             "shifts.shift_generator.generate_with_local_optimizer",
+            return_value=expected_result,
+        ) as mock_generate:
+            result = generate_shift(self.shift_plan)
+
+        self.assertIs(result, expected_result)
+        mock_load_context.assert_called_once_with(self.shift_plan)
+        mock_generate.assert_called_once_with(context)
+
+    def test_generate_shift_delegates_loaded_context_to_optimizer_api(self):
+        context = SimpleNamespace()
+        expected_result = ShiftGenerationResult(status="success", shifts=[])
+
+        with self.settings(
+            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+        ), patch(
+            "shifts.shift_generator.load_generation_context",
+            return_value=context,
+        ) as mock_load_context, patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
             return_value=expected_result,
         ) as mock_generate:
             result = generate_shift(self.shift_plan)
@@ -2444,8 +2647,13 @@ class ShiftGeneratorTests(TestCase):
                 input_type=ShiftResult.InputTypeChoices.MANUAL,
             )
 
-        with self.assertRaisesMessage(ShiftGenerationError, "2日後の固定勤務"):
+        with self.assertRaises(ShiftGenerationError) as raised:
             generate_shift(self.shift_plan)
+
+        self.assertEqual(
+            raised.exception.issue.code,
+            GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT,
+        )
 
     def test_generate_shift_ignores_unlocked_generated_result(self):
         self.create_rule()
@@ -2517,8 +2725,13 @@ class ShiftGeneratorTests(TestCase):
             input_type=ShiftResult.InputTypeChoices.MANUAL,
         )
 
-        with self.assertRaisesMessage(ShiftGenerationError, "夜勤不可"):
+        with self.assertRaises(ShiftGenerationError) as raised:
             generate_shift(self.shift_plan)
+
+        self.assertEqual(
+            raised.exception.issue.code,
+            GenerationIssueCode.NIGHT_SHIFT_NOT_ALLOWED,
+        )
 
     def test_generate_shift_rejects_excess_fixed_off_days(self):
         self.create_rule(off_days_per_staff=1)
@@ -2534,8 +2747,15 @@ class ShiftGeneratorTests(TestCase):
             date=date(2026, 7, 2),
         )
 
-        with self.assertRaisesMessage(ShiftGenerationError, "月休日数 1 日を超えています"):
+        with self.assertRaises(ShiftGenerationError) as raised:
             generate_shift(self.shift_plan)
+
+        issue = raised.exception.issue
+        self.assertEqual(issue.code, GenerationIssueCode.TOO_MANY_DAY_OFF_REQUESTS)
+        title, body = format_generation_issue(issue)
+        self.assertEqual(title, "希望休が月休日数を超えています")
+        self.assertIn("有給", body)
+        self.assertIn("特別休暇", body)
 
     def test_generate_shift_counts_only_off_and_off_request_as_monthly_off_days(self):
         self.create_rule(off_days_per_staff=1, max_consecutive_work_days=31)
@@ -2579,8 +2799,10 @@ class ShiftGeneratorTests(TestCase):
         result = generate_shift(self.shift_plan)
         shift_map = self.build_shift_map(result.shifts)
 
-        self.assertEqual(result.violations, [])
-        self.assertIsNone(result.day_staffing_adjustment_message)
+        self.assertEqual(
+            [issue.code for issue in result.issues],
+            [GenerationIssueCode.SHIFT_GENERATED],
+        )
         self.assertEqual(
             result.optimization_summary.minimum_day_staffing_delta,
             0,
@@ -2597,7 +2819,7 @@ class ShiftGeneratorTests(TestCase):
             )
         )
 
-    def test_generate_shift_treats_day_shortage_as_adjustment_not_violation(self):
+    def test_generate_shift_reports_day_shortage_as_warning_issue(self):
         self.create_rule(
             required_day_staff=3,
             required_night_staff=0,
@@ -2615,14 +2837,10 @@ class ShiftGeneratorTests(TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(sum(shortages), 62)
         self.assertEqual(max(shortages), 2)
-        self.assertEqual(result.violations, [])
-        self.assertFalse(result.has_violations)
-        self.assertEqual(
-            result.day_staffing_adjustment_message,
-            "設定した必要日勤数ではシフト最適化ができなかったため、"
-            "日勤数：1人で最適化を行なっています。",
+        self.assertIn(
+            GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+            [issue.code for issue in result.issues],
         )
-        self.assertNotIn("日勤が2人不足しています", str(result.violations))
 
     def test_generate_shift_rejects_unreachable_hard_night_requirement(self):
         self.create_rule(
@@ -2637,7 +2855,7 @@ class ShiftGeneratorTests(TestCase):
         with self.assertRaises(ShiftGenerationError):
             generate_shift(self.shift_plan)
 
-    def test_generate_shift_does_not_warn_for_day_excess(self):
+    def test_generate_shift_reports_day_excess_as_info_issue(self):
         self.create_rule(
             required_day_staff=1,
             required_night_staff=0,
@@ -2657,13 +2875,10 @@ class ShiftGeneratorTests(TestCase):
             for delta in result.optimization_summary.day_staffing_deltas.values()
         )
 
-        self.assertEqual(result.violations, [])
-        self.assertFalse(result.has_violations)
         self.assertGreater(total_excess, 0)
-        self.assertEqual(
-            result.day_staffing_adjustment_message,
-            "設定した必要日勤数ではシフト最適化ができなかったため、"
-            "各日の設定人数に対して0〜＋1人の範囲で最適化を行なっています。",
+        self.assertIn(
+            GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+            [issue.code for issue in result.issues],
         )
 
     def test_generate_shift_applies_date_rule_before_weekday_rule_for_day_requirement(self):
@@ -3100,7 +3315,153 @@ class ShiftGeneratorTests(TestCase):
         result = generate_shift(self.shift_plan)
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.violations, [])
+        self.assertIn(
+            GenerationIssueCode.SHIFT_GENERATED,
+            [issue.code for issue in result.issues],
+        )
+
+
+class GenerationIssueTests(SimpleTestCase):
+    def build_summary(self, **overrides):
+        target_dates = [date(2026, 8, 1), date(2026, 8, 2)]
+        data = {
+            "total_actual_day_count": 2,
+            "total_required_day_count": 2,
+            "minimum_day_staffing_delta": 0,
+            "maximum_day_staffing_delta": 0,
+            "day_staffing_delta_range": 0,
+            "minimum_actual_day_count": 1,
+            "maximum_actual_day_count": 1,
+            "actual_day_counts": dict.fromkeys(target_dates, 1),
+            "required_day_counts": dict.fromkeys(target_dates, 1),
+            "day_staffing_deltas": dict.fromkeys(target_dates, 0),
+            "night_shift_count_min": 0,
+            "night_shift_count_max": 0,
+            "night_count_imbalance_violation": 0,
+            "long_streak_penalty": 0,
+            "phase_statuses": {},
+            "night_shift_counts": {},
+        }
+        data.update(overrides)
+        return ShiftOptimizationSummary(**data)
+
+    def test_day_staffing_above_is_the_only_info_issue(self):
+        target_date = date(2026, 8, 1)
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(
+                maximum_day_staffing_delta=1,
+                day_staffing_delta_range=1,
+                actual_day_counts={target_date: 2},
+                required_day_counts={target_date: 1},
+                day_staffing_deltas={target_date: 1},
+            )
+        )
+
+        self.assertEqual(
+            [(issue.code, issue.severity) for issue in issues],
+            [
+                (GenerationIssueCode.SHIFT_GENERATED, GenerationIssueSeverity.SUCCESS),
+                (
+                    GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+                    GenerationIssueSeverity.INFO,
+                ),
+            ],
+        )
+
+    def test_day_staffing_below_is_warning_not_info(self):
+        target_date = date(2026, 8, 1)
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(
+                minimum_day_staffing_delta=-1,
+                maximum_day_staffing_delta=-1,
+                actual_day_counts={target_date: 0},
+                required_day_counts={target_date: 1},
+                day_staffing_deltas={target_date: -1},
+            )
+        )
+
+        self.assertIn(
+            (
+                GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                GenerationIssueSeverity.WARNING,
+            ),
+            [(issue.code, issue.severity) for issue in issues],
+        )
+        self.assertNotIn(
+            GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+            [issue.code for issue in issues],
+        )
+
+    def test_day_staffing_imbalance_marks_only_dates_two_or_more_from_required_count(self):
+        target_dates = [date(2026, 8, day) for day in range(1, 6)]
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(
+                minimum_day_staffing_delta=-2,
+                maximum_day_staffing_delta=2,
+                day_staffing_delta_range=4,
+                actual_day_counts=dict(zip(target_dates, [4, 5, 3, 6, 2])),
+                required_day_counts=dict.fromkeys(target_dates, 4),
+                day_staffing_deltas=dict(zip(target_dates, [0, 1, -1, 2, -2])),
+            )
+        )
+
+        issues_by_code = {issue.code: issue for issue in issues}
+        imbalance = issues_by_code[GenerationIssueCode.DAY_STAFFING_IMBALANCE]
+        self.assertEqual(imbalance.severity, GenerationIssueSeverity.WARNING)
+        self.assertEqual(imbalance.dates, [target_dates[3], target_dates[4]])
+
+    def test_day_staffing_imbalance_is_not_created_for_one_person_deviation(self):
+        target_dates = [date(2026, 8, day) for day in range(1, 4)]
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(
+                minimum_day_staffing_delta=-1,
+                maximum_day_staffing_delta=1,
+                day_staffing_delta_range=2,
+                actual_day_counts=dict(zip(target_dates, [3, 4, 5])),
+                required_day_counts=dict.fromkeys(target_dates, 4),
+                day_staffing_deltas=dict(zip(target_dates, [-1, 0, 1])),
+            )
+        )
+
+        self.assertNotIn(
+            GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+            [issue.code for issue in issues],
+        )
+
+    def test_night_difference_and_incomplete_items_are_warnings(self):
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(
+                night_shift_counts={1: 1, 2: 3},
+                phase_statuses={
+                    "day_ability_balance": "UNKNOWN",
+                    "night_ability_balance": "NOT_RUN",
+                    "long_streak": "NOT_RUN",
+                },
+            )
+        )
+        issues_by_code = {issue.code: issue for issue in issues}
+
+        self.assertEqual(
+            issues_by_code[GenerationIssueCode.NIGHT_COUNT_IMBALANCE].details[
+                "count_difference"
+            ],
+            2,
+        )
+        incomplete_title, incomplete_body = format_generation_issue(
+            issues_by_code[GenerationIssueCode.OPTIMIZATION_INCOMPLETE]
+        )
+        self.assertEqual(incomplete_title, "一部の最適化を完了できませんでした")
+        self.assertIn("日勤能力配置・夜勤能力配置・連勤配置", incomplete_body)
+
+    def test_long_streak_penalty_alone_does_not_create_warning(self):
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(long_streak_penalty=8)
+        )
+
+        self.assertEqual(
+            [issue.code for issue in issues],
+            [GenerationIssueCode.SHIFT_GENERATED],
+        )
 
 
 class ShiftSoftOptimizationTests(TestCase):
@@ -3172,22 +3533,6 @@ class ShiftSoftOptimizationTests(TestCase):
         for target_date, actual_count in fixed_actual_counts.items():
             model.Add(data.actual_day_count_vars[target_date] == actual_count)
         return model, staff_members, month_dates, data
-
-    def build_day_staffing_summary(
-        self,
-        *,
-        minimum_delta,
-        maximum_delta,
-        minimum_actual,
-        maximum_actual,
-    ):
-        return SimpleNamespace(
-            minimum_day_staffing_delta=minimum_delta,
-            maximum_day_staffing_delta=maximum_delta,
-            day_staffing_delta_range=maximum_delta - minimum_delta,
-            minimum_actual_day_count=minimum_actual,
-            maximum_actual_day_count=maximum_actual,
-        )
 
     def test_day_staffing_balance_data_keeps_current_optimization_fields(self):
         self.assertEqual(
@@ -3346,264 +3691,15 @@ class ShiftSoftOptimizationTests(TestCase):
 
         self.assertEqual(max(delta, 0), 3)
 
-    def test_day_staffing_adjustment_message_is_none_when_every_day_matches(self):
-        summary = self.build_day_staffing_summary(
-            minimum_delta=0,
-            maximum_delta=0,
-            minimum_actual=6,
-            maximum_actual=6,
-        )
-
-        self.assertIsNone(
-            build_day_staffing_adjustment_message(
-                optimization_summary=summary,
-                required_day_counts=[6, 6, 6, 6],
-            )
-        )
-        self.assertEqual(
-            _build_day_staffing_imbalance_violation(summary),
-            [],
-        )
-
-    def test_same_requirement_adjustment_uses_actual_count_range(self):
-        cases = [
-            (
-                (-1, 0, 5, 6),
-                "設定した必要日勤数ではシフト最適化ができなかったため、"
-                "日勤数：5〜6人で最適化を行なっています。",
-            ),
-            (
-                (2, 3, 8, 9),
-                "設定した必要日勤数ではシフト最適化ができなかったため、"
-                "日勤数：8〜9人で最適化を行なっています。",
-            ),
-            (
-                (-1, -1, 5, 5),
-                "設定した必要日勤数ではシフト最適化ができなかったため、"
-                "日勤数：5人で最適化を行なっています。",
-            ),
-        ]
-
-        for values, expected_message in cases:
-            with self.subTest(values=values):
-                summary = self.build_day_staffing_summary(
-                    minimum_delta=values[0],
-                    maximum_delta=values[1],
-                    minimum_actual=values[2],
-                    maximum_actual=values[3],
-                )
-                self.assertEqual(
-                    build_day_staffing_adjustment_message(
-                        optimization_summary=summary,
-                        required_day_counts=[6, 6, 6, 6],
-                    ),
-                    expected_message,
-                )
-
-    def test_varying_requirements_adjustment_uses_signed_delta_range(self):
-        cases = [
-            (
-                (3, 3),
-                "各日の設定人数に対して＋3人で最適化を行なっています。",
-            ),
-            (
-                (2, 3),
-                "各日の設定人数に対して＋2〜3人の範囲で最適化を行なっています。",
-            ),
-            (
-                (-2, -1),
-                "各日の設定人数に対して－1〜2人の範囲で最適化を行なっています。",
-            ),
-            (
-                (-2, -2),
-                "各日の設定人数に対して－2人で最適化を行なっています。",
-            ),
-            (
-                (-1, 1),
-                "各日の設定人数に対して－1〜＋1人の範囲で最適化を行なっています。",
-            ),
-            (
-                (0, 2),
-                "各日の設定人数に対して0〜＋2人の範囲で最適化を行なっています。",
-            ),
-            (
-                (-2, 0),
-                "各日の設定人数に対して－2〜0人の範囲で最適化を行なっています。",
-            ),
-        ]
-        prefix = "設定した必要日勤数ではシフト最適化ができなかったため、"
-
-        for (minimum_delta, maximum_delta), expected_body in cases:
-            with self.subTest(
-                minimum_delta=minimum_delta,
-                maximum_delta=maximum_delta,
-            ):
-                summary = self.build_day_staffing_summary(
-                    minimum_delta=minimum_delta,
-                    maximum_delta=maximum_delta,
-                    minimum_actual=0,
-                    maximum_actual=0,
-                )
-                self.assertEqual(
-                    build_day_staffing_adjustment_message(
-                        optimization_summary=summary,
-                        required_day_counts=[6, 4, 8],
-                    ),
-                    prefix + expected_body,
-                )
-
-    def test_incomplete_optimization_message_matches_unknown_phase(self):
-        cases = [
-            (
-                {
-                    "night_count_balance": "OPTIMAL",
-                    "day_staffing_balance": "FEASIBLE",
-                    "day_ability_balance": "OPTIMAL",
-                    "long_streak": "OPTIMAL",
-                },
-                None,
-            ),
-            (
-                {"night_count_balance": "UNKNOWN"},
-                None,
-            ),
-            (
-                {"day_staffing_balance": "UNKNOWN"},
-                None,
-            ),
-            (
-                {
-                    "day_ability_balance": "UNKNOWN",
-                    "long_streak": "NOT_RUN",
-                },
-                "処理時間の上限に達したため、"
-                "日勤能力配置・連勤配置の調整を完了できませんでした。"
-                "夜勤回数・日勤人数まで調整したシフトを使用しています。",
-            ),
-            (
-                {
-                    "long_streak": "UNKNOWN",
-                },
-                "処理時間の上限に達したため、"
-                "連勤配置の調整を完了できませんでした。"
-                "夜勤回数・日勤人数・能力配置まで調整したシフトを使用しています。",
-            ),
-        ]
-
-        for phase_statuses, expected_message in cases:
-            with self.subTest(phase_statuses=phase_statuses):
-                actual_message = build_optimization_incomplete_message(
-                    optimization_summary=SimpleNamespace(
-                        phase_statuses=phase_statuses
-                    )
-                )
-
-                self.assertEqual(actual_message, expected_message)
-                if actual_message is not None:
-                    self.assertNotIn("_balance", actual_message)
-                    self.assertNotIn("long_streak", actual_message)
-
-    def test_day_staffing_delta_range_one_has_no_imbalance_violation(self):
-        summary = self.build_day_staffing_summary(
-            minimum_delta=-1,
-            maximum_delta=0,
-            minimum_actual=5,
-            maximum_actual=6,
-        )
-
-        self.assertEqual(
-            _build_day_staffing_imbalance_violation(summary),
-            [],
-        )
-
-    def test_day_staffing_delta_range_three_creates_one_monthly_violation(self):
-        summary = self.build_day_staffing_summary(
-            minimum_delta=-1,
-            maximum_delta=2,
-            minimum_actual=1,
-            maximum_actual=4,
-        )
-
-        violations = _build_day_staffing_imbalance_violation(summary)
-
-        self.assertEqual(len(violations), 1)
-        violation = violations[0]
-        self.assertEqual(
-            violation.violation_type,
-            ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE,
-        )
-        self.assertEqual(
-            violation.message,
-            "固定勤務や勤務条件の影響により、日勤人数を均等に配置できませんでした。"
-            "可能な範囲で均等化しています。",
-        )
-        self.assertEqual(violation.minimum_count, -1)
-        self.assertEqual(violation.maximum_count, 2)
-        self.assertEqual(violation.count_difference, 3)
-        self.assertEqual(violation.allowed_difference, 1)
-        self.assertEqual(violation.amount, 2)
-
-    def test_adjustment_message_is_not_a_violation_but_warnings_are(self):
-        adjustment_only = ShiftGenerationResult(
-            status="success",
-            shifts=[],
-            day_staffing_adjustment_message="日勤人数を調整しました。",
-        )
-        incomplete_optimization_only = ShiftGenerationResult(
-            status="success",
-            shifts=[],
-            optimization_incomplete_message="能力配置の均等化は未完了です。",
-        )
-        day_warning = ShiftGenerationResult(
-            status="success",
-            shifts=[],
-            violations=[
-                ShiftGenerationViolation(
-                    violation_type=(
-                        ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
-                    ),
-                    message="日勤人数を均等化できませんでした。",
-                )
-            ],
-        )
-        night_warning = ShiftGenerationResult(
-            status="success",
-            shifts=[],
-            violations=[
-                ShiftGenerationViolation(
-                    violation_type=(
-                        ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE
-                    ),
-                    message="夜勤回数を均等化できませんでした。",
-                )
-            ],
-        )
-
-        self.assertFalse(adjustment_only.has_violations)
-        self.assertFalse(incomplete_optimization_only.has_violations)
-        self.assertTrue(day_warning.has_violations)
-        self.assertTrue(night_warning.has_violations)
-
-    def test_post_generation_daily_and_consecutive_warning_builders_are_removed(self):
+    def test_legacy_notification_builders_are_removed(self):
         for builder_name in (
-            "_build_staffing_violations",
-            "_build_consecutive_work_violations",
-            "_build_single_consecutive_violation",
+            "format_generation_violation_messages",
+            "build_day_staffing_adjustment_message",
+            "build_optimization_incomplete_message",
+            "_build_generation_violations",
         ):
             with self.subTest(builder_name=builder_name):
                 self.assertFalse(hasattr(shift_results, builder_name))
-        for violation_type_name in (
-            "DAY_SHORTAGE",
-            "DAY_EXCESS",
-            "MAX_CONSECUTIVE_WORK",
-        ):
-            with self.subTest(violation_type_name=violation_type_name):
-                self.assertFalse(
-                    hasattr(
-                        ShiftGenerationViolationType,
-                        violation_type_name,
-                    )
-                )
 
     def test_night_counts_are_balanced_and_hard_requirement_remains_exact(self):
         self.create_rule(
@@ -3641,7 +3737,7 @@ class ShiftSoftOptimizationTests(TestCase):
             )
             self.assertLessEqual(pattern_count, 1)
 
-    def test_night_imbalance_violation_amount_allows_one_shift_difference(self):
+    def test_night_imbalance_issue_allows_one_shift_difference(self):
         for counts, expected_amount in (
             ({1: 4, 2: 4}, None),
             ({1: 4, 2: 3}, None),
@@ -3649,18 +3745,46 @@ class ShiftSoftOptimizationTests(TestCase):
             ({1: 5, 2: 2}, 2),
         ):
             with self.subTest(counts=counts):
-                violations = _build_night_count_imbalance_violation(counts)
-                if expected_amount is None:
-                    self.assertEqual(violations, [])
-                    continue
-                violation = violations[0]
-                self.assertEqual(violation.amount, expected_amount)
-                self.assertEqual(violation.minimum_count, min(counts.values()))
-                self.assertEqual(violation.maximum_count, max(counts.values()))
-                self.assertEqual(
-                    violation.count_difference, max(counts.values()) - min(counts.values())
+                dates = [date(2026, 2, 1), date(2026, 2, 2)]
+                issues = build_generation_issues(
+                    optimization_summary=ShiftOptimizationSummary(
+                        total_actual_day_count=0,
+                        total_required_day_count=0,
+                        minimum_day_staffing_delta=0,
+                        maximum_day_staffing_delta=0,
+                        day_staffing_delta_range=0,
+                        minimum_actual_day_count=0,
+                        maximum_actual_day_count=0,
+                        actual_day_counts=dict.fromkeys(dates, 0),
+                        required_day_counts=dict.fromkeys(dates, 0),
+                        day_staffing_deltas=dict.fromkeys(dates, 0),
+                        night_shift_count_min=min(counts.values()),
+                        night_shift_count_max=max(counts.values()),
+                        night_count_imbalance_violation=expected_amount or 0,
+                        long_streak_penalty=0,
+                        night_shift_counts=counts,
+                    )
                 )
-                self.assertEqual(violation.allowed_difference, 1)
+                violation = next(
+                    (
+                        issue
+                        for issue in issues
+                        if issue.code == GenerationIssueCode.NIGHT_COUNT_IMBALANCE
+                    ),
+                    None,
+                )
+                if expected_amount is None:
+                    self.assertIsNone(violation)
+                    continue
+                self.assertEqual(
+                    violation.details["count_difference"], expected_amount + 1
+                )
+                self.assertEqual(violation.details["minimum_count"], min(counts.values()))
+                self.assertEqual(violation.details["maximum_count"], max(counts.values()))
+                self.assertEqual(
+                    violation.details["count_difference"],
+                    max(counts.values()) - min(counts.values()),
+                )
 
     def test_fixed_nights_can_exceed_ideal_spread_without_making_model_infeasible(self):
         self.create_rule(
@@ -3691,11 +3815,11 @@ class ShiftSoftOptimizationTests(TestCase):
         counts = result.optimization_summary.night_shift_counts
         self.assertEqual(counts[night_staff.id], 3)
         self.assertTrue(all(counts[staff.id] == 0 for staff in other_staff))
-        violation = next(
-            item for item in result.violations
-            if item.violation_type == ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE
+        issue = next(
+            item for item in result.issues
+            if item.code == GenerationIssueCode.NIGHT_COUNT_IMBALANCE
         )
-        self.assertEqual(violation.amount, 2)
+        self.assertEqual(issue.details["count_difference"], 3)
 
     def test_surplus_day_slots_are_balanced_without_stopping_at_requirement(self):
         model, _, month_dates, data = self.build_day_staffing_model(
@@ -3916,13 +4040,20 @@ class ShiftSoftOptimizationTests(TestCase):
                 for target_date in summary.actual_day_counts
             )
         )
-        day_staffing_violations = [
-            violation
-            for violation in result.violations
-            if violation.violation_type
-            == ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
-        ]
-        self.assertEqual(len(day_staffing_violations), 1)
+        issue = next(
+            issue
+            for issue in result.issues
+            if issue.code == GenerationIssueCode.DAY_STAFFING_IMBALANCE
+        )
+        self.assertEqual(
+            issue.dates,
+            [
+                target_date
+                for target_date, delta in summary.day_staffing_deltas.items()
+                if abs(delta) >= 2
+            ],
+        )
+        self.assertIn(fixed_date, issue.dates)
 
     def test_required_day_count_above_staff_count_remains_feasible(self):
         model, _, month_dates, data = self.build_day_staffing_model(
@@ -4883,11 +5014,14 @@ class ShiftSoftOptimizationTests(TestCase):
             result.solver_status,
             summary.phase_statuses["day_ability_balance"],
         )
+        incomplete_issue = next(
+            issue
+            for issue in result.issues
+            if issue.code == GenerationIssueCode.OPTIMIZATION_INCOMPLETE
+        )
         self.assertEqual(
-            result.optimization_incomplete_message,
-            "処理時間の上限に達したため、"
-            "連勤配置の調整を完了できませんでした。"
-            "夜勤回数・日勤人数・能力配置まで調整したシフトを使用しています。",
+            incomplete_issue.details["incomplete_items"],
+            ["long_streak"],
         )
 
     def test_empty_phase_definitions_raise_explicit_error(self):
@@ -6535,19 +6669,20 @@ class ShiftGenerateViewTests(TestCase):
             follow=True,
         )
 
-        self.assertContains(response, "シフトを生成しました。")
+        self.assertContains(response, "シフトを生成しました")
         self.assertNotContains(response, "処理時間の上限に達したため、")
 
-    def test_generate_action_shows_day_staffing_adjustment_as_info(self):
+    def test_generate_action_shows_structured_success_message(self):
         self.create_rule()
-        adjustment_message = (
-            "設定した必要日勤数ではシフト最適化ができなかったため、"
-            "日勤数：5〜6人で最適化を行なっています。"
-        )
         fake_result = ShiftGenerationResult(
             status="success",
             shifts=[],
-            day_staffing_adjustment_message=adjustment_message,
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
+                )
+            ],
         )
 
         with patch(
@@ -6560,8 +6695,39 @@ class ShiftGenerateViewTests(TestCase):
                 follow=True,
             )
 
-        self.assertContains(response, "シフトを生成しました。")
-        self.assertContains(response, adjustment_message, count=1)
+        self.assertContains(response, "シフトを生成しました")
+        self.assertContains(response, "設定した条件をもとにシフトを生成しました。")
+
+    def test_generate_action_shows_day_staffing_adjustment_as_info(self):
+        self.create_rule()
+        fake_result = ShiftGenerationResult(
+            status="success",
+            shifts=[],
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+                    severity=GenerationIssueSeverity.INFO,
+                )
+            ],
+        )
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=fake_result,
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+                follow=True,
+        )
+
+        self.assertContains(response, "シフトを生成しました")
+        self.assertContains(response, "日勤人数を調整しました", count=1)
+        self.assertContains(response, "設定人数より多く日勤を配置しています。", count=1)
         self.assertContains(response, "alert-info", count=1)
         self.assertNotContains(
             response,
@@ -6570,20 +6736,30 @@ class ShiftGenerateViewTests(TestCase):
 
     def test_generate_action_shows_adjustment_and_incomplete_optimization(self):
         self.create_rule()
-        adjustment_message = (
-            "設定した必要日勤数ではシフト最適化ができなかったため、"
-            "日勤数：5〜6人で最適化を行なっています。"
-        )
-        incomplete_message = (
-            "処理時間の上限に達したため、"
-            "能力配置の均等化を完了できませんでした。"
-            "それ以前の条件を反映したシフトを使用しています。"
-        )
         fake_result = ShiftGenerationResult(
             status="success",
             shifts=[],
-            day_staffing_adjustment_message=adjustment_message,
-            optimization_incomplete_message=incomplete_message,
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+                    severity=GenerationIssueSeverity.INFO,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.OPTIMIZATION_INCOMPLETE,
+                    severity=GenerationIssueSeverity.WARNING,
+                    details={
+                        "incomplete_items": [
+                            "day_ability_balance",
+                            "night_ability_balance",
+                            "long_streak",
+                        ]
+                    },
+                ),
+            ],
         )
 
         with patch(
@@ -6594,11 +6770,10 @@ class ShiftGenerateViewTests(TestCase):
                 reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
                 {"action": "generate"},
                 follow=True,
-            )
+        )
 
-        self.assertContains(response, "シフトを生成しました。")
-        self.assertContains(response, adjustment_message, count=1)
-        self.assertContains(response, incomplete_message, count=1)
+        self.assertContains(response, "シフトを生成しました")
+        self.assertContains(response, "日勤能力配置・夜勤能力配置・連勤配置", count=1)
         self.assertContains(response, "alert-info", count=1)
         self.assertContains(response, "alert-warning", count=1)
         self.assertNotContains(response, "シフトを生成できませんでした。")
@@ -6608,20 +6783,14 @@ class ShiftGenerateViewTests(TestCase):
             required_day_staff=3,
             max_consecutive_work_days=31,
         )
-        adjustment_message = (
-            "設定した必要日勤数ではシフト最適化ができなかったため、"
-            "日勤数：1人で最適化を行なっています。"
-        )
-
         response = self.client.post(
             reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
             {"action": "generate"},
             follow=True,
         )
 
-        self.assertContains(response, "シフトを生成しました。")
-        self.assertContains(response, adjustment_message, count=1)
-        self.assertNotContains(response, "日勤が2人不足しています。")
+        self.assertContains(response, "シフトを生成しました")
+        self.assertContains(response, "日勤人数が設定を下回っています", count=1)
         self.assertNotContains(
             response,
             "シフトを生成しましたが、一部の条件を満たせませんでした。",
@@ -6629,24 +6798,17 @@ class ShiftGenerateViewTests(TestCase):
 
     def test_generate_action_shows_warning_message_when_violations_exist(self):
         self.create_rule()
-        adjustment_message = (
-            "設定した必要日勤数ではシフト最適化ができなかったため、"
-            "日勤数：5〜7人で最適化を行なっています。"
-        )
-        warning_message = (
-            "固定勤務や勤務条件の影響により、日勤人数を均等に配置できませんでした。"
-            "可能な範囲で均等化しています。"
-        )
         fake_result = ShiftGenerationResult(
             status="success",
             shifts=[],
-            day_staffing_adjustment_message=adjustment_message,
-            violations=[
-                ShiftGenerationViolation(
-                    violation_type=(
-                        ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
-                    ),
-                    message=warning_message,
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+                    severity=GenerationIssueSeverity.WARNING,
                 )
             ],
         )
@@ -6658,9 +6820,9 @@ class ShiftGenerateViewTests(TestCase):
                 follow=True,
             )
 
-        self.assertContains(response, "シフトを生成しました。")
-        self.assertContains(response, adjustment_message)
-        self.assertContains(response, warning_message)
+        self.assertContains(response, "シフトを生成しました")
+        self.assertContains(response, "日勤人数にばらつきがあります")
+        self.assertContains(response, "日勤人数を十分に均等化できませんでした。")
         self.assertNotContains(
             response,
             "シフトを生成しましたが、一部の条件を満たせませんでした。",
@@ -6669,35 +6831,27 @@ class ShiftGenerateViewTests(TestCase):
 
     def test_generate_action_shows_incomplete_and_staffing_warnings_together(self):
         self.create_rule()
-        incomplete_message = (
-            "処理時間の上限に達したため、"
-            "夜勤回数・能力配置の均等化を完了できませんでした。"
-            "それ以前の条件を反映したシフトを使用しています。"
-        )
-        day_warning_message = (
-            "固定勤務や勤務条件の影響により、日勤人数を均等に配置できませんでした。"
-            "可能な範囲で均等化しています。"
-        )
-        night_warning_message = (
-            "スタッフ間の夜勤回数差が2回あります。"
-            "目標は1回以内ですが、固定勤務などの影響により調整できませんでした。"
-        )
         fake_result = ShiftGenerationResult(
             status="success",
             shifts=[],
-            optimization_incomplete_message=incomplete_message,
-            violations=[
-                ShiftGenerationViolation(
-                    violation_type=(
-                        ShiftGenerationViolationType.DAY_STAFFING_IMBALANCE
-                    ),
-                    message=day_warning_message,
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
                 ),
-                ShiftGenerationViolation(
-                    violation_type=(
-                        ShiftGenerationViolationType.NIGHT_COUNT_IMBALANCE
-                    ),
-                    message=night_warning_message,
+                GenerationIssue(
+                    code=GenerationIssueCode.OPTIMIZATION_INCOMPLETE,
+                    severity=GenerationIssueSeverity.WARNING,
+                    details={"incomplete_items": ["night_ability_balance"]},
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+                    severity=GenerationIssueSeverity.WARNING,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
+                    severity=GenerationIssueSeverity.WARNING,
+                    details={"count_difference": 2},
                 ),
             ],
         )
@@ -6712,11 +6866,11 @@ class ShiftGenerateViewTests(TestCase):
                 follow=True,
             )
 
-        self.assertContains(response, "シフトを生成しました。")
-        self.assertContains(response, incomplete_message, count=1)
-        self.assertContains(response, day_warning_message, count=1)
-        self.assertContains(response, night_warning_message, count=1)
-        self.assertContains(response, "alert-warning", count=2)
+        self.assertContains(response, "シフトを生成しました")
+        self.assertContains(response, "夜勤能力配置", count=1)
+        self.assertContains(response, "日勤人数にばらつきがあります", count=1)
+        self.assertContains(response, "夜勤回数にばらつきがあります", count=1)
+        self.assertContains(response, "alert-warning", count=3)
         self.assertNotContains(response, "シフトを生成できませんでした。")
 
     def test_generate_action_shows_error_message_when_generation_fails(self):
@@ -6729,7 +6883,7 @@ class ShiftGenerateViewTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "シフトを生成できませんでした。")
+        self.assertContains(response, "シフトを生成できません")
         self.assertContains(response, "固定条件が競合しています。")
 
     def test_generate_action_keeps_posted_manual_shift_as_fixed_input(self):
@@ -6754,7 +6908,7 @@ class ShiftGenerateViewTests(TestCase):
             staff_member=self.staff_member,
             date=date(2026, 8, 1),
         )
-        self.assertContains(response, "シフトを生成しました。")
+        self.assertContains(response, "シフトを生成しました")
         self.assertEqual(saved_result.shift_type, ShiftResult.ShiftTypeChoices.DAY)
         self.assertEqual(saved_result.input_type, ShiftResult.InputTypeChoices.MANUAL)
 
