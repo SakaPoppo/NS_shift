@@ -37,6 +37,7 @@ from .shift_generation.optimization import (
 )
 from .shift_generation.payload import build_optimizer_payload
 from .shift_generation.messages import format_generation_issue
+from .shift_generation.markers import build_generation_issue_markers
 from .shift_generation.results import (
     build_generation_issues,
 )
@@ -198,6 +199,83 @@ class ShiftGenerationContextTests(TestCase):
         self.assertIn(self.target_staff.name, body)
         self.assertIn("希望休", body)
         self.assertIn("日勤", body)
+
+    def test_context_marks_only_previous_day_and_after_night_for_invalid_after_night(self):
+        previous_date = date(2026, 7, 14)
+        after_night_date = date(2026, 7, 15)
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=previous_date,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=after_night_date,
+            shift_type=ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        with self.assertRaises(ShiftGenerationError) as raised:
+            load_generation_context(self.shift_plan)
+
+        self.assertEqual(
+            raised.exception.issue.dates,
+            [previous_date, after_night_date],
+        )
+
+    def test_context_marks_only_night_and_next_day_for_invalid_after_night(self):
+        night_date = date(2026, 7, 15)
+        next_date = date(2026, 7, 16)
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=night_date,
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=next_date,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+
+        with self.assertRaises(ShiftGenerationError) as raised:
+            load_generation_context(self.shift_plan)
+
+        self.assertEqual(raised.exception.issue.dates, [night_date, next_date])
+
+    def test_context_marks_night_after_night_and_third_day_for_invalid_day_off(self):
+        night_date = date(2026, 7, 15)
+        after_night_date = date(2026, 7, 16)
+        third_date = date(2026, 7, 17)
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=night_date,
+            shift_type=ShiftResult.ShiftTypeChoices.NIGHT,
+            input_type=ShiftResult.InputTypeChoices.MANUAL,
+        )
+        ShiftResult.objects.create(
+            shift_plan=self.shift_plan,
+            staff_member=self.target_staff,
+            date=third_date,
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+            input_type=ShiftResult.InputTypeChoices.GENERATED,
+            is_locked=True,
+        )
+
+        with self.assertRaises(ShiftGenerationError) as raised:
+            load_generation_context(self.shift_plan)
+
+        self.assertEqual(
+            raised.exception.issue.dates,
+            [night_date, after_night_date, third_date],
+        )
 
     def test_context_includes_target_carryovers_regardless_of_source(self):
         manual_carryover_staff = StaffMember.objects.create(
@@ -2654,6 +2732,10 @@ class ShiftGeneratorTests(TestCase):
             raised.exception.issue.code,
             GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT,
         )
+        self.assertEqual(
+            raised.exception.issue.dates,
+            [date(2026, 7, 10), date(2026, 7, 11), date(2026, 7, 12)],
+        )
 
     def test_generate_shift_ignores_unlocked_generated_result(self):
         self.create_rule()
@@ -3447,6 +3529,10 @@ class GenerationIssueTests(SimpleTestCase):
             ],
             2,
         )
+        self.assertEqual(
+            issues_by_code[GenerationIssueCode.NIGHT_COUNT_IMBALANCE].staff_ids,
+            [1, 2],
+        )
         incomplete_title, incomplete_body = format_generation_issue(
             issues_by_code[GenerationIssueCode.OPTIMIZATION_INCOMPLETE]
         )
@@ -3462,6 +3548,174 @@ class GenerationIssueTests(SimpleTestCase):
             [issue.code for issue in issues],
             [GenerationIssueCode.SHIFT_GENERATED],
         )
+
+
+class GenerationIssueMarkerTests(SimpleTestCase):
+    def issue(self, code, severity, *, dates=None, staff_ids=None):
+        return GenerationIssue(
+            code=code,
+            severity=severity,
+            dates=dates or [],
+            staff_ids=staff_ids or [],
+        )
+
+    def test_day_staffing_issues_mark_only_their_dates_and_day_totals(self):
+        first_date = date(2026, 8, 3)
+        second_date = date(2026, 8, 9)
+
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                    GenerationIssueSeverity.WARNING,
+                    dates=[first_date],
+                ),
+                self.issue(
+                    GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+                    GenerationIssueSeverity.WARNING,
+                    dates=[second_date],
+                ),
+            ]
+        )
+
+        self.assertEqual(
+            markers.date_issue_levels,
+            {first_date: "warning", second_date: "warning"},
+        )
+        self.assertEqual(
+            markers.daily_summary_issue_levels,
+            {(first_date, "day"): "warning", (second_date, "day"): "warning"},
+        )
+        self.assertEqual(markers.cell_issue_levels, {})
+
+    def test_night_count_imbalance_marks_only_night_staff_summaries(self):
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
+                    GenerationIssueSeverity.WARNING,
+                    staff_ids=[11, 22],
+                )
+            ]
+        )
+
+        self.assertEqual(
+            markers.staff_summary_issue_levels,
+            {(11, "night"): "warning", (22, "night"): "warning"},
+        )
+        self.assertEqual(markers.date_issue_levels, {})
+        self.assertEqual(markers.cell_issue_levels, {})
+
+    def test_optimization_incomplete_and_info_success_do_not_mark_the_table(self):
+        target_date = date(2026, 8, 3)
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.OPTIMIZATION_INCOMPLETE,
+                    GenerationIssueSeverity.WARNING,
+                ),
+                self.issue(
+                    GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED,
+                    GenerationIssueSeverity.INFO,
+                    dates=[target_date],
+                ),
+                self.issue(
+                    GenerationIssueCode.SHIFT_GENERATED,
+                    GenerationIssueSeverity.SUCCESS,
+                ),
+            ]
+        )
+
+        self.assertEqual(markers.date_issue_levels, {})
+        self.assertEqual(markers.daily_summary_issue_levels, {})
+        self.assertEqual(markers.cell_issue_levels, {})
+        self.assertEqual(markers.staff_summary_issue_levels, {})
+
+    def test_error_issues_mark_the_required_date_summary_and_cells(self):
+        night_date = date(2026, 8, 4)
+        cell_date = date(2026, 8, 5)
+        off_request_date = date(2026, 8, 6)
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[night_date],
+                ),
+                self.issue(
+                    GenerationIssueCode.NIGHT_SHIFT_NOT_ALLOWED,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[cell_date],
+                    staff_ids=[11],
+                ),
+                self.issue(
+                    GenerationIssueCode.FIXED_ASSIGNMENT_CONFLICT,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[cell_date],
+                    staff_ids=[22],
+                ),
+                self.issue(
+                    GenerationIssueCode.TOO_MANY_DAY_OFF_REQUESTS,
+                    GenerationIssueSeverity.ERROR,
+                    staff_ids=[11],
+                ),
+            ],
+            off_request_cell_keys={(11, off_request_date), (11, cell_date), (22, off_request_date)},
+        )
+
+        self.assertEqual(markers.date_issue_levels, {night_date: "error"})
+        self.assertEqual(
+            markers.daily_summary_issue_levels,
+            {(night_date, "night"): "error"},
+        )
+        self.assertEqual(
+            markers.cell_issue_levels,
+            {
+                (11, cell_date): "error",
+                (22, cell_date): "error",
+                (11, off_request_date): "error",
+            },
+        )
+
+    def test_error_wins_when_issues_overlap(self):
+        target_date = date(2026, 8, 8)
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+                    GenerationIssueSeverity.WARNING,
+                    dates=[target_date],
+                ),
+                self.issue(
+                    GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[target_date],
+                ),
+            ]
+        )
+
+        self.assertEqual(markers.date_issue_levels[target_date], "error")
+
+    def test_generation_infeasible_uses_only_structured_locations(self):
+        target_date = date(2026, 8, 10)
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.GENERATION_INFEASIBLE,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[target_date],
+                    staff_ids=[11],
+                ),
+                self.issue(
+                    GenerationIssueCode.GENERATION_INFEASIBLE,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[date(2026, 8, 11)],
+                ),
+            ]
+        )
+
+        self.assertEqual(markers.cell_issue_levels, {(11, target_date): "error"})
+        self.assertEqual(markers.date_issue_levels, {date(2026, 8, 11): "error"})
 
 
 class ShiftSoftOptimizationTests(TestCase):
@@ -6698,6 +6952,82 @@ class ShiftGenerateViewTests(TestCase):
         self.assertContains(response, "シフトを生成しました")
         self.assertContains(response, "設定した条件をもとにシフトを生成しました。")
 
+    def test_generate_action_preserves_issue_markers_after_redirect(self):
+        self.create_rule()
+        target_date = date(2026, 8, 1)
+        fake_result = ShiftGenerationResult(
+            status="success",
+            shifts=[],
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                    severity=GenerationIssueSeverity.WARNING,
+                    dates=[target_date],
+                ),
+            ],
+        )
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=fake_result,
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+                follow=True,
+            )
+
+        header = next(
+            header
+            for header in response.context["day_headers"]
+            if header["date"] == target_date
+        )
+        daily_value = response.context["day_summary_rows"][0]["values"][0]
+        self.assertEqual(header["issue_level"], "warning")
+        self.assertEqual(daily_value["day_issue_level"], "warning")
+
+    def test_generate_action_clears_previous_issues_when_regeneration_fails(self):
+        self.create_rule()
+        session = self.client.session
+        session["generation_issues_by_shift_plan"] = {
+            str(self.shift_plan.pk): [
+                {
+                    "code": GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                    "severity": GenerationIssueSeverity.WARNING,
+                    "dates": ["2026-08-01"],
+                    "staff_ids": [],
+                    "details": {},
+                }
+            ]
+        }
+        session.save()
+        current_issue = GenerationIssue(
+            code=GenerationIssueCode.GENERATION_INFEASIBLE,
+            severity=GenerationIssueSeverity.ERROR,
+            details={"reason": "今回の生成に失敗しました。"},
+        )
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            side_effect=ShiftGenerationError(issue=current_issue),
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "今回の生成に失敗しました。")
+        self.assertEqual(response.context["date_issue_levels"], {})
+        self.assertNotIn(
+            str(self.shift_plan.pk),
+            self.client.session.get("generation_issues_by_shift_plan", {}),
+        )
+
     def test_generate_action_shows_day_staffing_adjustment_as_info(self):
         self.create_rule()
         fake_result = ShiftGenerationResult(
@@ -6790,7 +7120,11 @@ class ShiftGenerateViewTests(TestCase):
         )
 
         self.assertContains(response, "シフトを生成しました")
-        self.assertContains(response, "日勤人数が設定を下回っています", count=1)
+        self.assertContains(
+            response,
+            '<span class="text-sm font-medium">日勤人数が設定を下回っています：',
+            count=1,
+        )
         self.assertNotContains(
             response,
             "シフトを生成しましたが、一部の条件を満たせませんでした。",

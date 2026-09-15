@@ -292,7 +292,10 @@ def _validate_fixed_assignments(
                     and previous_shift_type != ShiftResult.ShiftTypeChoices.NIGHT
                 ):
                     raise ShiftGenerationError(
-                        issue=_night_sequence_issue(staff, target_date)
+                        issue=_night_sequence_issue(
+                            staff,
+                            [month_dates[index - 1], target_date],
+                        )
                     )
             if (
                 fixed_shift_type == ShiftResult.ShiftTypeChoices.AFTER_NIGHT
@@ -308,7 +311,10 @@ def _validate_fixed_assignments(
                     | {ShiftResult.ShiftTypeChoices.NIGHT}
                 ):
                     raise ShiftGenerationError(
-                        issue=_night_sequence_issue(staff, target_date)
+                        issue=_night_sequence_issue(
+                            staff,
+                            [target_date, month_dates[index + 1]],
+                        )
                     )
             if fixed_shift_type != ShiftResult.ShiftTypeChoices.NIGHT:
                 continue
@@ -322,7 +328,10 @@ def _validate_fixed_assignments(
                 and next_shift_type != ShiftResult.ShiftTypeChoices.AFTER_NIGHT
             ):
                 raise ShiftGenerationError(
-                    issue=_night_sequence_issue(staff, target_date)
+                    issue=_night_sequence_issue(
+                        staff,
+                        [target_date, month_dates[index + 1]],
+                    )
                 )
             if index + 2 >= len(month_dates):
                 continue
@@ -338,22 +347,28 @@ def _validate_fixed_assignments(
                     and third_key not in user_override_assignment_keys
                 ):
                     raise ShiftGenerationError(
-                        issue=_night_sequence_issue(staff, target_date)
+                        issue=_night_sequence_issue(
+                            staff,
+                            [target_date, month_dates[index + 1], month_dates[index + 2]],
+                        )
                     )
             elif third_shift_type is not None and third_shift_type not in (
                 OFF_LIKE_SHIFT_TYPES
                 | {ShiftResult.ShiftTypeChoices.NIGHT}
             ):
                 raise ShiftGenerationError(
-                    issue=_night_sequence_issue(staff, target_date)
+                    issue=_night_sequence_issue(
+                        staff,
+                        [target_date, month_dates[index + 1], month_dates[index + 2]],
+                    )
                 )
 
 
-def _night_sequence_issue(staff, target_date) -> GenerationIssue:
+def _night_sequence_issue(staff, related_dates) -> GenerationIssue:
     return GenerationIssue(
         code=GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT,
         severity=GenerationIssueSeverity.ERROR,
-        dates=[target_date],
+        dates=related_dates,
         staff_ids=[staff.id],
         details={"staff_name": staff.name},
     )
