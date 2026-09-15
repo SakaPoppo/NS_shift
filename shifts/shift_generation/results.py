@@ -182,17 +182,23 @@ def build_generation_issues(
         )
     night_counts = optimization_summary.night_shift_counts
     if len(night_counts) > 1:
-        difference = max(night_counts.values()) - min(night_counts.values())
+        minimum_count = min(night_counts.values())
+        maximum_count = max(night_counts.values())
+        difference = maximum_count - minimum_count
         if difference > 1:
             issues.append(
                 GenerationIssue(
                     code=GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
                     severity=GenerationIssueSeverity.WARNING,
-                    staff_ids=list(night_counts),
+                    staff_ids=[
+                        staff_id
+                        for staff_id, count in night_counts.items()
+                        if count in {minimum_count, maximum_count}
+                    ],
                     details={
                         "count_difference": difference,
-                        "minimum_count": min(night_counts.values()),
-                        "maximum_count": max(night_counts.values()),
+                        "minimum_count": minimum_count,
+                        "maximum_count": maximum_count,
                     },
                 )
             )

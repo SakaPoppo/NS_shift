@@ -1,4 +1,5 @@
 import csv
+from datetime import date
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -46,6 +47,7 @@ from .shift_generator import (
     generate_and_save_shift,
 )
 from .shift_generation.messages import format_generation_issue
+from .shift_generation.markers import build_generation_issue_markers
 from .shift_generation.types import (
     GenerationIssue,
     GenerationIssueCode,
@@ -70,6 +72,7 @@ GENERATION_ISSUE_MESSAGE_LEVELS = {
     GenerationIssueSeverity.WARNING: messages.WARNING,
     GenerationIssueSeverity.ERROR: messages.ERROR,
 }
+GENERATION_ISSUES_SESSION_KEY = "generation_issues_by_shift_plan"
 
 
 def add_generation_issue_message(request, issue: GenerationIssue) -> None:
@@ -81,6 +84,80 @@ def add_generation_issue_message(request, issue: GenerationIssue) -> None:
         GENERATION_ISSUE_MESSAGE_LEVELS[issue.severity],
         f"{title}：{body}",
     )
+
+
+def save_generation_issues(request, shift_plan, issues: list[GenerationIssue]) -> None:
+    """リダイレクト後の編集画面でも表示できるようIssueをsessionに保存する。"""
+
+    issue_sets = dict(request.session.get(GENERATION_ISSUES_SESSION_KEY, {}))
+    issue_sets[str(shift_plan.pk)] = [
+        {
+            "code": issue.code,
+            "severity": issue.severity,
+            "dates": [target_date.isoformat() for target_date in issue.dates],
+            "staff_ids": issue.staff_ids,
+            "details": _serialize_generation_issue_details(issue.details),
+        }
+        for issue in issues
+    ]
+    request.session[GENERATION_ISSUES_SESSION_KEY] = issue_sets
+
+
+def get_saved_generation_issues(request, shift_plan) -> list[GenerationIssue]:
+    """sessionから安全に復元できるIssueだけを返す。"""
+
+    raw_issues = request.session.get(GENERATION_ISSUES_SESSION_KEY, {}).get(
+        str(shift_plan.pk), []
+    )
+    issues = []
+    for raw_issue in raw_issues:
+        if not isinstance(raw_issue, dict):
+            continue
+        raw_dates = raw_issue.get("dates", [])
+        staff_ids = raw_issue.get("staff_ids", [])
+        try:
+            dates = [date.fromisoformat(value) for value in raw_dates]
+        except (TypeError, ValueError):
+            continue
+        if (
+            not isinstance(raw_issue.get("code"), str)
+            or raw_issue.get("severity") not in GENERATION_ISSUE_MESSAGE_LEVELS
+            or not isinstance(raw_dates, list)
+            or not isinstance(staff_ids, list)
+            or not all(isinstance(staff_id, int) for staff_id in staff_ids)
+            or not isinstance(raw_issue.get("details", {}), dict)
+        ):
+            continue
+        issues.append(
+            GenerationIssue(
+                code=raw_issue["code"],
+                severity=raw_issue["severity"],
+                dates=dates,
+                staff_ids=staff_ids,
+                details=raw_issue.get("details", {}),
+            )
+        )
+    return issues
+
+
+def clear_saved_generation_issues(request, shift_plan) -> None:
+    issue_sets = dict(request.session.get(GENERATION_ISSUES_SESSION_KEY, {}))
+    if str(shift_plan.pk) in issue_sets:
+        issue_sets.pop(str(shift_plan.pk))
+        request.session[GENERATION_ISSUES_SESSION_KEY] = issue_sets
+
+
+def _serialize_generation_issue_details(value):
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {
+            str(key): _serialize_generation_issue_details(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_serialize_generation_issue_details(item) for item in value]
+    return value
 
 # ShiftResult の memo は現在の編集画面では利用していないため、夜勤入力により
 # 連動設定したセルだけを安全に識別する内部マーカーとして使用する。これにより、
@@ -138,7 +215,14 @@ WEEKDAY_CONDITION_LABELS = [*WEEKDAY_LABELS, "祝日"]
 ShiftCarryoverFormSet = formset_factory(ShiftCarryoverEntryForm, extra=0)
 
 
-def build_day_headers(month_dates, holiday_dates=frozenset()): # 画面用の日付加工
+def build_day_headers(
+    month_dates,
+    holiday_dates=frozenset(),
+    date_issue_levels=None,
+    date_issue_titles=None,
+): # 画面用の日付加工
+    date_issue_levels = date_issue_levels or {}
+    date_issue_titles = date_issue_titles or {}
     return [
         {
             "date": current_date,
@@ -146,6 +230,8 @@ def build_day_headers(month_dates, holiday_dates=frozenset()): # 画面用の日
             "is_saturday": current_date.weekday() == 5,
             "is_sunday": current_date.weekday() == 6,
             "is_holiday": current_date in holiday_dates,
+            "issue_level": date_issue_levels.get(current_date),
+            "issue_title": date_issue_titles.get(current_date, ""),
         }
         for current_date in month_dates
     ]
@@ -158,6 +244,12 @@ def build_shift_plan_grid(
     base_fixed_assignments,
     display_assignments=None,
     excluded_staff_ids=frozenset(),
+    daily_summary_issue_levels=None,
+    daily_summary_issue_titles=None,
+    cell_issue_levels=None,
+    cell_issue_titles=None,
+    staff_summary_issue_levels=None,
+    staff_summary_issue_titles=None,
 ):
     """編集画面用のグリッドデータを組み立てる。
 
@@ -170,6 +262,12 @@ def build_shift_plan_grid(
     希望休・固定休と保存済み勤務が競合している場合は、基礎データ側を表示しつつ
     競合中の勤務区分を補足情報として残す。
     """
+    daily_summary_issue_levels = daily_summary_issue_levels or {}
+    daily_summary_issue_titles = daily_summary_issue_titles or {}
+    cell_issue_levels = cell_issue_levels or {}
+    cell_issue_titles = cell_issue_titles or {}
+    staff_summary_issue_levels = staff_summary_issue_levels or {}
+    staff_summary_issue_titles = staff_summary_issue_titles or {}
     staff_rows = []
     day_totals = {
         current_date: {
@@ -248,6 +346,12 @@ def build_shift_plan_grid(
             display_classes = config["classes"]
             if has_conflict:
                 display_classes = f"{display_classes} border-orange-400 ring-1 ring-orange-300"
+            issue_level = cell_issue_levels.get(cell_key)
+            if issue_level:
+                display_classes = (
+                    f"{display_classes} ring-2 ring-inset "
+                    f"{'ring-red-400' if issue_level == 'error' else 'ring-amber-400'}"
+                )
             cells.append(
                 {
                     "date": current_date,
@@ -260,6 +364,8 @@ def build_shift_plan_grid(
                     "has_conflict": has_conflict,
                     "conflicting_shift_type": conflicting_shift_type,
                     "conflict_message": conflict_message,
+                    "issue_level": issue_level,
+                    "issue_title": cell_issue_titles.get(cell_key, ""),
                     "is_night_shift_auto": bool(
                         result and result.memo == NIGHT_SHIFT_AUTO_MEMO
                     ),
@@ -271,6 +377,12 @@ def build_shift_plan_grid(
                 "staff_member": staff_member,
                 "cells": cells,
                 "stats": row_stats,
+                "night_issue_level": staff_summary_issue_levels.get(
+                    (staff_member.id, "night")
+                ),
+                "night_issue_title": staff_summary_issue_titles.get(
+                    (staff_member.id, "night"), ""
+                ),
                 "is_excluded": is_excluded,
             }
         )
@@ -285,6 +397,18 @@ def build_shift_plan_grid(
                     "night_count": day_totals[current_date]["night"],
                     "day_ability_total": day_totals[current_date]["day_ability_total"],
                     "night_ability_total": day_totals[current_date]["night_ability_total"],
+                    "day_issue_level": daily_summary_issue_levels.get(
+                        (current_date, "day")
+                    ),
+                    "day_issue_title": daily_summary_issue_titles.get(
+                        (current_date, "day"), ""
+                    ),
+                    "night_issue_level": daily_summary_issue_levels.get(
+                        (current_date, "night")
+                    ),
+                    "night_issue_title": daily_summary_issue_titles.get(
+                        (current_date, "night"), ""
+                    ),
                 }
                 for current_date in month_dates
             ],
@@ -505,6 +629,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         *,
         display_assignments=None,
         excluded_staff_ids=None,
+        generation_issues=None,
     ):
         staff_members = list(self.get_staff_members())
         if excluded_staff_ids is None:
@@ -516,12 +641,28 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         }
         month_dates = get_month_dates(shift_plan.year, shift_plan.month)
         holiday_dates = get_japanese_holiday_dates(shift_plan.year, shift_plan.month)
-        day_headers = build_day_headers(month_dates, holiday_dates)
         shift_results_by_key = self.get_shift_results_by_key(shift_plan, staff_members)
         base_fixed_assignments = self.get_base_fixed_assignments(
             shift_plan,
             staff_members,
             month_dates,
+        )
+        if generation_issues is None:
+            generation_issues = get_saved_generation_issues(self.request, shift_plan)
+        off_request_cell_keys = {
+            cell_key
+            for cell_key, assignment in base_fixed_assignments.items()
+            if assignment["shift_type"] == ShiftResult.ShiftTypeChoices.OFF_REQUEST
+        }
+        issue_markers = build_generation_issue_markers(
+            generation_issues,
+            off_request_cell_keys=off_request_cell_keys,
+        )
+        day_headers = build_day_headers(
+            month_dates,
+            holiday_dates,
+            issue_markers.date_issue_levels,
+            issue_markers.date_issue_titles,
         )
         staff_rows, day_summary_rows = build_shift_plan_grid(
             staff_members,
@@ -530,6 +671,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             base_fixed_assignments,
             display_assignments=display_assignments,
             excluded_staff_ids=excluded_staff_ids,
+            daily_summary_issue_levels=issue_markers.daily_summary_issue_levels,
+            daily_summary_issue_titles=issue_markers.daily_summary_issue_titles,
+            cell_issue_levels=issue_markers.cell_issue_levels,
+            cell_issue_titles=issue_markers.cell_issue_titles,
+            staff_summary_issue_levels=issue_markers.staff_summary_issue_levels,
+            staff_summary_issue_titles=issue_markers.staff_summary_issue_titles,
         )
         shift_rule = self.get_shift_rule(shift_plan)
         carryover_staff_ids = set(
@@ -546,6 +693,10 @@ class UserShiftPlanMixin(LoginRequiredMixin):
             "day_headers": day_headers,
             "shift_select_options": SHIFT_SELECT_OPTIONS,
             "day_summary_rows": day_summary_rows,
+            "date_issue_levels": issue_markers.date_issue_levels,
+            "daily_summary_issue_levels": issue_markers.daily_summary_issue_levels,
+            "cell_issue_levels": issue_markers.cell_issue_levels,
+            "staff_summary_issue_levels": issue_markers.staff_summary_issue_levels,
             "staff_count": len(staff_members),
             "generation_target_count": len(staff_members) - len(excluded_staff_ids),
             "excluded_staff_count": len(excluded_staff_ids),
@@ -1243,6 +1394,8 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
             return redirect("shifts:conditions", pk=shift_plan.pk)
 
         action = request.POST.get("action", "save")
+        if action == "generate":
+            clear_saved_generation_issues(request, shift_plan)
         staff_members = list(self.get_staff_members())
         month_dates = get_month_dates(shift_plan.year, shift_plan.month)
         existing_results_by_key = self.get_shift_results_by_key(shift_plan, staff_members)
@@ -1263,6 +1416,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 self.reset_generated_results(shift_plan)
                 sync_month_boundary_assignments(shift_plan)
                 sync_next_month_boundary_assignments(shift_plan)
+            clear_saved_generation_issues(request, shift_plan)
             messages.success(request, "自動生成した勤務を削除し、手入力した勤務だけを残しました。")
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
@@ -1271,6 +1425,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 self.reset_all_shift_results(shift_plan)
                 sync_month_boundary_assignments(shift_plan)
                 sync_next_month_boundary_assignments(shift_plan)
+            clear_saved_generation_issues(request, shift_plan)
             messages.success(request, "勤務データを削除し、希望休・固定休だけの状態へ戻しました。")
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
@@ -1303,6 +1458,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 shift_plan,
                 display_assignments=submitted_assignments,
                 excluded_staff_ids=submitted_excluded_staff_ids,
+                generation_issues=[],
             )
             return render(request, self.template_name, context)
 
@@ -1320,6 +1476,12 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     shift_plan,
                     display_assignments=submitted_assignments,
                     excluded_staff_ids=submitted_excluded_staff_ids,
+                    generation_issues=[
+                        GenerationIssue(
+                            code=GenerationIssueCode.NO_GENERATION_TARGET_STAFF,
+                            severity=GenerationIssueSeverity.ERROR,
+                        )
+                    ],
                 )
                 return render(request, self.template_name, context)
             try:
@@ -1346,11 +1508,13 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     shift_plan,
                     display_assignments=submitted_assignments,
                     excluded_staff_ids=submitted_excluded_staff_ids,
+                    generation_issues=[issue],
                 )
                 return render(request, self.template_name, context)
 
             for issue in generation_result.issues:
                 add_generation_issue_message(request, issue)
+            save_generation_issues(request, shift_plan, generation_result.issues)
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 
         with transaction.atomic():
@@ -1362,7 +1526,8 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                 auto_assignment_keys,
             )
             sync_next_month_boundary_assignments(shift_plan)
-            messages.success(request, "シフトを保存しました。")
+        clear_saved_generation_issues(request, shift_plan)
+        messages.success(request, "シフトを保存しました。")
 
         return HttpResponseRedirect(self.get_edit_url(shift_plan))
 

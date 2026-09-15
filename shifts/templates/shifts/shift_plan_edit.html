@@ -193,7 +193,7 @@
                     Lv
                   </th>
                   {% for header in day_headers %}
-                    <th class="min-w-[48px] border-b border-r border-slate-200 bg-slate-50 px-0.5 py-1 text-center">
+                    <th class="min-w-[48px] border-b border-r px-0.5 py-1 text-center {% if header.issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif header.issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50{% endif %}"{% if header.issue_title %} title="{{ header.issue_title }}"{% endif %}>
                       <div class="text-[11px] font-bold {% if header.is_sunday or header.is_holiday %}text-red-500{% elif header.is_saturday %}text-sky-600{% else %}text-slate-500{% endif %}">
                         {{ header.weekday_label }}
                       </div>
@@ -253,7 +253,7 @@
                             data-date="{{ cell.date|date:'Y-m-d' }}"
                             data-shift-value="{{ cell.value }}"
                             class="relative flex h-8 items-center justify-center rounded-lg border text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] {{ cell.display_classes }}"
-                            title="{% if cell.has_conflict %}{{ cell.conflict_message }}{% else %}{{ cell.display_label }}{% endif %}"
+                            title="{% if cell.issue_title %}{{ cell.issue_title }}{% elif cell.has_conflict %}{{ cell.conflict_message }}{% else %}{{ cell.display_label }}{% endif %}"
                           >
                             <span>{{ cell.display_label }}</span>
                             {% if cell.has_conflict %}
@@ -275,6 +275,7 @@
                             data-shift-value="{{ cell.value }}"
                             data-night-shift-auto="{{ cell.is_night_shift_auto|yesno:'true,false' }}"
                             class="h-8 w-full appearance-none rounded-lg border px-0 text-center text-sm font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] outline-none transition focus:scale-[1.02] focus:border-sky-700 focus:ring-2 focus:ring-sky-700/20 {{ cell.display_classes }}"
+                            {% if cell.issue_title %}title="{{ cell.issue_title }}"{% endif %}
                           >
                             {% if cell.value == "after_night" %}
                               <option value="after_night" selected>明</option>
@@ -288,7 +289,7 @@
                     {% endfor %}
 
                     <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.day }}</td>
-                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.night }}</td>
+                    <td class="border-b border-r px-0.5 py-2 text-center text-[11px] font-bold {% if row.night_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif row.night_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if row.night_issue_title %} title="{{ row.night_issue_title }}"{% endif %}>{{ row.stats.night }}</td>
                     <td class="border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.off }}</td>
                   </tr>
                 {% empty %}
@@ -307,7 +308,7 @@
                       日別集計 日勤人数
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.day_count }}</td>
+                      <td class="border-r border-b px-0.5 py-2 text-center text-[11px] font-bold {% if value.day_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif value.day_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if value.day_issue_title %} title="{{ value.day_issue_title }}"{% endif %}>{{ value.day_count }}</td>
                     {% endfor %}
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
@@ -318,7 +319,7 @@
                       日別集計 夜勤人数
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.night_count }}</td>
+                      <td class="border-r border-b px-0.5 py-2 text-center text-[11px] font-bold {% if value.night_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif value.night_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if value.night_issue_title %} title="{{ value.night_issue_title }}"{% endif %}>{{ value.night_count }}</td>
                     {% endfor %}
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
