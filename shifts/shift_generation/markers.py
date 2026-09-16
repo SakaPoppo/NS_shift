@@ -78,6 +78,15 @@ def build_generation_issue_markers(
                     issue.severity,
                     title,
                 )
+        elif issue.code == GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED:
+            for staff_id in issue.staff_ids:
+                _set_marker(
+                    markers.staff_summary_issue_levels,
+                    markers.staff_summary_issue_titles,
+                    (staff_id, "off"),
+                    issue.severity,
+                    title,
+                )
         elif issue.code == GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF:
             for target_date in issue.dates:
                 _set_marker(

@@ -29,6 +29,7 @@ class GenerationIssueCode:
     DAY_STAFFING_BELOW_REQUIRED = "DAY_STAFFING_BELOW_REQUIRED"
     DAY_STAFFING_IMBALANCE = "DAY_STAFFING_IMBALANCE"
     NIGHT_COUNT_IMBALANCE = "NIGHT_COUNT_IMBALANCE"
+    MONTHLY_OFF_COUNT_EXCEEDED = "MONTHLY_OFF_COUNT_EXCEEDED"
     OPTIMIZATION_INCOMPLETE = "OPTIMIZATION_INCOMPLETE"
     SHIFT_RULE_NOT_CONFIGURED = "SHIFT_RULE_NOT_CONFIGURED"
     NO_ACTIVE_STAFF = "NO_ACTIVE_STAFF"
@@ -187,10 +188,18 @@ class GenerationContext:
 class ShiftGenerationError(Exception):
     """固定条件の矛盾やソルバー不成立を呼び出し元へ伝える例外。"""
 
-    def __init__(self, message: str | None = None, *, issue: GenerationIssue | None = None):
-        self.issue = issue or GenerationIssue(
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        issue: GenerationIssue | None = None,
+        issues: list[GenerationIssue] | None = None,
+    ):
+        default_issue = GenerationIssue(
             code=GenerationIssueCode.GENERATION_INFEASIBLE,
             severity=GenerationIssueSeverity.ERROR,
             details={"reason": message} if message else {},
         )
+        self.issues = issues or [issue or default_issue]
+        self.issue = self.issues[0]
         super().__init__(message or self.issue.code)

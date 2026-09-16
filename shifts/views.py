@@ -383,6 +383,12 @@ def build_shift_plan_grid(
                 "night_issue_title": staff_summary_issue_titles.get(
                     (staff_member.id, "night"), ""
                 ),
+                "off_issue_level": staff_summary_issue_levels.get(
+                    (staff_member.id, "off")
+                ),
+                "off_issue_title": staff_summary_issue_titles.get(
+                    (staff_member.id, "off"), ""
+                ),
                 "is_excluded": is_excluded,
             }
         )
@@ -1503,12 +1509,14 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                         severity=GenerationIssueSeverity.ERROR,
                         details={"reason": str(error)},
                     )
-                add_generation_issue_message(request, issue)
+                issues = getattr(error, "issues", [issue])
+                for current_issue in issues:
+                    add_generation_issue_message(request, current_issue)
                 context = self.build_edit_context(
                     shift_plan,
                     display_assignments=submitted_assignments,
                     excluded_staff_ids=submitted_excluded_staff_ids,
-                    generation_issues=[issue],
+                    generation_issues=issues,
                 )
                 return render(request, self.template_name, context)
 

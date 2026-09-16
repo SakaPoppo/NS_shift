@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import secrets
+from collections import Counter
 from dataclasses import fields
 from datetime import date
 from types import SimpleNamespace
@@ -48,6 +49,7 @@ from .shift_generation.types import (
     GenerationIssue,
     GenerationIssueCode,
     GenerationIssueSeverity,
+    GeneratedShift,
     OptimizationPhaseResult,
     ShiftOptimizationSummary,
 )
@@ -130,6 +132,15 @@ class ShiftGenerationContextTests(TestCase):
                 for target_date in context.month_dates
             ],
             "phase_results": [],
+            "issues": [
+                {
+                    "code": GenerationIssueCode.SHIFT_GENERATED,
+                    "severity": GenerationIssueSeverity.SUCCESS,
+                    "dates": [],
+                    "staff_ids": [],
+                    "details": {},
+                }
+            ],
         }
         return response
 
@@ -488,6 +499,10 @@ class ShiftGenerationContextTests(TestCase):
             payload["effective_off_days"],
             [{"staff_id": staff_member.id, "off_days": 9}],
         )
+        self.assertEqual(
+            payload["configured_off_days"],
+            [{"staff_id": staff_member.id, "off_days": 0}],
+        )
         self.assertEqual(payload["user_override_assignment_keys"], [])
         json.dumps(payload)
 
@@ -539,6 +554,121 @@ class ShiftGenerationContextTests(TestCase):
                 "X-API-Key": api_key,
             },
             timeout=330,
+        )
+
+    def test_optimizer_api_client_uses_api_issues_for_messages_and_markers(self):
+        context = load_generation_context(self.shift_plan)
+        response = self.optimizer_api_success_response(context)
+        target_date = context.month_dates[0]
+        response.json.return_value["issues"] = [
+            {
+                "code": GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                "severity": GenerationIssueSeverity.WARNING,
+                "dates": [target_date.isoformat()],
+                "staff_ids": [],
+                "details": {
+                    "required_count": 5,
+                    "actual_count": 3,
+                },
+            },
+            {
+                "code": GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
+                "severity": GenerationIssueSeverity.WARNING,
+                "dates": [],
+                "staff_ids": [self.target_staff.id],
+                "details": {
+                    "minimum_count": 1,
+                    "maximum_count": 3,
+                    "count_difference": 2,
+                },
+            },
+            {
+                "code": GenerationIssueCode.OPTIMIZATION_INCOMPLETE,
+                "severity": GenerationIssueSeverity.WARNING,
+                "dates": [],
+                "staff_ids": [],
+                "details": {"incomplete_items": ["long_streak"]},
+            },
+        ]
+
+        with self.settings(
+            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+            OPTIMIZER_API_KEY=secrets.token_urlsafe(32),
+        ), patch(
+            "shifts.shift_generation.client.requests.post",
+            return_value=response,
+        ):
+            result = generate_with_optimizer_api(context)
+
+        self.assertEqual(
+            [issue.code for issue in result.issues],
+            [
+                GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
+                GenerationIssueCode.OPTIMIZATION_INCOMPLETE,
+            ],
+        )
+        self.assertEqual(result.issues[0].dates, [target_date])
+        self.assertEqual(result.issues[1].staff_ids, [self.target_staff.id])
+        self.assertEqual(result.issues[2].details["incomplete_items"], ["long_streak"])
+        self.assertEqual(
+            format_generation_issue(result.issues[0])[0],
+            "日勤人数が設定を下回っています",
+        )
+        markers = build_generation_issue_markers(result.issues)
+        self.assertEqual(markers.date_issue_levels[target_date], "warning")
+        self.assertEqual(
+            markers.staff_summary_issue_levels[
+                (self.target_staff.id, "night")
+            ],
+            "warning",
+        )
+
+    def test_optimizer_api_client_raises_generation_issues_for_infeasible_result(self):
+        context = load_generation_context(self.shift_plan)
+        target_date = context.month_dates[0]
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "status": "infeasible",
+            "solver_status": "INFEASIBLE",
+            "shifts": [],
+            "phase_results": [],
+            "issues": [
+                {
+                    "code": GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF,
+                    "severity": GenerationIssueSeverity.ERROR,
+                    "dates": [target_date.isoformat()],
+                    "staff_ids": [],
+                    "details": {
+                        "available_count": 1,
+                        "required_count": 2,
+                    },
+                },
+            ],
+        }
+
+        with self.settings(
+            OPTIMIZER_API_URL="https://optimizer.example.run.app",
+            OPTIMIZER_API_KEY=secrets.token_urlsafe(32),
+        ), patch(
+            "shifts.shift_generation.client.requests.post",
+            return_value=response,
+        ), self.assertRaises(ShiftGenerationError) as raised:
+            generate_with_optimizer_api(context)
+
+        self.assertEqual(
+            [issue.code for issue in raised.exception.issues],
+            [
+                GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF,
+            ],
+        )
+        title, body = format_generation_issue(raised.exception.issues[0])
+        self.assertEqual(title, "夜勤人数を確保できません")
+        self.assertIn("夜勤2名", body)
+        markers = build_generation_issue_markers(raised.exception.issues)
+        self.assertEqual(markers.date_issue_levels[target_date], "error")
+        self.assertEqual(
+            markers.daily_summary_issue_levels[(target_date, "night")], "error"
         )
 
     def test_optimizer_api_client_hides_authentication_response_details(self):
@@ -648,6 +778,27 @@ class ShiftGenerationContextTests(TestCase):
             ("status", lambda payload: payload.update(status="failed")),
             ("solver_status", lambda payload: payload.pop("solver_status")),
             ("phase_results", lambda payload: payload.update(phase_results={})),
+            ("issues", lambda payload: payload.update(issues={})),
+            (
+                "unknown_issue_code",
+                lambda payload: payload["issues"][0].update(code="UNKNOWN_ISSUE"),
+            ),
+            (
+                "invalid_issue_severity",
+                lambda payload: payload["issues"][0].update(severity="fatal"),
+            ),
+            (
+                "invalid_issue_date",
+                lambda payload: payload["issues"][0].update(dates=["invalid-date"]),
+            ),
+            (
+                "invalid_issue_staff_ids",
+                lambda payload: payload["issues"][0].update(staff_ids=["1"]),
+            ),
+            (
+                "invalid_issue_details",
+                lambda payload: payload["issues"][0].update(details=[]),
+            ),
             (
                 "unknown_staff",
                 lambda payload: payload["shifts"][0].update(staff_id=999999),
@@ -672,6 +823,7 @@ class ShiftGenerationContextTests(TestCase):
                 **base_payload,
                 "shifts": [shift.copy() for shift in base_payload["shifts"]],
                 "phase_results": list(base_payload["phase_results"]),
+                "issues": [issue.copy() for issue in base_payload["issues"]],
             }
             invalidate(payload)
             response = Mock(status_code=200)
@@ -3474,16 +3626,16 @@ class GenerationIssueTests(SimpleTestCase):
             [issue.code for issue in issues],
         )
 
-    def test_day_staffing_imbalance_marks_only_dates_two_or_more_from_required_count(self):
+    def test_day_staffing_imbalance_marks_dates_two_or_more_from_modal_count(self):
         target_dates = [date(2026, 8, day) for day in range(1, 6)]
         issues = build_generation_issues(
             optimization_summary=self.build_summary(
                 minimum_day_staffing_delta=-2,
                 maximum_day_staffing_delta=2,
                 day_staffing_delta_range=4,
-                actual_day_counts=dict(zip(target_dates, [4, 5, 3, 6, 2])),
+                actual_day_counts=dict(zip(target_dates, [4, 4, 4, 6, 2])),
                 required_day_counts=dict.fromkeys(target_dates, 4),
-                day_staffing_deltas=dict(zip(target_dates, [0, 1, -1, 2, -2])),
+                day_staffing_deltas=dict(zip(target_dates, [0, 0, 0, 2, -2])),
             )
         )
 
@@ -3491,6 +3643,8 @@ class GenerationIssueTests(SimpleTestCase):
         imbalance = issues_by_code[GenerationIssueCode.DAY_STAFFING_IMBALANCE]
         self.assertEqual(imbalance.severity, GenerationIssueSeverity.WARNING)
         self.assertEqual(imbalance.dates, [target_dates[3], target_dates[4]])
+        self.assertEqual(imbalance.details["modal_day_staffing_count"], 4)
+        self.assertEqual(imbalance.details["count_difference_threshold"], 2)
 
     def test_day_staffing_imbalance_is_not_created_for_one_person_deviation(self):
         target_dates = [date(2026, 8, day) for day in range(1, 4)]
@@ -3499,9 +3653,9 @@ class GenerationIssueTests(SimpleTestCase):
                 minimum_day_staffing_delta=-1,
                 maximum_day_staffing_delta=1,
                 day_staffing_delta_range=2,
-                actual_day_counts=dict(zip(target_dates, [3, 4, 5])),
+                actual_day_counts=dict(zip(target_dates, [4, 4, 5])),
                 required_day_counts=dict.fromkeys(target_dates, 4),
-                day_staffing_deltas=dict(zip(target_dates, [-1, 0, 1])),
+                day_staffing_deltas=dict(zip(target_dates, [0, 0, 1])),
             )
         )
 
@@ -3548,6 +3702,40 @@ class GenerationIssueTests(SimpleTestCase):
             [issue.code for issue in issues],
             [GenerationIssueCode.SHIFT_GENERATED],
         )
+
+    def test_monthly_off_count_exceeded_is_a_warning_with_staff_summary_data(self):
+        staff_id = 42
+        shifts = [
+            GeneratedShift(
+                staff_member_id=staff_id,
+                date=date(2026, 8, day),
+                shift_type=ShiftResult.ShiftTypeChoices.OFF,
+            )
+            for day in range(1, 13)
+        ]
+
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(),
+            shifts=shifts,
+            configured_off_days=10,
+        )
+
+        issue = next(
+            issue
+            for issue in issues
+            if issue.code == GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED
+        )
+        self.assertEqual(issue.severity, GenerationIssueSeverity.WARNING)
+        self.assertEqual(issue.staff_ids, [staff_id])
+        self.assertEqual(
+            issue.details,
+            {
+                "configured_off_count": 10,
+                "actual_off_count": 12,
+                "excess_count": 2,
+            },
+        )
+        self.assertIn("設定の10日より2日多い12日", format_generation_issue(issue)[1])
 
 
 class GenerationIssueMarkerTests(SimpleTestCase):
@@ -3604,6 +3792,25 @@ class GenerationIssueMarkerTests(SimpleTestCase):
             {(11, "night"): "warning", (22, "night"): "warning"},
         )
         self.assertEqual(markers.date_issue_levels, {})
+        self.assertEqual(markers.cell_issue_levels, {})
+
+    def test_monthly_off_count_exceeded_marks_only_the_off_staff_summary(self):
+        markers = build_generation_issue_markers(
+            [
+                self.issue(
+                    GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED,
+                    GenerationIssueSeverity.WARNING,
+                    staff_ids=[11],
+                )
+            ]
+        )
+
+        self.assertEqual(
+            markers.staff_summary_issue_levels,
+            {(11, "off"): "warning"},
+        )
+        self.assertEqual(markers.date_issue_levels, {})
+        self.assertEqual(markers.daily_summary_issue_levels, {})
         self.assertEqual(markers.cell_issue_levels, {})
 
     def test_optimization_incomplete_and_info_success_do_not_mark_the_table(self):
@@ -4299,12 +4506,18 @@ class ShiftSoftOptimizationTests(TestCase):
             for issue in result.issues
             if issue.code == GenerationIssueCode.DAY_STAFFING_IMBALANCE
         )
+        frequencies = Counter(summary.actual_day_counts.values())
+        modal_day_staffing_count = min(
+            count
+            for count, frequency in frequencies.items()
+            if frequency == max(frequencies.values())
+        )
         self.assertEqual(
             issue.dates,
             [
                 target_date
-                for target_date, delta in summary.day_staffing_deltas.items()
-                if abs(delta) >= 2
+                for target_date, actual_count in summary.actual_day_counts.items()
+                if abs(actual_count - modal_day_staffing_count) >= 2
             ],
         )
         self.assertIn(fixed_date, issue.dates)
@@ -7027,6 +7240,77 @@ class ShiftGenerateViewTests(TestCase):
             str(self.shift_plan.pk),
             self.client.session.get("generation_issues_by_shift_plan", {}),
         )
+
+    def test_monthly_off_warning_from_session_marks_only_the_off_summary(self):
+        self.create_rule()
+        session = self.client.session
+        session["generation_issues_by_shift_plan"] = {
+            str(self.shift_plan.pk): [
+                {
+                    "code": GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED,
+                    "severity": GenerationIssueSeverity.WARNING,
+                    "dates": [],
+                    "staff_ids": [self.staff_member.id],
+                    "details": {
+                        "configured_off_count": 10,
+                        "actual_off_count": 12,
+                        "excess_count": 2,
+                    },
+                }
+            ]
+        }
+        session.save()
+
+        response = self.client.get(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertContains(response, "月休日数が設定を超えています")
+        row = next(
+            row
+            for row in response.context["staff_rows"]
+            if row["staff_member"].id == self.staff_member.id
+        )
+        self.assertEqual(row["off_issue_level"], "warning")
+        self.assertEqual(response.context["cell_issue_levels"], {})
+
+    def test_generate_action_shows_each_infeasible_api_issue_and_marks_date(self):
+        self.create_rule()
+        target_date = date(2026, 8, 1)
+        issues = [
+            GenerationIssue(
+                code=GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF,
+                severity=GenerationIssueSeverity.ERROR,
+                dates=[target_date],
+                details={
+                    "available_count": 1,
+                    "required_count": 2,
+                },
+            ),
+            GenerationIssue(
+                code=GenerationIssueCode.GENERATION_INFEASIBLE,
+                severity=GenerationIssueSeverity.ERROR,
+            ),
+        ]
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            side_effect=ShiftGenerationError(issues=issues),
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "夜勤人数を確保できません")
+        self.assertContains(response, "シフトを生成できません")
+        header = next(
+            header
+            for header in response.context["day_headers"]
+            if header["date"] == target_date
+        )
+        self.assertEqual(header["issue_level"], "error")
 
     def test_generate_action_shows_day_staffing_adjustment_as_info(self):
         self.create_rule()

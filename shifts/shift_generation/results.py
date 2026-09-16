@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from ..models import ShiftResult
+from ..services import MONTHLY_OFF_SHIFT_TYPES
 from .types import (
     GENERATABLE_SHIFT_TYPES,
     GenerationIssue,
@@ -120,8 +123,27 @@ def _build_generated_shifts(
     return generated_shifts
 
 
+def _most_frequent_day_staffing_count(
+    actual_day_counts: dict,
+) -> int | None:
+    """Return the modal daily staffing count, breaking ties toward the lower count."""
+
+    frequencies = Counter(actual_day_counts.values())
+    if not frequencies:
+        return None
+    highest_frequency = max(frequencies.values())
+    return min(
+        count
+        for count, frequency in frequencies.items()
+        if frequency == highest_frequency
+    )
+
+
 def build_generation_issues(
-    *, optimization_summary: ShiftOptimizationSummary
+    *,
+    optimization_summary: ShiftOptimizationSummary,
+    shifts: list[GeneratedShift] | None = None,
+    configured_off_days: int | None = None,
 ) -> list[GenerationIssue]:
     """求解結果から画面通知用の構造化データを組み立てる。"""
 
@@ -159,13 +181,26 @@ def build_generation_issues(
                 code=GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
                 severity=GenerationIssueSeverity.WARNING,
                 dates=below_dates,
+                details={
+                    "actual_day_counts": optimization_summary.actual_day_counts,
+                    "required_day_counts": optimization_summary.required_day_counts,
+                },
             )
         )
-    imbalance_dates = [
-        target_date
-        for target_date, delta in optimization_summary.day_staffing_deltas.items()
-        if abs(delta) >= 2
-    ]
+    modal_day_staffing_count = _most_frequent_day_staffing_count(
+        optimization_summary.actual_day_counts
+    )
+    imbalance_dates = (
+        [
+            target_date
+            for target_date, actual_count in (
+                optimization_summary.actual_day_counts.items()
+            )
+            if abs(actual_count - modal_day_staffing_count) >= 2
+        ]
+        if modal_day_staffing_count is not None
+        else []
+    )
     if imbalance_dates:
         issues.append(
             GenerationIssue(
@@ -175,8 +210,8 @@ def build_generation_issues(
                 details={
                     "required_day_counts": optimization_summary.required_day_counts,
                     "actual_day_counts": optimization_summary.actual_day_counts,
-                    "minimum_delta": optimization_summary.minimum_day_staffing_delta,
-                    "maximum_delta": optimization_summary.maximum_day_staffing_delta,
+                    "modal_day_staffing_count": modal_day_staffing_count,
+                    "count_difference_threshold": 2,
                 },
             )
         )
@@ -215,4 +250,24 @@ def build_generation_issues(
                 details={"incomplete_items": incomplete_items},
             )
         )
+    if shifts is not None and configured_off_days is not None:
+        actual_monthly_off_counts = Counter(
+            shift.staff_member_id
+            for shift in shifts
+            if shift.shift_type in MONTHLY_OFF_SHIFT_TYPES
+        )
+        for staff_id, actual_off_count in actual_monthly_off_counts.items():
+            if actual_off_count > configured_off_days:
+                issues.append(
+                    GenerationIssue(
+                        code=GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED,
+                        severity=GenerationIssueSeverity.WARNING,
+                        staff_ids=[staff_id],
+                        details={
+                            "configured_off_count": configured_off_days,
+                            "actual_off_count": actual_off_count,
+                            "excess_count": actual_off_count - configured_off_days,
+                        },
+                    )
+                )
     return issues
