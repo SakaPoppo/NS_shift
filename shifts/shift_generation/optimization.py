@@ -21,6 +21,7 @@ from staff.models import StaffMember
 from ..models import ShiftResult
 from ..services import (
     FIXED_NON_GENERATED_MONTHLY_OFF_SHIFT_TYPES,
+    MONTHLY_OFF_SHIFT_TYPES,
     OFF_LIKE_SHIFT_TYPES,
     WORKLIKE_SHIFT_TYPES,
 )
@@ -675,13 +676,19 @@ def _add_monthly_off_day_constraints(
             if fixed_assignments.get((staff_member.id, target_date))
             in FIXED_NON_GENERATED_MONTHLY_OFF_SHIFT_TYPES
         )
+        mandatory_off_count = sum(
+            1
+            for target_date in month_dates
+            if fixed_assignments.get((staff_member.id, target_date))
+            in MONTHLY_OFF_SHIFT_TYPES
+        )
         model.Add(
             sum(
                 shift_vars[(staff_member.id, target_date)][ShiftResult.ShiftTypeChoices.OFF]
                 for target_date in month_dates
             )
             + fixed_non_generated_off_count
-            == effective_off_days[staff_member.id]
+            == max(effective_off_days[staff_member.id], mandatory_off_count)
         )
 
 

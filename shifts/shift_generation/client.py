@@ -11,7 +11,6 @@ from django.conf import settings
 from ..models import ShiftResult
 from ..services import WORKLIKE_SHIFT_TYPES
 from .payload import build_optimizer_payload
-from .results import build_generation_issues
 from .types import (
     GeneratedShift,
     GenerationContext,
@@ -21,6 +20,21 @@ from .types import (
     ShiftGenerationError,
     ShiftGenerationResult,
     ShiftOptimizationSummary,
+)
+
+
+_ALLOWED_ISSUE_CODES = frozenset(
+    value
+    for name, value in vars(GenerationIssueCode).items()
+    if not name.startswith("_") and isinstance(value, str)
+)
+_ALLOWED_ISSUE_SEVERITIES = frozenset(
+    {
+        GenerationIssueSeverity.SUCCESS,
+        GenerationIssueSeverity.INFO,
+        GenerationIssueSeverity.WARNING,
+        GenerationIssueSeverity.ERROR,
+    }
 )
 
 
@@ -115,8 +129,22 @@ def _build_generation_result(
 
     status = response_data.get("status")
     solver_status = response_data.get("solver_status")
-    if status != "success" or not isinstance(solver_status, str):
+    if status not in {"success", "infeasible"} or not isinstance(
+        solver_status, str
+    ):
         raise _invalid_response_error()
+
+    issues = _parse_issues(context, response_data.get("issues"))
+    if status == "infeasible":
+        if (
+            solver_status != "INFEASIBLE"
+            or response_data.get("shifts") != []
+            or response_data.get("phase_results") != []
+            or not issues
+            or any(issue.severity != GenerationIssueSeverity.ERROR for issue in issues)
+        ):
+            raise _invalid_response_error()
+        raise ShiftGenerationError(issues=issues)
 
     shifts = _parse_shifts(context, response_data.get("shifts"))
     phase_statuses, phase_optimal_flags = _parse_phase_results(
@@ -131,9 +159,7 @@ def _build_generation_result(
     return ShiftGenerationResult(
         status=status,
         shifts=shifts,
-        issues=build_generation_issues(
-            optimization_summary=optimization_summary,
-        ),
+        issues=issues,
         solver_status=solver_status,
         staff_count=len(context.staff_members),
         target_day_count=len(context.month_dates),
@@ -201,6 +227,64 @@ def _parse_phase_results(raw_phase_results: object) -> tuple[dict[str, str], dic
         statuses[name] = status
         optimal_flags[name] = optimal
     return statuses, optimal_flags
+
+
+def _parse_issues(
+    context: GenerationContext, raw_issues: object
+) -> list[GenerationIssue]:
+    """Validate API facts before passing them to messages and markers."""
+
+    if not isinstance(raw_issues, list):
+        raise _invalid_response_error()
+
+    known_dates = set(context.month_dates)
+    known_staff_ids = {staff_member.id for staff_member in context.staff_members}
+    issues = []
+    for raw_issue in raw_issues:
+        if not isinstance(raw_issue, Mapping):
+            raise _invalid_response_error()
+        code = raw_issue.get("code")
+        severity = raw_issue.get("severity")
+        raw_dates = raw_issue.get("dates")
+        raw_staff_ids = raw_issue.get("staff_ids")
+        details = raw_issue.get("details")
+        if (
+            not isinstance(code, str)
+            or code not in _ALLOWED_ISSUE_CODES
+            or not isinstance(severity, str)
+            or severity not in _ALLOWED_ISSUE_SEVERITIES
+            or not isinstance(raw_dates, list)
+            or not isinstance(raw_staff_ids, list)
+            or not isinstance(details, Mapping)
+        ):
+            raise _invalid_response_error()
+
+        dates = []
+        for raw_date in raw_dates:
+            if not isinstance(raw_date, str):
+                raise _invalid_response_error()
+            try:
+                target_date = date.fromisoformat(raw_date)
+            except ValueError as error:
+                raise _invalid_response_error() from error
+            if target_date not in known_dates:
+                raise _invalid_response_error()
+            dates.append(target_date)
+
+        if any(type(staff_id) is not int for staff_id in raw_staff_ids):
+            raise _invalid_response_error()
+        if not set(raw_staff_ids).issubset(known_staff_ids):
+            raise _invalid_response_error()
+        issues.append(
+            GenerationIssue(
+                code=code,
+                severity=severity,
+                dates=dates,
+                staff_ids=list(raw_staff_ids),
+                details=dict(details),
+            )
+        )
+    return issues
 
 
 def _build_summary(*, context, shifts, phase_statuses, phase_optimal_flags):

@@ -290,7 +290,7 @@
 
                     <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.day }}</td>
                     <td class="border-b border-r px-0.5 py-2 text-center text-[11px] font-bold {% if row.night_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif row.night_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if row.night_issue_title %} title="{{ row.night_issue_title }}"{% endif %}>{{ row.stats.night }}</td>
-                    <td class="border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.off }}</td>
+                    <td class="border-b border-slate-200 px-0.5 py-2 text-center text-[11px] font-bold {% if row.off_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif row.off_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}bg-slate-50 text-slate-700{% endif %}"{% if row.off_issue_title %} title="{{ row.off_issue_title }}"{% endif %}>{{ row.stats.off }}</td>
                   </tr>
                 {% empty %}
                   <tr>

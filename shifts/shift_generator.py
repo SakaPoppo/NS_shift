@@ -61,6 +61,8 @@ def generate_with_local_optimizer(
         shifts=shifts,
         issues=build_generation_issues(
             optimization_summary=optimization_summary,
+            shifts=shifts,
+            configured_off_days=context.shift_rule.off_days_per_staff,
         ),
         solver_status=optimization.solver_status,
         staff_count=len(context.staff_members),
