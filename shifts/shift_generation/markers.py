@@ -53,6 +53,7 @@ def build_generation_issue_markers(
         if issue.code in {
             GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
             GenerationIssueCode.DAY_STAFFING_IMBALANCE,
+            GenerationIssueCode.INSUFFICIENT_LEADER_STAFF,
         }:
             for target_date in issue.dates:
                 _set_marker(

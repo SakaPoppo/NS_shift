@@ -1,6 +1,34 @@
 <div
   role="alert"
-  class="alert rounded-xl border {% if variant == 'error' %}alert-error border-error/20{% elif variant == 'success' %}alert-success border-success/20{% elif variant == 'warning' %}alert-warning border-warning/20{% else %}alert-info border-info/20{% endif %}"
+  class="alert flex items-start gap-3 rounded-2xl border p-4 shadow-sm {% if variant == 'error' %}alert-error border-error/25 bg-error/10{% elif variant == 'success' %}alert-success border-success/25 bg-success/10{% elif variant == 'warning' %}alert-warning border-warning/25 bg-warning/10{% else %}alert-info border-info/25 bg-info/10{% endif %}"
 >
-  <span class="text-sm font-medium">{{ text }}</span>
+  <div
+    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full {% if variant == 'error' %}bg-error/15 text-error{% elif variant == 'success' %}bg-success/15 text-success{% elif variant == 'warning' %}bg-warning/15 text-warning{% else %}bg-info/15 text-info{% endif %}"
+    aria-hidden="true"
+    data-alert-icon="{{ variant }}"
+  >
+    {% if variant == 'success' %}
+      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m5 12 4 4L19 6" />
+      </svg>
+    {% elif variant == 'warning' %}
+      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9 2.9 17a2 2 0 0 0 1.74 3h14.72A2 2 0 0 0 21.1 17L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+      </svg>
+    {% elif variant == 'error' %}
+      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" />
+      </svg>
+    {% else %}
+      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 11.5v.01M12 8v.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" />
+      </svg>
+    {% endif %}
+  </div>
+  <div class="min-w-0 flex-1">
+    <p class="text-sm font-black leading-5 {% if variant == 'error' %}text-error{% elif variant == 'success' %}text-success{% elif variant == 'warning' %}text-warning{% else %}text-info{% endif %}">
+      {% if variant == 'error' %}エラー{% elif variant == 'success' %}成功{% elif variant == 'warning' %}警告{% else %}お知らせ{% endif %}
+    </p>
+    <p class="mt-0.5 break-words text-sm font-medium leading-6 text-base-content/80">{{ text }}</p>
+  </div>
 </div>

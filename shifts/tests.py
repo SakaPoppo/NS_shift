@@ -3685,7 +3685,13 @@ class GenerationIssueTests(SimpleTestCase):
         )
         self.assertEqual(
             issues_by_code[GenerationIssueCode.NIGHT_COUNT_IMBALANCE].staff_ids,
-            [1, 2],
+            [1],
+        )
+        self.assertEqual(
+            issues_by_code[GenerationIssueCode.NIGHT_COUNT_IMBALANCE].details[
+                "alerted_count"
+            ],
+            1,
         )
         incomplete_title, incomplete_body = format_generation_issue(
             issues_by_code[GenerationIssueCode.OPTIMIZATION_INCOMPLETE]
@@ -3702,6 +3708,47 @@ class GenerationIssueTests(SimpleTestCase):
             [issue.code for issue in issues],
             [GenerationIssueCode.SHIFT_GENERATED],
         )
+
+    def test_night_imbalance_marks_the_less_common_extreme_count(self):
+        night_counts = {
+            1: 6,
+            2: 6,
+            3: 6,
+            4: 5,
+            5: 6,
+            6: 6,
+            7: 6,
+            8: 4,
+            9: 6,
+        }
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(night_shift_counts=night_counts)
+        )
+
+        imbalance = next(
+            issue
+            for issue in issues
+            if issue.code == GenerationIssueCode.NIGHT_COUNT_IMBALANCE
+        )
+
+        self.assertEqual(imbalance.staff_ids, [8])
+        self.assertEqual(imbalance.details["alerted_count"], 4)
+        self.assertEqual(imbalance.details["count_difference_threshold"], 2)
+
+    def test_night_imbalance_marks_the_high_count_when_it_is_less_common(self):
+        night_counts = {1: 4, 2: 4, 3: 4, 4: 6}
+        issues = build_generation_issues(
+            optimization_summary=self.build_summary(night_shift_counts=night_counts)
+        )
+
+        imbalance = next(
+            issue
+            for issue in issues
+            if issue.code == GenerationIssueCode.NIGHT_COUNT_IMBALANCE
+        )
+
+        self.assertEqual(imbalance.staff_ids, [4])
+        self.assertEqual(imbalance.details["alerted_count"], 6)
 
     def test_monthly_off_count_exceeded_is_a_warning_with_staff_summary_data(self):
         staff_id = 42
@@ -3737,6 +3784,21 @@ class GenerationIssueTests(SimpleTestCase):
         )
         self.assertIn("設定の10日より2日多い12日", format_generation_issue(issue)[1])
 
+    def test_insufficient_leader_staff_is_an_error_with_date_specific_message(self):
+        target_date = date(2026, 8, 8)
+        issue = GenerationIssue(
+            code=GenerationIssueCode.INSUFFICIENT_LEADER_STAFF,
+            severity=GenerationIssueSeverity.ERROR,
+            dates=[target_date],
+            details={"required_count": 2, "available_count": 1},
+        )
+
+        title, body = format_generation_issue(issue)
+
+        self.assertEqual(title, "リーダー人数を確保できません")
+        self.assertIn("8月8日は日勤リーダー2名が必要", body)
+        self.assertIn("配置可能なリーダーは1名", body)
+
 
 class GenerationIssueMarkerTests(SimpleTestCase):
     def issue(self, code, severity, *, dates=None, staff_ids=None):
@@ -3750,6 +3812,7 @@ class GenerationIssueMarkerTests(SimpleTestCase):
     def test_day_staffing_issues_mark_only_their_dates_and_day_totals(self):
         first_date = date(2026, 8, 3)
         second_date = date(2026, 8, 9)
+        third_date = date(2026, 8, 12)
 
         markers = build_generation_issue_markers(
             [
@@ -3763,16 +3826,29 @@ class GenerationIssueMarkerTests(SimpleTestCase):
                     GenerationIssueSeverity.WARNING,
                     dates=[second_date],
                 ),
+                self.issue(
+                    GenerationIssueCode.INSUFFICIENT_LEADER_STAFF,
+                    GenerationIssueSeverity.ERROR,
+                    dates=[third_date],
+                ),
             ]
         )
 
         self.assertEqual(
             markers.date_issue_levels,
-            {first_date: "warning", second_date: "warning"},
+            {
+                first_date: "warning",
+                second_date: "warning",
+                third_date: "error",
+            },
         )
         self.assertEqual(
             markers.daily_summary_issue_levels,
-            {(first_date, "day"): "warning", (second_date, "day"): "warning"},
+            {
+                (first_date, "day"): "warning",
+                (second_date, "day"): "warning",
+                (third_date, "day"): "error",
+            },
         )
         self.assertEqual(markers.cell_issue_levels, {})
 
@@ -7127,6 +7203,19 @@ class ShiftGenerateViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         mock_generate.assert_called_once_with(self.shift_plan)
 
+    def test_edit_view_keeps_level_column_sticky_and_explains_reset_actions(self):
+        self.create_rule()
+
+        response = self.client.get(
+            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
+        )
+
+        self.assertContains(response, "sticky left-[198px]", count=2)
+        self.assertContains(response, "font-black text-slate-700")
+        self.assertContains(response, "① 自動生成のみリセット")
+        self.assertContains(response, "② 初期状態にリセット")
+        self.assertContains(response, "希望休・固定休だけの初期状態に戻します。")
+
     def test_generate_action_shows_success_message(self):
         self.create_rule(max_consecutive_work_days=31)
 
@@ -7273,6 +7362,8 @@ class ShiftGenerateViewTests(TestCase):
         )
         self.assertEqual(row["off_issue_level"], "warning")
         self.assertEqual(response.context["cell_issue_levels"], {})
+        self.assertContains(response, "text-error font-bold")
+        self.assertContains(response, "ring-warning/60")
 
     def test_generate_action_shows_each_infeasible_api_issue_and_marks_date(self):
         self.create_rule()
@@ -7311,6 +7402,7 @@ class ShiftGenerateViewTests(TestCase):
             if header["date"] == target_date
         )
         self.assertEqual(header["issue_level"], "error")
+        self.assertContains(response, "ring-error/70", count=2)
 
     def test_generate_action_shows_day_staffing_adjustment_as_info(self):
         self.create_rule()
@@ -7343,6 +7435,8 @@ class ShiftGenerateViewTests(TestCase):
         self.assertContains(response, "日勤人数を調整しました", count=1)
         self.assertContains(response, "設定人数より多く日勤を配置しています。", count=1)
         self.assertContains(response, "alert-info", count=1)
+        self.assertContains(response, 'data-alert-icon="success"', count=1)
+        self.assertContains(response, 'data-alert-icon="info"', count=1)
         self.assertNotContains(
             response,
             "シフトを生成しましたが、一部の条件を満たせませんでした。",
@@ -7406,7 +7500,7 @@ class ShiftGenerateViewTests(TestCase):
         self.assertContains(response, "シフトを生成しました")
         self.assertContains(
             response,
-            '<span class="text-sm font-medium">日勤人数が設定を下回っています：',
+            '<p class="mt-0.5 break-words text-sm font-medium leading-6 text-base-content/80">日勤人数が設定を下回っています：',
             count=1,
         )
         self.assertNotContains(
@@ -7489,6 +7583,7 @@ class ShiftGenerateViewTests(TestCase):
         self.assertContains(response, "日勤人数にばらつきがあります", count=1)
         self.assertContains(response, "夜勤回数にばらつきがあります", count=1)
         self.assertContains(response, "alert-warning", count=3)
+        self.assertContains(response, 'data-alert-icon="warning"', count=3)
         self.assertNotContains(response, "シフトを生成できませんでした。")
 
     def test_generate_action_shows_error_message_when_generation_fails(self):
@@ -7503,6 +7598,8 @@ class ShiftGenerateViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "シフトを生成できません")
         self.assertContains(response, "固定条件が競合しています。")
+        self.assertContains(response, "alert-error", count=1)
+        self.assertContains(response, 'data-alert-icon="error"', count=1)
 
     def test_generate_action_keeps_posted_manual_shift_as_fixed_input(self):
         self.create_rule(required_day_staff=0, off_days_per_staff=30)

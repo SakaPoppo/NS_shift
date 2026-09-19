@@ -16,6 +16,7 @@ ISSUE_TITLES = {
     GenerationIssueCode.NO_ACTIVE_STAFF: "有効なスタッフがいません",
     GenerationIssueCode.NO_GENERATION_TARGET_STAFF: "生成対象のスタッフがいません",
     GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF: "夜勤人数を確保できません",
+    GenerationIssueCode.INSUFFICIENT_LEADER_STAFF: "リーダー人数を確保できません",
     GenerationIssueCode.TOO_MANY_DAY_OFF_REQUESTS: "希望休が月休日数を超えています",
     GenerationIssueCode.NIGHT_SHIFT_NOT_ALLOWED: "夜勤設定が矛盾しています",
     GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT: "夜勤後の勤務条件を満たせません",
@@ -72,6 +73,9 @@ def format_generation_issue(issue: GenerationIssue) -> tuple[str, str]:
     if issue.code == GenerationIssueCode.INSUFFICIENT_NIGHT_STAFF:
         target_date = issue.dates[0]
         return title, "{:%-m月%-d}日は夜勤{}名が必要ですが、配置可能なスタッフは{}名です。必要夜勤人数またはスタッフの夜勤可否を確認してください。".format(target_date, details["required_count"], details["available_count"])
+    if issue.code == GenerationIssueCode.INSUFFICIENT_LEADER_STAFF:
+        target_date = issue.dates[0]
+        return title, "{:%-m月%-d}日は日勤リーダー{}名が必要ですが、配置可能なリーダーは{}名です。必要リーダー人数または固定勤務を確認してください。".format(target_date, details["required_count"], details["available_count"])
     if issue.code == GenerationIssueCode.NIGHT_SHIFT_NOT_ALLOWED:
         return title, "{staff_name}さんは夜勤不可に設定されていますが、{:%-m月%-d}日に夜勤が設定されています。".format(issue.dates[0], **details)
     if issue.code == GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT:
