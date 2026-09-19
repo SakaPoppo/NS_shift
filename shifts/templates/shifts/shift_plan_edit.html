@@ -146,7 +146,7 @@
                   </summary>
                   <ul class="menu dropdown-content z-20 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
                     <li class="px-3 py-2 text-xs font-medium leading-5 text-slate-500">
-                      戻り先を選択してください。
+                      リセット方法を選択してください。
                     </li>
                     <li>
                       <button
@@ -154,10 +154,10 @@
                         name="action"
                         value="reset_to_manual"
                         class="flex flex-col items-start gap-1 rounded-xl px-3 py-3 text-left"
-                        onclick="return confirm('自動生成した勤務だけを削除します。希望休・固定休・手入力した勤務は残ります。')"
+                        onclick="return confirm('自動生成した勤務のみを削除します。希望休・固定休・手入力した勤務は残ります。')"
                       >
-                        <span class="text-sm font-bold text-slate-900">手入力まで戻す</span>
-                        <span class="text-xs font-medium leading-5 text-slate-500">自動生成した勤務だけを削除します。希望休・固定休・手入力した勤務は残ります。</span>
+                        <span class="text-sm font-bold text-slate-900">① 自動生成のみリセット</span>
+                        <span class="text-xs font-medium leading-5 text-slate-500">自動生成した勤務のみを削除します<br>固定休や手入力した勤務は残ります</span>
                       </button>
                     </li>
                     <li>
@@ -166,10 +166,10 @@
                         name="action"
                         value="reset_to_base"
                         class="flex flex-col items-start gap-1 rounded-xl px-3 py-3 text-left"
-                        onclick="return confirm('手入力した勤務と自動生成した勤務をすべて削除します。希望休・固定休だけが残ります。')"
+                        onclick="return confirm('手入力した勤務と自動生成した勤務を削除し、希望休・固定休だけの初期状態に戻します。')"
                       >
-                        <span class="text-sm font-bold text-slate-900">希望休・固定休まで戻す</span>
-                        <span class="text-xs font-medium leading-5 text-slate-500">手入力した勤務と自動生成した勤務をすべて削除します。希望休・固定休だけが残ります。</span>
+                        <span class="text-sm font-bold text-slate-900">② 初期状態にリセット</span>
+                        <span class="text-xs font-medium leading-5 text-slate-500">手入力した勤務と自動生成した勤務を削除して<br>固定シフトだけの初期状態に戻します</span>
                       </button>
                     </li>
                   </ul>
@@ -186,14 +186,14 @@
                     <span class="block leading-tight">生成</span>
                     <span class="block leading-tight">対象</span>
                   </th>
-                  <th class="sticky left-[52px] z-30 min-w-[146px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
+                  <th class="sticky left-[52px] z-30 w-[146px] min-w-[146px] max-w-[146px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-sm font-black text-slate-900">
                     スタッフ
                   </th>
-                  <th class="min-w-[40px] border-b border-r border-slate-200 bg-slate-50 px-1 py-2 text-center text-[11px] font-bold text-slate-700">
+                  <th class="sticky left-[198px] z-30 w-[40px] min-w-[40px] border-b border-r border-slate-200 bg-slate-50 px-1 py-2 text-center text-[11px] font-black text-slate-700">
                     Lv
                   </th>
                   {% for header in day_headers %}
-                    <th class="min-w-[48px] border-b border-r px-0.5 py-1 text-center {% if header.issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif header.issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50{% endif %}"{% if header.issue_title %} title="{{ header.issue_title }}"{% endif %}>
+                    <th class="min-w-[48px] border-b border-r border-slate-200 bg-slate-50 px-0.5 py-1 text-center {% if header.issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif header.issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if header.issue_title %} title="{{ header.issue_title }}"{% endif %}>
                       <div class="text-[11px] font-bold {% if header.is_sunday or header.is_holiday %}text-red-500{% elif header.is_saturday %}text-sky-600{% else %}text-slate-500{% endif %}">
                         {{ header.weekday_label }}
                       </div>
@@ -228,7 +228,7 @@
                         {% if not row.is_excluded %}checked{% endif %}
                       >
                     </td>
-                    <th class="sticky left-[52px] z-10 border-b border-r border-slate-200 bg-white px-2 py-2 text-left align-middle">
+                    <th class="sticky left-[52px] z-10 w-[146px] max-w-[146px] border-b border-r border-slate-200 bg-white px-2 py-2 text-left align-middle">
                       <div class="flex min-w-0 items-center gap-1.5 text-sm font-black text-slate-900">
                         {% if row.staff_member.role == "leader" %}
                           <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-amber-300 bg-amber-200 text-[10px] font-black text-amber-800" title="リーダー">L</span>
@@ -240,7 +240,7 @@
                         </span>
                       </div>
                     </th>
-                    <td class="min-w-[40px] border-b border-r border-slate-200 bg-white px-1 py-2 text-center text-sm font-bold text-slate-700">
+                    <td class="sticky left-[198px] z-10 w-[40px] min-w-[40px] border-b border-r border-slate-200 bg-white px-1 py-2 text-center text-sm font-bold text-slate-700">
                       <span class="inline-flex h-5 items-center rounded-md border px-1.5 text-[10px] font-black {% if row.staff_member.ability_level == 1 %}border-[#D5EAF7] bg-[#EEF7FC] text-[#0C5F84]{% elif row.staff_member.ability_level == 2 %}border-[#B8DCF3] bg-[#D7ECFA] text-[#075985]{% elif row.staff_member.ability_level == 3 %}border-[#7CC5EC] bg-[#A9D7F4] text-[#075985]{% elif row.staff_member.ability_level == 4 %}border-[#2F9CB8] bg-[#47AFC8] text-white{% else %}border-[#0B5E79] bg-[#0F6F8F] text-white{% endif %}">Lv{{ row.staff_member.ability_level }}</span>
                     </td>
 
@@ -289,8 +289,8 @@
                     {% endfor %}
 
                     <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ row.stats.day }}</td>
-                    <td class="border-b border-r px-0.5 py-2 text-center text-[11px] font-bold {% if row.night_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif row.night_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if row.night_issue_title %} title="{{ row.night_issue_title }}"{% endif %}>{{ row.stats.night }}</td>
-                    <td class="border-b border-slate-200 px-0.5 py-2 text-center text-[11px] font-bold {% if row.off_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif row.off_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}bg-slate-50 text-slate-700{% endif %}"{% if row.off_issue_title %} title="{{ row.off_issue_title }}"{% endif %}>{{ row.stats.off }}</td>
+                    <td class="border-b border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] {% if row.night_issue_level %}text-error font-bold{% else %}text-slate-700 font-bold{% endif %} {% if row.night_issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif row.night_issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if row.night_issue_title %} title="{{ row.night_issue_title }}"{% endif %}>{{ row.stats.night }}</td>
+                    <td class="border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] {% if row.off_issue_level %}text-error font-bold{% else %}text-slate-700 font-bold{% endif %} {% if row.off_issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif row.off_issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if row.off_issue_title %} title="{{ row.off_issue_title }}"{% endif %}>{{ row.stats.off }}</td>
                   </tr>
                 {% empty %}
                   <tr>
@@ -308,7 +308,7 @@
                       日別集計 日勤人数
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-b px-0.5 py-2 text-center text-[11px] font-bold {% if value.day_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif value.day_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if value.day_issue_title %} title="{{ value.day_issue_title }}"{% endif %}>{{ value.day_count }}</td>
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] {% if value.day_issue_level %}text-error font-bold{% else %}text-slate-700 font-bold{% endif %} {% if value.day_issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif value.day_issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if value.day_issue_title %} title="{{ value.day_issue_title }}"{% endif %}>{{ value.day_count }}</td>
                     {% endfor %}
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
@@ -319,7 +319,7 @@
                       日別集計 夜勤人数
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-b px-0.5 py-2 text-center text-[11px] font-bold {% if value.night_issue_level == 'error' %}border-red-300 bg-red-50 text-red-800{% elif value.night_issue_level == 'warning' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}"{% if value.night_issue_title %} title="{{ value.night_issue_title }}"{% endif %}>{{ value.night_count }}</td>
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] {% if value.night_issue_level %}text-error font-bold{% else %}text-slate-700 font-bold{% endif %} {% if value.night_issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif value.night_issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if value.night_issue_title %} title="{{ value.night_issue_title }}"{% endif %}>{{ value.night_count }}</td>
                     {% endfor %}
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>

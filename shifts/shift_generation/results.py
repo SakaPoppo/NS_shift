@@ -123,12 +123,12 @@ def _build_generated_shifts(
     return generated_shifts
 
 
-def _most_frequent_day_staffing_count(
-    actual_day_counts: dict,
+def _most_frequent_count(
+    counts: dict,
 ) -> int | None:
-    """Return the modal daily staffing count, breaking ties toward the lower count."""
+    """Return the modal count, breaking ties toward the lower count."""
 
-    frequencies = Counter(actual_day_counts.values())
+    frequencies = Counter(counts.values())
     if not frequencies:
         return None
     highest_frequency = max(frequencies.values())
@@ -187,7 +187,7 @@ def build_generation_issues(
                 },
             )
         )
-    modal_day_staffing_count = _most_frequent_day_staffing_count(
+    modal_day_staffing_count = _most_frequent_count(
         optimization_summary.actual_day_counts
     )
     imbalance_dates = (
@@ -220,20 +220,33 @@ def build_generation_issues(
         minimum_count = min(night_counts.values())
         maximum_count = max(night_counts.values())
         difference = maximum_count - minimum_count
-        if difference > 1:
+        minimum_count_staff_ids = [
+            staff_id
+            for staff_id, count in night_counts.items()
+            if count == minimum_count
+        ]
+        maximum_count_staff_ids = [
+            staff_id
+            for staff_id, count in night_counts.items()
+            if count == maximum_count
+        ]
+        if difference >= 2:
+            imbalanced_staff_ids = (
+                minimum_count_staff_ids
+                if len(minimum_count_staff_ids) <= len(maximum_count_staff_ids)
+                else maximum_count_staff_ids
+            )
             issues.append(
                 GenerationIssue(
                     code=GenerationIssueCode.NIGHT_COUNT_IMBALANCE,
                     severity=GenerationIssueSeverity.WARNING,
-                    staff_ids=[
-                        staff_id
-                        for staff_id, count in night_counts.items()
-                        if count in {minimum_count, maximum_count}
-                    ],
+                    staff_ids=imbalanced_staff_ids,
                     details={
                         "count_difference": difference,
                         "minimum_count": minimum_count,
                         "maximum_count": maximum_count,
+                        "count_difference_threshold": 2,
+                        "alerted_count": night_counts[imbalanced_staff_ids[0]],
                     },
                 )
             )

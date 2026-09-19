@@ -350,7 +350,7 @@ def build_shift_plan_grid(
             if issue_level:
                 display_classes = (
                     f"{display_classes} ring-2 ring-inset "
-                    f"{'ring-red-400' if issue_level == 'error' else 'ring-amber-400'}"
+                    f"{'ring-error/70' if issue_level == 'error' else 'ring-warning/60'}"
                 )
             cells.append(
                 {
