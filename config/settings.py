@@ -28,6 +28,17 @@ def env_int(name, default):
     return int(value)
 
 
+def resolve_optimizer_api_url(*, debug: bool) -> str:
+    """実行環境に対応する最適化APIの接続先を返す。"""
+
+    if debug:
+        return os.getenv(
+            "LOCAL_OPTIMIZER_API_URL",
+            "http://host.docker.internal:8080",
+        ).rstrip("/")
+    return os.getenv("OPTIMIZER_API_URL", "").rstrip("/")
+
+
 SECRET_KEY = os.environ.get(
     "SECRET_KEY",
     os.getenv("DJANGO_SECRET_KEY", "django-insecure-change-me-for-development"),
@@ -51,23 +62,6 @@ if DEBUG and not ALLOWED_HOSTS:
 render_external_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
 if render_external_url and render_external_url not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(render_external_url)
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-        },
-    },
-    "loggers": {
-        "shifts.shift_generation.optimization": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-    },
-}
 
 INSTALLED_APPS = [
     "accounts",
@@ -168,8 +162,7 @@ LOGIN_URL = "accounts:login"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Cloud Run の最適化APIは、URLが設定された環境だけで使用する。
-# ローカル開発・既存テストは未設定のまま従来のローカル最適化器を利用できる。
-OPTIMIZER_API_URL = os.getenv("OPTIMIZER_API_URL", "").rstrip("/")
+# 開発時はローカルAPI、本番時はCloud RunのAPIへ委譲する。
+OPTIMIZER_API_URL = resolve_optimizer_api_url(debug=DEBUG)
 OPTIMIZER_API_KEY = os.getenv("OPTIMIZER_API_KEY", "")
 OPTIMIZER_API_TIMEOUT = env_int("OPTIMIZER_API_TIMEOUT", 330)

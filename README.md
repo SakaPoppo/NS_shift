@@ -240,7 +240,7 @@
 　- 曜日・特定日ごとの勤務条件
 
 - シフト自動生成
-　- Google OR-Tools CP-SATを利用した勤務の自動配置
+　- 専用の最適化APIを利用した勤務の自動配置
 　- 希望休・固定勤務・夜勤可否などを考慮した生成
 　- 夜勤→明けなど、看護師勤務特有の勤務パターンへの対応
 　- 最大連勤数、必要人数、リーダー配置、能力条件などを考慮した生成
@@ -344,10 +344,10 @@
 - 開発環境：Docker Compose、Node.js 20、PostCSS
 - デプロイ先：Render Web Service、Render PostgreSQL
 - 使用ライブラリ：
-    - OR-Tools
-      - CP-SATを使用し、勤務条件をハード制約と目的関数へ分けてシフトを最適化するため
     - psycopg、dj-database-url
       - DjangoからPostgreSQLへ接続し、環境変数から接続先を設定するため
+    - requests
+      - 最適化APIへ生成条件を送信し、生成結果を取得するため
     - gunicorn、uvicorn
       - Render上でDjango ASGIアプリケーションを起動するため
     - whitenoise
@@ -371,7 +371,7 @@ PostgreSQLはローカル環境とRenderの本番環境で共通して利用し�
 
 - 今回チャレンジした点
 
-単なるCRUDアプリではなく、Google OR-Tools CP-SATを使って、複数の勤務条件を同時に満たすシフト自動生成を実装しています。
+単なるCRUDアプリではなく、専用の最適化APIを通じて、複数の勤務条件を同時に満たすシフト自動生成を実装しています。
 具体的には、以下の条件を扱っています。
 - 1人1日1勤務、月休日数、必要夜勤人数を必須条件として守る
 - 夜勤から明けへの連動、希望休、固定勤務を維持する
@@ -379,13 +379,13 @@ PostgreSQLはローカル環境とRenderの本番環境で共通して利用し�
 - 配置可能な日勤枠を、各日の必要日勤人数との差分を基準として均等化する
 - 長い連勤、夜勤回数、日勤・夜勤の能力配置の偏りを減らす
 
-日勤配置、長い連勤、夜勤回数、能力配置を優先順位付きの複数フェーズで最適化し、前フェーズの最適値と解を後続フェーズへ引き継いでいます。
+最適化処理は専用サービスへ分離し、Django側は入力検証、生成リクエスト、結果保存、通知表示を担当しています。
 
 - 不安な点
 
 シフト自動生成では、希望休、固定勤務、必要人数、夜勤回数、連勤制限、勤務レベルなど、複数の条件を同時に扱う必要があります。
-人数や勤務条件によっては探索時間が長くなる可能性があるため、スタッフ数に応じて各最適化フェーズの制限時間を延長しています。
-また、日勤人数を設定値へ一致させられない場合は、配置可能な日勤枠を必要人数との差分が小さくなるように均等化し、生成後に調整内容を通知します。
+人数や勤務条件によっては最適化APIの探索時間が長くなる可能性があるため、Django側ではAPI応答のタイムアウトを明示して扱っています。
+また、日勤人数を設定値へ満たせない場合は、APIから返された調整内容を通知します。
 
 ---
 
@@ -396,8 +396,7 @@ PostgreSQLはローカル環境とRenderの本番環境で共通して利用し�
 このアプリの中心機能は、勤務条件をもとにシフトを自動生成する部分です。
 条件同士の競合や固定勤務の影響を考慮する必要があるため、通常のCRUDアプリと比べて実装とテストの難易度が高くなります。
 
-対策として、勤務条件をOR-Toolsのハード制約と目的関数へ分離し、目的関数を複数フェーズに分けて優先順位を明確にしています。
-また、Django TestCaseと小規模なCP-SATモデルを使用し、制約、最適化結果、生成後の通知・警告を自動テストしています。
+対策として、最適化ロジックを専用APIへ分離し、Django側では入力条件、API応答、生成後の保存・通知を自動テストしています。
 
 ２. フロントエンドについて
 
@@ -406,6 +405,25 @@ ReactやNext.jsは導入せず、Django Templatesを中心に実装していま�
 
 ローカル開発ではDocker ComposeでDjango、PostgreSQL、Tailwind監視環境を起動します。
 本番環境ではRenderを使用し、GunicornからUvicornWorkerを介してDjango ASGIアプリケーションを起動し、WhiteNoiseで静的ファイルを配信しています。
+
+### ローカルOptimizer APIとの連携
+
+ローカルでシフト生成を確認する場合は、Ns ShiftとOptimizer APIを別々のComposeで起動します。
+
+```bash
+# ns-shift-optimizer-api
+cp .env.example .env
+# NS_shift の .env と同じ OPTIMIZER_API_KEY を設定する
+docker compose up --build
+
+# NS_shift
+cp .env.example .env
+docker compose up
+```
+
+`DJANGO_DEBUG=true` のとき、Ns Shiftは `LOCAL_OPTIMIZER_API_URL`（既定値: `http://host.docker.internal:8080`）へ接続します。`DJANGO_DEBUG=false` のときだけ、Cloud Run用の `OPTIMIZER_API_URL` を使用します。
+
+Optimizer APIは2 CPU・OR-Tools探索worker数2で起動し、`app/` のPythonコードを保存すると自動で再起動します。依存関係またはDockerfileを変更した場合のみ、API側で `docker compose up --build` を実行してください。
 
 
 ### 画面遷移図　URL

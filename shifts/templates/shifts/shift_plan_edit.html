@@ -330,7 +330,7 @@
                       日別集計 日勤能力
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.day_ability_total }}</td>
+                      <td class="border-r border-b border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] {% if value.day_ability_issue_level %}text-error font-bold{% else %}text-slate-700 font-bold{% endif %} {% if value.day_ability_issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif value.day_ability_issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if value.day_ability_issue_title %} title="{{ value.day_ability_issue_title }}"{% endif %}>{{ value.day_ability_total }}</td>
                     {% endfor %}
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-b border-slate-200 bg-slate-50"></td>
@@ -341,7 +341,7 @@
                       日別集計 夜勤能力
                     </th>
                     {% for value in summary.values %}
-                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] font-bold text-slate-700">{{ value.night_ability_total }}</td>
+                      <td class="border-r border-slate-200 bg-slate-50 px-0.5 py-2 text-center text-[11px] {% if value.night_ability_issue_level %}text-error font-bold{% else %}text-slate-700 font-bold{% endif %} {% if value.night_ability_issue_level == 'error' %}ring-2 ring-inset ring-error/70{% elif value.night_ability_issue_level == 'warning' %}ring-2 ring-inset ring-warning/60{% endif %}"{% if value.night_ability_issue_title %} title="{{ value.night_ability_issue_title }}"{% endif %}>{{ value.night_ability_total }}</td>
                     {% endfor %}
                     <td class="border-r border-slate-200 bg-slate-50"></td>
                     <td class="border-r border-slate-200 bg-slate-50"></td>

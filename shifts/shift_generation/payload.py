@@ -47,6 +47,9 @@ def build_optimizer_payload(context: GenerationContext) -> dict:
             {
                 "date": target_date.isoformat(),
                 "required_day_staff": effective_rule.required_day_staff,
+                "required_day_staff_override": (
+                    effective_rule.required_day_staff_override
+                ),
                 "required_night_staff": effective_rule.required_night_staff,
                 "required_leader_staff": effective_rule.required_leader_staff,
                 "min_ability_level": effective_rule.min_ability_level,

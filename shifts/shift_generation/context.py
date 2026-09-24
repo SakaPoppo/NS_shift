@@ -339,12 +339,21 @@ def _validate_fixed_assignments(
             third_shift_type = fixed_assignments.get(
                 third_key
             )
+            night_sequence_keys = (
+                (staff.id, target_date),
+                (staff.id, month_dates[index + 1]),
+                third_key,
+            )
+            is_manual_only_night_sequence = all(
+                key in user_override_assignment_keys
+                for key in night_sequence_keys
+            )
             rule = effective_rules[target_date]
             if rule.night_shift_next_day_off:
                 if (
                     third_shift_type is not None
                     and third_shift_type not in OFF_LIKE_SHIFT_TYPES
-                    and third_key not in user_override_assignment_keys
+                    and not is_manual_only_night_sequence
                 ):
                     raise ShiftGenerationError(
                         issue=_night_sequence_issue(

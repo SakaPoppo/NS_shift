@@ -51,6 +51,30 @@ def build_generation_issue_markers(
 
         title = ISSUE_TITLES.get(issue.code, "シフト生成の問題")
         if issue.code in {
+            GenerationIssueCode.DAY_ABILITY_BELOW_TARGET,
+            GenerationIssueCode.DAY_ABILITY_ABOVE_TARGET,
+        }:
+            for target_date in issue.dates:
+                _set_marker(
+                    markers.daily_summary_issue_levels,
+                    markers.daily_summary_issue_titles,
+                    (target_date, "day_ability"),
+                    issue.severity,
+                    title,
+                )
+        elif issue.code in {
+            GenerationIssueCode.NIGHT_ABILITY_BELOW_TARGET,
+            GenerationIssueCode.NIGHT_ABILITY_ABOVE_TARGET,
+        }:
+            for target_date in issue.dates:
+                _set_marker(
+                    markers.daily_summary_issue_levels,
+                    markers.daily_summary_issue_titles,
+                    (target_date, "night_ability"),
+                    issue.severity,
+                    title,
+                )
+        elif issue.code in {
             GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
             GenerationIssueCode.DAY_STAFFING_IMBALANCE,
             GenerationIssueCode.INSUFFICIENT_LEADER_STAFF,

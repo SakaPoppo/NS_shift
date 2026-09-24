@@ -39,8 +39,6 @@ services:
     environment:
       # webコンテナ内のタイムゾーン
       TZ: Asia/Tokyo
-      # 1 CPU環境でのOR-Tools探索worker数
-      ORTOOLS_NUM_SEARCH_WORKERS: "1"
     env_file:
       # ローカル開発用の環境変数を読み込む
       - .env
