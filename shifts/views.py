@@ -3,6 +3,7 @@ from datetime import date
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.conf import settings
 from django.db import transaction
 from django.forms import formset_factory
 from django.forms.utils import ErrorList
@@ -73,6 +74,13 @@ GENERATION_ISSUE_MESSAGE_LEVELS = {
     GenerationIssueSeverity.ERROR: messages.ERROR,
 }
 GENERATION_ISSUES_SESSION_KEY = "generation_issues_by_shift_plan"
+OPTIMIZATION_PHASE_LABELS = {
+    "night_count_balance": "夜勤回数",
+    "night_ability_balance": "夜勤能力",
+    "day_staffing_balance": "日勤人数",
+    "day_ability_balance": "日勤能力",
+    "long_streak": "連勤調整",
+}
 
 
 def add_generation_issue_message(request, issue: GenerationIssue) -> None:
@@ -84,6 +92,32 @@ def add_generation_issue_message(request, issue: GenerationIssue) -> None:
         GENERATION_ISSUE_MESSAGE_LEVELS[issue.severity],
         f"{title}：{body}",
     )
+
+
+def add_optimization_phase_diagnostic_message(request, generation_result) -> None:
+    """開発環境だけで、APIが返したフェーズ到達状態を生成画面に表示する。"""
+
+    if not settings.DEBUG or generation_result.optimization_summary is None:
+        return
+
+    summary = generation_result.optimization_summary
+    phase_details = [
+        f"{label} {summary.phase_statuses[phase_name]}"
+        for phase_name, label in OPTIMIZATION_PHASE_LABELS.items()
+        if phase_name in summary.phase_statuses
+    ]
+    if not phase_details:
+        return
+    non_optimal_labels = [
+        OPTIMIZATION_PHASE_LABELS.get(phase_name, phase_name)
+        for phase_name in summary.non_optimal_phases
+    ]
+    suffix = (
+        f"（最適性未証明: {', '.join(non_optimal_labels)}）"
+        if non_optimal_labels
+        else ""
+    )
+    messages.info(request, f"最適化診断: {' / '.join(phase_details)}{suffix}")
 
 
 def save_generation_issues(request, shift_plan, issues: list[GenerationIssue]) -> None:
@@ -403,6 +437,18 @@ def build_shift_plan_grid(
                     "night_count": day_totals[current_date]["night"],
                     "day_ability_total": day_totals[current_date]["day_ability_total"],
                     "night_ability_total": day_totals[current_date]["night_ability_total"],
+                    "day_ability_issue_level": daily_summary_issue_levels.get(
+                        (current_date, "day_ability")
+                    ),
+                    "day_ability_issue_title": daily_summary_issue_titles.get(
+                        (current_date, "day_ability"), ""
+                    ),
+                    "night_ability_issue_level": daily_summary_issue_levels.get(
+                        (current_date, "night_ability")
+                    ),
+                    "night_ability_issue_title": daily_summary_issue_titles.get(
+                        (current_date, "night_ability"), ""
+                    ),
                     "day_issue_level": daily_summary_issue_levels.get(
                         (current_date, "day")
                     ),
@@ -1522,6 +1568,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
 
             for issue in generation_result.issues:
                 add_generation_issue_message(request, issue)
+            add_optimization_phase_diagnostic_message(request, generation_result)
             save_generation_issues(request, shift_plan, generation_result.issues)
             return HttpResponseRedirect(self.get_edit_url(shift_plan))
 

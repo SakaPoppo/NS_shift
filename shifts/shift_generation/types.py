@@ -29,6 +29,10 @@ class GenerationIssueCode:
     DAY_STAFFING_BELOW_REQUIRED = "DAY_STAFFING_BELOW_REQUIRED"
     DAY_STAFFING_IMBALANCE = "DAY_STAFFING_IMBALANCE"
     NIGHT_COUNT_IMBALANCE = "NIGHT_COUNT_IMBALANCE"
+    DAY_ABILITY_BELOW_TARGET = "DAY_ABILITY_BELOW_TARGET"
+    DAY_ABILITY_ABOVE_TARGET = "DAY_ABILITY_ABOVE_TARGET"
+    NIGHT_ABILITY_BELOW_TARGET = "NIGHT_ABILITY_BELOW_TARGET"
+    NIGHT_ABILITY_ABOVE_TARGET = "NIGHT_ABILITY_ABOVE_TARGET"
     MONTHLY_OFF_COUNT_EXCEEDED = "MONTHLY_OFF_COUNT_EXCEEDED"
     OPTIMIZATION_INCOMPLETE = "OPTIMIZATION_INCOMPLETE"
     SHIFT_RULE_NOT_CONFIGURED = "SHIFT_RULE_NOT_CONFIGURED"
@@ -80,6 +84,7 @@ class ShiftOptimizationSummary:
     long_streak_penalty: int
     phase_statuses: dict[str, str] = field(default_factory=dict)
     phase_optimal_flags: dict[str, bool] = field(default_factory=dict)
+    non_optimal_phases: tuple[str, ...] = ()
     night_shift_counts: dict[int, int] = field(default_factory=dict)
 
 
@@ -92,84 +97,6 @@ class ShiftGenerationResult:
     staff_count: int = 0
     target_day_count: int = 0
     optimization_summary: ShiftOptimizationSummary | None = None
-
-
-@dataclass
-class DayStaffingBalanceData:
-    """必要人数との差分を基準に月内の日勤枠を均等化するデータ。"""
-
-    actual_day_count_vars: dict[date, object] = field(default_factory=dict)
-    required_day_counts: dict[date, int] = field(default_factory=dict)
-    day_staffing_delta_vars: dict[date, object] = field(default_factory=dict)
-    minimum_delta: object | None = None
-    maximum_delta: object | None = None
-    delta_range: object | None = None
-    total_actual_day_count: object | None = None
-    total_required_day_count: int = 0
-    total_delta: object | None = None
-    objective_score: object | None = None
-
-
-@dataclass
-class NightCountBalanceData:
-    """夜勤可能スタッフ間の月間夜勤回数差を最適化するためのデータ。"""
-
-    night_count_min: object | None = None
-    night_count_max: object | None = None
-    night_count_vars: dict[int, object] = field(default_factory=dict)
-    night_balance_violation: object | None = None
-    objective_score: object | None = None
-
-
-@dataclass(frozen=True)
-class OptimizationPhaseDefinition:
-    """1回の求解で評価する目的と時間制限をまとめた定義。"""
-
-    name: str
-    objective: object
-    max_time_seconds: int
-
-
-@dataclass
-class AbilityDistributionData:
-    """勤務内の累積能力レベル分布を母集団比率と比較するデータ。"""
-
-    shift_type: str | None = None
-    thresholds: tuple[int, ...] = field(default_factory=tuple)
-    eligible_staff_count: int = 0
-    eligible_above_counts: dict[int, int] = field(default_factory=dict)
-    actual_shift_count_vars: dict[date, object] = field(default_factory=dict)
-    threshold_count_vars: dict[tuple[date, int], object] = field(
-        default_factory=dict
-    )
-    deviation_vars: dict[tuple[date, int], object] = field(
-        default_factory=dict
-    )
-    max_deviation: object | None = None
-    total_deviation: object | None = None
-    objective_score: object | None = None
-
-
-@dataclass(frozen=True)
-class OptimizationPhaseResult:
-    name: str
-    status: str
-    objective_value: int | None
-    optimal: bool
-    solver: object | None
-
-
-@dataclass(frozen=True)
-class ShiftOptimizationOutput:
-    """最適化層から結果組み立て層へ渡す、求解済みデータ。"""
-
-    solver: object
-    solver_status: str
-    shift_vars: dict
-    day_staffing_balance_data: DayStaffingBalanceData
-    night_count_balance_data: NightCountBalanceData
-    long_streak_terms: list
-    phase_results: list[OptimizationPhaseResult]
 
 
 @dataclass(frozen=True)

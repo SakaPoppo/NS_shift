@@ -22,8 +22,6 @@ services:
         generateValue: true
       - key: WEB_CONCURRENCY
         value: "1"
-      - key: ORTOOLS_NUM_SEARCH_WORKERS
-        value: "1"
       - key: GUNICORN_TIMEOUT
         value: "360"
       - key: DJANGO_ALLOWED_HOSTS

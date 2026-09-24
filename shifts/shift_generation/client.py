@@ -342,6 +342,11 @@ def _build_summary(*, context, shifts, phase_statuses, phase_optimal_flags):
         ),
         phase_statuses=phase_statuses,
         phase_optimal_flags=phase_optimal_flags,
+        non_optimal_phases=tuple(
+            name
+            for name, is_optimal in phase_optimal_flags.items()
+            if not is_optimal
+        ),
         night_shift_counts=night_shift_counts,
     )
 

@@ -137,15 +137,6 @@ class ShiftCarryoverEntryForm(forms.Form):
 
     def clean(self):
         cleaned_data = super().clean()
-        shift_type = cleaned_data.get("previous_last_shift_type")
-        consecutive_work_days = cleaned_data.get(
-            "previous_consecutive_work_days"
-        )
-        if shift_type and consecutive_work_days == 0:
-            self.add_error(
-                "previous_consecutive_work_days",
-                "夜勤・明けの場合は1以上を入力してください。",
-            )
         return cleaned_data
 
 

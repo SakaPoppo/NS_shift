@@ -50,6 +50,7 @@ class EffectiveShiftRule:
     """
 
     required_day_staff: int
+    required_day_staff_override: int | None
     required_night_staff: int
     required_leader_staff: int
     min_ability_level: int | None
@@ -98,8 +99,17 @@ def get_effective_rule_for_date(shift_plan: ShiftPlan, target_date):
             return getattr(weekday_rule, field_name)
         return default_value
 
+    def resolve_day_staffing_override():
+        """月共通値を除き、日勤人数を明示した拡張条件だけを返す。"""
+
+        for rule in (date_rule, holiday_rule, weekday_rule):
+            if rule and rule.required_day_staff is not None:
+                return rule.required_day_staff
+        return None
+
     return EffectiveShiftRule(
         required_day_staff=resolve("required_day_staff", shift_rule.required_day_staff),
+        required_day_staff_override=resolve_day_staffing_override(),
         required_night_staff=resolve("required_night_staff", shift_rule.required_night_staff),
         required_leader_staff=resolve("required_leader_staff", shift_rule.required_leader_staff),
         min_ability_level=resolve("min_ability_level", None),

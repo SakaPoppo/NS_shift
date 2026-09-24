@@ -10,6 +10,10 @@ ISSUE_TITLES = {
     GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED: "日勤人数が設定を下回っています",
     GenerationIssueCode.DAY_STAFFING_IMBALANCE: "日勤人数にばらつきがあります",
     GenerationIssueCode.NIGHT_COUNT_IMBALANCE: "夜勤回数にばらつきがあります",
+    GenerationIssueCode.DAY_ABILITY_BELOW_TARGET: "日勤の能力値が不足しています",
+    GenerationIssueCode.DAY_ABILITY_ABOVE_TARGET: "日勤の能力値が偏っています",
+    GenerationIssueCode.NIGHT_ABILITY_BELOW_TARGET: "夜勤の能力値が不足しています",
+    GenerationIssueCode.NIGHT_ABILITY_ABOVE_TARGET: "夜勤の能力値が偏っています",
     GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED: "月休日数が設定を超えています",
     GenerationIssueCode.OPTIMIZATION_INCOMPLETE: "一部の最適化を完了できませんでした",
     GenerationIssueCode.SHIFT_RULE_NOT_CONFIGURED: "シフト条件が未設定です",
@@ -56,6 +60,13 @@ def format_generation_issue(issue: GenerationIssue) -> tuple[str, str]:
     if issue.code == GenerationIssueCode.NIGHT_COUNT_IMBALANCE:
         difference = details.get("count_difference")
         return title, f"固定勤務などの影響により、スタッフ間の夜勤回数に最大{difference}回の差があります。必須条件は満たしています。"
+    if issue.code in {
+        GenerationIssueCode.DAY_ABILITY_BELOW_TARGET,
+        GenerationIssueCode.DAY_ABILITY_ABOVE_TARGET,
+        GenerationIssueCode.NIGHT_ABILITY_BELOW_TARGET,
+        GenerationIssueCode.NIGHT_ABILITY_ABOVE_TARGET,
+    }:
+        return title, "勤務条件の影響により、期待する能力合計から25%以上の差があります。可能な範囲で調整しています。"
     if issue.code == GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED:
         return title, "固定勤務や定休日のため、月休日数が設定の{}日より{}日多い{}日になっています。".format(
             details["configured_off_count"],
