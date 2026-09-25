@@ -396,34 +396,8 @@ PostgreSQLはローカル環境とRenderの本番環境で共通して利用し�
 このアプリの中心機能は、勤務条件をもとにシフトを自動生成する部分です。
 条件同士の競合や固定勤務の影響を考慮する必要があるため、通常のCRUDアプリと比べて実装とテストの難易度が高くなります。
 
-対策として、最適化ロジックを専用APIへ分離し、Django側では入力条件、API応答、生成後の保存・通知を自動テストしています。
+対策として、最適化ロジックを専用APIへ分離し、Django側では入力条件、API応答、生成後の保存・通知を自動テストしています。。
 
-２. フロントエンドについて
-
-ReactやNext.jsは導入せず、Django Templatesを中心に実装しています。
-月間シフト表の入力補助にはVanilla JavaScriptを使用し、Tailwind CSSとdaisyUIでPC・スマートフォンの両方に対応した画面を構築しています。
-
-ローカル開発ではDocker ComposeでDjango、PostgreSQL、Tailwind監視環境を起動します。
-本番環境ではRenderを使用し、GunicornからUvicornWorkerを介してDjango ASGIアプリケーションを起動し、WhiteNoiseで静的ファイルを配信しています。
-
-### ローカルOptimizer APIとの連携
-
-ローカルでシフト生成を確認する場合は、Ns ShiftとOptimizer APIを別々のComposeで起動します。
-
-```bash
-# ns-shift-optimizer-api
-cp .env.example .env
-# NS_shift の .env と同じ OPTIMIZER_API_KEY を設定する
-docker compose up --build
-
-# NS_shift
-cp .env.example .env
-docker compose up
-```
-
-`DJANGO_DEBUG=true` のとき、Ns Shiftは `LOCAL_OPTIMIZER_API_URL`（既定値: `http://host.docker.internal:8080`）へ接続します。`DJANGO_DEBUG=false` のときだけ、Cloud Run用の `OPTIMIZER_API_URL` を使用します。
-
-Optimizer APIは2 CPU・OR-Tools探索worker数2で起動し、`app/` のPythonコードを保存すると自動で再起動します。依存関係またはDockerfileを変更した場合のみ、API側で `docker compose up --build` を実行してください。
 
 
 ### 画面遷移図　URL

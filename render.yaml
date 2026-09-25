@@ -7,7 +7,7 @@ databases:
 
 services:
   - type: web
-    plan: starter 
+    plan: free
     name: ns-shift-web
     runtime: python
     region: singapore
