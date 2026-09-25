@@ -181,26 +181,27 @@ def get_previous_plan_carryover_values(
     """前月シフト表から、月末勤務と連勤数をスタッフ別に取り出す。"""
 
     last_date = get_month_dates(previous_plan.year, previous_plan.month)[-1]
-    last_results = {
-        result.staff_member_id: result
-        for result in ShiftResult.objects.filter(
-            shift_plan=previous_plan,
-            staff_member__in=staff_members,
-            date=last_date,
-        )
-    }
+    staff_ids = [staff_member.id for staff_member in staff_members]
+    results_by_staff_id = {staff_id: {} for staff_id in staff_ids}
+    # 月末勤務だけを先に取り、連勤数が必要なスタッフごとに再検索していたため、
+    # スタッフ数に比例して ShiftResult の検索が増えていた。対象月の結果を一度に
+    # 読み込み、スタッフ・日付ごとの辞書で月末からの連勤数を計算する。
+    for staff_id, result_date, shift_type in ShiftResult.objects.filter(
+        shift_plan=previous_plan,
+        staff_member_id__in=staff_ids,
+        date__lte=last_date,
+    ).values_list("staff_member_id", "date", "shift_type"):
+        results_by_staff_id[staff_id][result_date] = shift_type
+
     values = {}
     for staff_member in staff_members:
-        last_result = last_results.get(staff_member.id)
-        last_shift_type = last_result.shift_type if last_result else None
-        consecutive = (
-            calculate_previous_consecutive_work_days(
-                previous_plan,
-                staff_member,
-            )
-            if last_shift_type in WORKLIKE_SHIFT_TYPES
-            else 0
-        )
+        results_by_date = results_by_staff_id[staff_member.id]
+        last_shift_type = results_by_date.get(last_date)
+        consecutive = 0
+        current_date = last_date
+        while results_by_date.get(current_date) in WORKLIKE_SHIFT_TYPES:
+            consecutive += 1
+            current_date -= timedelta(days=1)
         values[staff_member.id] = (last_shift_type, consecutive)
     return values
 

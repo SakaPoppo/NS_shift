@@ -7,8 +7,9 @@ from unittest.mock import ANY, Mock, patch
 
 import requests
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
-from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.db import IntegrityError, connection
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from config.settings import resolve_optimizer_api_url
 from staff.models import StaffMember, StaffRegularDayOff
@@ -44,12 +45,14 @@ from .services import (
     get_effective_rule_for_date,
     get_japanese_holiday_dates,
     get_month_dates,
+    get_previous_plan_carryover_values,
     get_usable_previous_shift_plan,
     save_manual_shift_carryovers,
     sync_month_boundary_assignments,
 )
 from .views import (
     ShiftPlanCsvExportView,
+    ShiftRuleEditView,
     build_day_headers,
     build_shift_plan_grid,
 )
@@ -1009,6 +1012,101 @@ class ShiftPlanCsvExportViewTests(TestCase):
                     self.assertNotContains(response, "CSVダウンロード")
 
 
+class ShiftQueryCountRegressionTests(TestCase):
+    """スタッフ数を増やしても主要画面の読取クエリ数が増えないことを確認する。"""
+
+    def create_user_with_shift_data(self, username, staff_count):
+        user = get_user_model().objects.create_user(username=username, password="x")
+        previous_plan = ShiftPlan.objects.create(
+            user=user,
+            year=2026,
+            month=1,
+            status=ShiftPlan.StatusChoices.GENERATED,
+        )
+        shift_plan = ShiftPlan.objects.create(user=user, year=2026, month=2)
+        ShiftRule.objects.create(
+            shift_plan=shift_plan,
+            required_day_staff=1,
+            required_night_staff=0,
+            off_days_per_staff=8,
+            max_consecutive_work_days=5,
+        )
+        staff_members = StaffMember.objects.bulk_create(
+            [StaffMember(user=user, name=f"スタッフ{index}") for index in range(staff_count)]
+        )
+        StaffRegularDayOff.objects.bulk_create(
+            [
+                StaffRegularDayOff(staff_member=staff_member, day_of_week=0)
+                for staff_member in staff_members
+            ]
+        )
+        ShiftResult.objects.bulk_create(
+            [
+                ShiftResult(
+                    shift_plan=previous_plan,
+                    staff_member=staff_member,
+                    date=date(2026, 1, 31),
+                    shift_type=ShiftResult.ShiftTypeChoices.DAY,
+                )
+                for staff_member in staff_members
+            ]
+        )
+        return user, shift_plan
+
+    def get_query_count(self, user, url):
+        client = Client()
+        client.force_login(user)
+        with CaptureQueriesContext(connection) as queries:
+            response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        return len(queries)
+
+    def test_key_screens_do_not_add_queries_per_staff_member(self):
+        one_staff_user, one_staff_plan = self.create_user_with_shift_data(
+            "shift-query-one", 1
+        )
+        ten_staff_user, ten_staff_plan = self.create_user_with_shift_data(
+            "shift-query-ten", 10
+        )
+
+        screen_urls = (
+            (
+                "dashboard",
+                reverse("core:main_page"),
+                reverse("core:main_page"),
+            ),
+            (
+                "shift_list",
+                reverse("shifts:list"),
+                reverse("shifts:list"),
+            ),
+            (
+                "conditions",
+                reverse("shifts:conditions", kwargs={"pk": one_staff_plan.pk}),
+                reverse("shifts:conditions", kwargs={"pk": ten_staff_plan.pk}),
+            ),
+            (
+                "shift_edit",
+                reverse("shifts:edit", kwargs={"pk": one_staff_plan.pk}),
+                reverse("shifts:edit", kwargs={"pk": ten_staff_plan.pk}),
+            ),
+            (
+                "carryover_edit",
+                reverse("shifts:carryover", kwargs={"pk": one_staff_plan.pk}),
+                reverse("shifts:carryover", kwargs={"pk": ten_staff_plan.pk}),
+            ),
+        )
+
+        for name, one_staff_url, ten_staff_url in screen_urls:
+            with self.subTest(screen=name):
+                one_staff_count = self.get_query_count(one_staff_user, one_staff_url)
+                ten_staff_count = self.get_query_count(ten_staff_user, ten_staff_url)
+                self.assertEqual(
+                    one_staff_count,
+                    ten_staff_count,
+                )
+
+
 class ShiftResultModelTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -1436,6 +1534,50 @@ class ShiftRuleWorkflowTests(TestCase):
         }
         data.update(overrides)
         return data
+
+    def test_date_rule_form_rebuild_does_not_add_queries_per_date_rule(self):
+        first_rule = DateShiftRule.objects.create(
+            shift_plan=self.shift_plan,
+            target_date=date(2026, 8, 1),
+            required_day_staff=1,
+        )
+        view = ShiftRuleEditView()
+
+        with CaptureQueriesContext(connection) as one_rule_queries:
+            one_rule_forms = view.get_date_rule_forms(
+                self.shift_plan,
+                data={
+                    "date_rule_total_forms": "1",
+                    "date-rule-0-date_rule_id": str(first_rule.pk),
+                    "date-rule-0-active": "1",
+                    "date-rule-0-target_date": "2026-08-01",
+                    "date-rule-0-required_day_staff": "1",
+                },
+            )
+            self.assertTrue(all(form.is_valid() for form in one_rule_forms))
+
+        additional_rules = DateShiftRule.objects.bulk_create(
+            [
+                DateShiftRule(
+                    shift_plan=self.shift_plan,
+                    target_date=date(2026, 8, day),
+                    required_day_staff=1,
+                )
+                for day in range(2, 11)
+            ]
+        )
+        form_data = {"date_rule_total_forms": "10"}
+        for index, date_rule in enumerate([first_rule, *additional_rules]):
+            form_data[f"date-rule-{index}-date_rule_id"] = str(date_rule.pk)
+            form_data[f"date-rule-{index}-active"] = "1"
+            form_data[f"date-rule-{index}-target_date"] = date_rule.target_date.isoformat()
+            form_data[f"date-rule-{index}-required_day_staff"] = "1"
+
+        with CaptureQueriesContext(connection) as ten_rule_queries:
+            ten_rule_forms = view.get_date_rule_forms(self.shift_plan, data=form_data)
+            self.assertTrue(all(form.is_valid() for form in ten_rule_forms))
+
+        self.assertEqual(len(one_rule_queries), len(ten_rule_queries))
 
     def test_create_form_has_only_year_and_month(self):
         form = ShiftPlanCreateForm(user=self.user)
@@ -3991,6 +4133,44 @@ class ShiftCarryoverServiceTests(TestCase):
         carryover = self.current.carryovers.get(staff_member=self.staff)
         self.assertEqual(carryover.source, ShiftCarryover.SourceChoices.PREVIOUS_PLAN)
         self.assertEqual(carryover.previous_consecutive_work_days, 3)
+
+    def test_previous_plan_values_do_not_add_queries_per_staff_member(self):
+        """前月末の勤務・連勤数取得はスタッフ数でクエリ数を増やさない。"""
+        ShiftResult.objects.create(
+            shift_plan=self.previous,
+            staff_member=self.staff,
+            date=date(2025, 12, 31),
+            shift_type=ShiftResult.ShiftTypeChoices.DAY,
+        )
+
+        with CaptureQueriesContext(connection) as one_staff_queries:
+            get_previous_plan_carryover_values(self.previous, [self.staff])
+
+        additional_staff_members = StaffMember.objects.bulk_create(
+            [
+                StaffMember(user=self.user, name=f"追加スタッフ{index}")
+                for index in range(2, 11)
+            ]
+        )
+        ShiftResult.objects.bulk_create(
+            [
+                ShiftResult(
+                    shift_plan=self.previous,
+                    staff_member=staff_member,
+                    date=date(2025, 12, 31),
+                    shift_type=ShiftResult.ShiftTypeChoices.DAY,
+                )
+                for staff_member in additional_staff_members
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as ten_staff_queries:
+            get_previous_plan_carryover_values(
+                self.previous,
+                [self.staff, *additional_staff_members],
+            )
+
+        self.assertEqual(len(one_staff_queries), len(ten_staff_queries))
 
     def test_normal_build_does_not_overwrite_manual_carryover(self):
         ShiftResult.objects.create(

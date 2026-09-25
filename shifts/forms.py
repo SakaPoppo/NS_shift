@@ -413,10 +413,18 @@ class DateShiftRuleForm(forms.Form):
         min_value=1,
         required=False,
     )
-    def __init__(self, *args, shift_plan, instance=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        shift_plan,
+        instance=None,
+        existing_date_rules=None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.shift_plan = shift_plan
         self.instance = instance
+        self.existing_date_rules = existing_date_rules
 
         set_widget_attrs(self.fields["active"], **{"value": "1" if instance else "0"})
         min_date, max_date = get_month_date_range(shift_plan.year, shift_plan.month)
@@ -489,10 +497,18 @@ class DateShiftRuleForm(forms.Form):
         if target_date.year != self.shift_plan.year or target_date.month != self.shift_plan.month:
             self.add_error("target_date", "対象シフト表の年月内の日付を選択してください。")
 
-        existing_rule = self.shift_plan.date_rules.filter(target_date=target_date)
-        if self.instance:
-            existing_rule = existing_rule.exclude(pk=self.instance.pk)
-        if existing_rule.exists():
+        if self.existing_date_rules is not None:
+            existing_rule = self.existing_date_rules.get(target_date)
+            has_conflict = (
+                existing_rule is not None
+                and (self.instance is None or existing_rule.pk != self.instance.pk)
+            )
+        else:
+            existing_rule = self.shift_plan.date_rules.filter(target_date=target_date)
+            if self.instance:
+                existing_rule = existing_rule.exclude(pk=self.instance.pk)
+            has_conflict = existing_rule.exists()
+        if has_conflict:
             self.add_error("target_date", "同じ日付の特定日条件はすでに登録されています。")
 
         add_ability_requirement_errors(self, cleaned_data)

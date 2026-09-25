@@ -1,5 +1,8 @@
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from unittest.mock import patch
 
@@ -97,6 +100,35 @@ class StaffMemberFormTests(TestCase):
 
 
 class StaffMemberListTests(TestCase):
+    def test_list_query_count_does_not_increase_with_staff_members(self):
+        def create_user_with_staff_members(username, count):
+            user = get_user_model().objects.create_user(username=username, password="x")
+            staff_members = StaffMember.objects.bulk_create(
+                [StaffMember(user=user, name=f"スタッフ{index}") for index in range(count)]
+            )
+            StaffRegularDayOff.objects.bulk_create(
+                [
+                    StaffRegularDayOff(staff_member=staff_member, day_of_week=0)
+                    for staff_member in staff_members
+                ]
+            )
+            return user
+
+        one_staff_user = create_user_with_staff_members("staff-query-one", 1)
+        ten_staff_user = create_user_with_staff_members("staff-query-ten", 10)
+
+        def query_count(user):
+            client = Client()
+            client.force_login(user)
+            with CaptureQueriesContext(connection) as queries:
+                response = client.get(reverse("staff:list"))
+            self.assertEqual(response.status_code, 200)
+            return len(queries)
+
+        one_staff_count = query_count(one_staff_user)
+        ten_staff_count = query_count(ten_staff_user)
+        self.assertEqual(one_staff_count, ten_staff_count)
+
     def test_bulk_create_link_is_displayed_when_staff_can_be_created(self):
         user = get_user_model().objects.create_user(username="bulk-link-user", password="x")
         self.client.force_login(user)
@@ -720,6 +752,44 @@ class BulkStaffEditViewTests(TestCase):
                 "-ability_level", "id"
             )
         )
+
+    def test_bulk_edit_query_count_does_not_increase_with_staff_members(self):
+        first_staff_member = self.create_staff("スタッフ1")
+        StaffRegularDayOff.objects.create(
+            staff_member=first_staff_member,
+            day_of_week=0,
+        )
+
+        with CaptureQueriesContext(connection) as one_staff_queries:
+            response = self.client.get(reverse("staff:bulk_edit"))
+        self.assertEqual(response.status_code, 200)
+
+        additional_staff_members = StaffMember.objects.bulk_create(
+            [
+                StaffMember(
+                    user=self.user,
+                    name=f"スタッフ{index}",
+                    gender=StaffMember.GenderChoices.FEMALE,
+                    job=StaffMember.JobChoices.NURSE,
+                    role=StaffMember.RoleChoices.MEMBER,
+                    ability_level=2,
+                    can_night_shift=True,
+                )
+                for index in range(2, 11)
+            ]
+        )
+        StaffRegularDayOff.objects.bulk_create(
+            [
+                StaffRegularDayOff(staff_member=staff_member, day_of_week=0)
+                for staff_member in additional_staff_members
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as ten_staff_queries:
+            response = self.client.get(reverse("staff:bulk_edit"))
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(len(one_staff_queries), len(ten_staff_queries))
 
     def test_displays_only_logged_in_users_active_staff_members(self):
         visible_staff = self.create_staff("表示スタッフ")

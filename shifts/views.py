@@ -579,19 +579,38 @@ class UserShiftPlanMixin(LoginRequiredMixin):
                 total_forms = int(data.get("date_rule_total_forms", 0))
             except (TypeError, ValueError):
                 total_forms = 0
+            date_rule_ids = [
+                data.get(f"date-rule-{index}-date_rule_id")
+                for index in range(max(total_forms, 0))
+            ]
+            date_rules = list(shift_plan.date_rules.all())
+            date_rules_by_id = {
+                str(date_rule.pk): date_rule
+                for date_rule in date_rules
+            }
+            date_rules_by_date = {
+                date_rule.target_date: date_rule
+                for date_rule in date_rules
+            }
             forms = []
             for index in range(max(total_forms, 0)):
                 prefix = f"date-rule-{index}"
-                date_rule_id = data.get(f"{prefix}-date_rule_id")
-                instance = None
+                date_rule_id = date_rule_ids[index]
+                instance = date_rules_by_id.get(str(date_rule_id))
                 if date_rule_id:
-                    instance = get_object_or_404(shift_plan.date_rules.all(), pk=date_rule_id)
+                    # 他のシフト表のIDや削除済みIDは、従来どおり404として扱う。
+                    if instance is None:
+                        instance = get_object_or_404(
+                            shift_plan.date_rules.all(),
+                            pk=date_rule_id,
+                        )
                 forms.append(
                     DateShiftRuleForm(
                         data=data,
                         prefix=prefix,
                         shift_plan=shift_plan,
                         instance=instance,
+                        existing_date_rules=date_rules_by_date,
                     )
                 )
             return forms

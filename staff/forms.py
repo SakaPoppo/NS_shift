@@ -232,7 +232,8 @@ class StaffMemberForm(forms.ModelForm):
         if self.instance and self.instance.pk:
             # 編集画面では、関連テーブルに保存済みの固定休をチェックボックスへ戻す。
             self.fields["regular_days_off"].initial = list(
-                self.instance.regular_days_off.values_list("day_of_week", flat=True)
+                day_off.day_of_week
+                for day_off in self.instance.regular_days_off.all()
             )
 
 
