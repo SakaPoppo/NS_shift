@@ -1,0 +1,59 @@
+name: Django CI
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ns_shift_ci
+          POSTGRES_USER: ns_shift_ci
+          POSTGRES_PASSWORD: ns_shift_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ns_shift_ci -d ns_shift_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-for-production
+      DJANGO_DEBUG: "false"
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      DATABASE_URL: postgresql://ns_shift_ci:ns_shift_ci_password@localhost:5432/ns_shift_ci
+      LOCAL_OPTIMIZER_API_URL: ""
+      OPTIMIZER_API_URL: ""
+      OPTIMIZER_API_KEY: ""
+      OPTIMIZER_API_TIMEOUT: "30"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check Django configuration
+        run: python manage.py check
+
+      - name: Check PostgreSQL connection
+        run: python manage.py shell -c "from django.db import connection; connection.ensure_connection()"
+
+      - name: Run tests
+        run: python manage.py test
