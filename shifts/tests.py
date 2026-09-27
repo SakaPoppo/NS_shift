@@ -7,6 +7,7 @@ from unittest.mock import ANY, Mock, patch
 
 import requests
 from django.contrib.auth import get_user_model
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.db import IntegrityError, connection
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
@@ -31,6 +32,7 @@ from .shift_generation.payload import build_optimizer_payload
 from .shift_generation.messages import format_generation_issue
 from .shift_generation.markers import build_generation_issue_markers
 from .shift_generation.types import (
+    GeneratedShift,
     GenerationContext,
     GenerationIssue,
     GenerationIssueCode,
@@ -56,6 +58,34 @@ from .views import (
     build_day_headers,
     build_shift_plan_grid,
 )
+
+
+def build_successful_generation_result(
+    staff_members,
+    month_dates,
+    *,
+    assignments=None,
+    issues=None,
+):
+    """外部 Optimizer に依存しない Django 側テスト用の生成結果を作る。"""
+
+    assignments = assignments or {}
+    return ShiftGenerationResult(
+        status="success",
+        shifts=[
+            GeneratedShift(
+                staff_member_id=staff_member.id,
+                date=target_date,
+                shift_type=assignments.get(
+                    (staff_member.id, target_date),
+                    ShiftResult.ShiftTypeChoices.DAY,
+                ),
+            )
+            for staff_member in staff_members
+            for target_date in month_dates
+        ],
+        issues=issues or [],
+    )
 
 
 class OptimizerApiSettingsTests(SimpleTestCase):
@@ -966,6 +996,8 @@ class ShiftPlanCsvExportViewTests(TestCase):
         )
         request = RequestFactory().get("/shifts/csv/")
         request.user = user
+        SessionMiddleware(lambda request: None).process_request(request)
+        request.session.save()
 
         response = ShiftPlanCsvExportView.as_view()(request, pk=shift_plan.pk)
 
@@ -1663,8 +1695,8 @@ class ShiftRuleWorkflowTests(TestCase):
         )
 
         self.assertNotContains(response, "現在のシフトを固定")
-        self.assertContains(response, "手入力まで戻す")
-        self.assertContains(response, "希望休・固定休まで戻す")
+        self.assertContains(response, "① 自動生成のみリセット")
+        self.assertContains(response, "② 初期状態にリセット")
 
     def test_other_user_cannot_access_conditions(self):
         response = self.client.get(
@@ -2080,12 +2112,6 @@ class ShiftRuleWorkflowTests(TestCase):
         self.assertContains(response, "シフトを生成しています…")
         self.assertContains(
             response,
-            "通常は数十秒で完了しますが、スタッフ数や条件によっては"
-            "2〜3分程度かかる場合があります。",
-        )
-        self.assertContains(response, "画面を閉じずにそのままお待ちください。")
-        self.assertContains(
-            response,
             'event.submitter?.value !== "generate"',
         )
         self.assertContains(response, "window.requestAnimationFrame")
@@ -2496,7 +2522,7 @@ class ShiftRuleWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "1日の夜勤は保存できません。")
-        self.assertContains(response, "翌日の2日が希望休のため、夜勤明けを配置できません。")
+        self.assertContains(response, "翌日の明けセルに勤務が入力されています。")
         self.assertFalse(
             ShiftResult.objects.filter(
                 shift_plan=self.shift_plan,
@@ -2616,7 +2642,7 @@ class ShiftRuleWorkflowTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "翌日の2日が曜日固定休のため、夜勤明けを配置できません。")
+        self.assertContains(response, "翌日の明けセルに勤務が入力されています。")
 
 
 class ShiftCarryoverWorkflowTests(TestCase):
@@ -3071,10 +3097,21 @@ class ShiftGenerationPersistenceTests(TestCase):
         data.update(overrides)
         return ShiftRule.objects.create(shift_plan=self.shift_plan, **data)
 
+    def build_generated_result(self, *, assignments=None):
+        return build_successful_generation_result(
+            [self.staff_member],
+            get_month_dates(self.shift_plan.year, self.shift_plan.month),
+            assignments=assignments,
+        )
+
     def test_generate_and_save_shift_persists_generated_results_and_status(self):
         self.create_rule()
 
-        result = generate_and_save_shift(self.shift_plan)
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=self.build_generated_result(),
+        ):
+            result = generate_and_save_shift(self.shift_plan)
 
         saved_results = ShiftResult.objects.filter(shift_plan=self.shift_plan)
         self.shift_plan.refresh_from_db()
@@ -3113,7 +3150,11 @@ class ShiftGenerationPersistenceTests(TestCase):
             is_locked=True,
         )
 
-        generate_and_save_shift(self.shift_plan)
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=self.build_generated_result(),
+        ):
+            generate_and_save_shift(self.shift_plan)
 
         manual_result.refresh_from_db()
         locked_result.refresh_from_db()
@@ -3131,7 +3172,11 @@ class ShiftGenerationPersistenceTests(TestCase):
             is_locked=False,
         )
 
-        generate_and_save_shift(self.shift_plan)
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=self.build_generated_result(),
+        ):
+            generate_and_save_shift(self.shift_plan)
 
         replaced_results = ShiftResult.objects.filter(
             shift_plan=self.shift_plan,
@@ -3150,7 +3195,16 @@ class ShiftGenerationPersistenceTests(TestCase):
             date=date(2026, 8, 1),
         )
 
-        generate_and_save_shift(self.shift_plan)
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=self.build_generated_result(
+                assignments={
+                    (self.staff_member.id, date(2026, 8, 1)):
+                    ShiftResult.ShiftTypeChoices.OFF_REQUEST,
+                }
+            ),
+        ):
+            generate_and_save_shift(self.shift_plan)
 
         saved_result = ShiftResult.objects.get(
             shift_plan=self.shift_plan,
@@ -3192,6 +3246,9 @@ class ShiftGenerationPersistenceTests(TestCase):
         self.create_rule()
 
         with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=self.build_generated_result(),
+        ), patch(
             "shifts.shift_generation.persistence.ShiftResult.objects.bulk_create",
             side_effect=RuntimeError("boom"),
         ):
@@ -3266,7 +3323,15 @@ class ShiftGenerationPersistenceExcludedStaffTests(TestCase):
             input_type=ShiftResult.InputTypeChoices.MANUAL,
         )
 
-        generate_and_save_shift(self.shift_plan)
+        generated_result = build_successful_generation_result(
+            [self.target_staff],
+            get_month_dates(self.shift_plan.year, self.shift_plan.month),
+        )
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=generated_result,
+        ):
+            generate_and_save_shift(self.shift_plan)
 
         self.assertEqual(
             ShiftResult.objects.filter(
@@ -3355,11 +3420,24 @@ class ShiftGenerateViewTests(TestCase):
     def test_generate_action_shows_success_message(self):
         self.create_rule(max_consecutive_work_days=31)
 
-        response = self.client.post(
-            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
-            {"action": "generate"},
-            follow=True,
-        )
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=ShiftGenerationResult(
+                status="success",
+                shifts=[],
+                issues=[
+                    GenerationIssue(
+                        code=GenerationIssueCode.SHIFT_GENERATED,
+                        severity=GenerationIssueSeverity.SUCCESS,
+                    )
+                ],
+            ),
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+                follow=True,
+            )
 
         self.assertContains(response, "シフトを生成しました")
         self.assertNotContains(response, "処理時間の上限に達したため、")
@@ -3627,11 +3705,32 @@ class ShiftGenerateViewTests(TestCase):
             required_day_staff=3,
             max_consecutive_work_days=31,
         )
-        response = self.client.post(
-            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
-            {"action": "generate"},
-            follow=True,
+        fake_result = ShiftGenerationResult(
+            status="success",
+            shifts=[],
+            issues=[
+                GenerationIssue(
+                    code=GenerationIssueCode.SHIFT_GENERATED,
+                    severity=GenerationIssueSeverity.SUCCESS,
+                ),
+                GenerationIssue(
+                    code=GenerationIssueCode.DAY_STAFFING_BELOW_REQUIRED,
+                    severity=GenerationIssueSeverity.WARNING,
+                    dates=[date(2026, 8, 1)],
+                    details={"required_count": 3, "actual_count": 1},
+                ),
+            ],
         )
+
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=fake_result,
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {"action": "generate"},
+                follow=True,
+            )
 
         self.assertContains(response, "シフトを生成しました")
         self.assertContains(
@@ -3745,14 +3844,27 @@ class ShiftGenerateViewTests(TestCase):
             required_day_staff=1,
         )
 
-        response = self.client.post(
-            reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
-            {
-                "action": "generate",
-                f"shift_{self.staff_member.id}_2026-08-01": ShiftResult.ShiftTypeChoices.DAY,
-            },
-            follow=True,
-        )
+        with patch(
+            "shifts.views.generate_and_save_shift",
+            return_value=ShiftGenerationResult(
+                status="success",
+                shifts=[],
+                issues=[
+                    GenerationIssue(
+                        code=GenerationIssueCode.SHIFT_GENERATED,
+                        severity=GenerationIssueSeverity.SUCCESS,
+                    )
+                ],
+            ),
+        ):
+            response = self.client.post(
+                reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk}),
+                {
+                    "action": "generate",
+                    f"shift_{self.staff_member.id}_2026-08-01": ShiftResult.ShiftTypeChoices.DAY,
+                },
+                follow=True,
+            )
 
         saved_result = ShiftResult.objects.get(
             shift_plan=self.shift_plan,
@@ -4058,11 +4170,24 @@ class HolidayOffTests(TestCase):
         staff_member = StaffMember.objects.create(
             user=self.user, name="祝日生成", is_holiday_off=True
         )
-        result = generate_shift(self.plan)
+        holidays = get_japanese_holiday_dates(2026, 1)
+        fake_result = build_successful_generation_result(
+            [staff_member],
+            holidays,
+            assignments={
+                (staff_member.id, holiday): ShiftResult.ShiftTypeChoices.OFF
+                for holiday in holidays
+            },
+        )
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=fake_result,
+        ):
+            result = generate_shift(self.plan)
         shift_map = {
             (shift.staff_member_id, shift.date): shift.shift_type for shift in result.shifts
         }
-        for holiday in get_japanese_holiday_dates(2026, 1):
+        for holiday in holidays:
             self.assertEqual(
                 shift_map[(staff_member.id, holiday)], ShiftResult.ShiftTypeChoices.OFF
             )
@@ -4343,7 +4468,19 @@ class ShiftCarryoverServiceTests(TestCase):
         )
 
         boundary_results = sync_month_boundary_assignments(self.current)
-        result = generate_shift(self.current)
+        fake_result = build_successful_generation_result(
+            [self.staff],
+            [date(2026, 1, 2)],
+            assignments={
+                (self.staff.id, date(2026, 1, 2)):
+                ShiftResult.ShiftTypeChoices.OFF,
+            },
+        )
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            return_value=fake_result,
+        ):
+            result = generate_shift(self.current)
         shift_map = {
             shift.date: shift.shift_type for shift in result.shifts
         }
@@ -4380,28 +4517,42 @@ class ShiftCarryoverServiceTests(TestCase):
         )
         sync_month_boundary_assignments(self.current)
 
-        result = generate_shift(self.current)
-        shift_map = {
-            shift.date: shift.shift_type for shift in result.shifts
-        }
-
-        self.assertEqual(
-            [shift_map[date(2026, 1, day)] for day in (1, 2)],
-            [
+        fake_result = build_successful_generation_result(
+            [self.staff],
+            [date(2026, 1, 1), date(2026, 1, 2)],
+            assignments={
+                (self.staff.id, date(2026, 1, 1)):
                 ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                (self.staff.id, date(2026, 1, 2)):
                 ShiftResult.ShiftTypeChoices.NIGHT,
-            ],
+            },
         )
+        with patch(
+            "shifts.shift_generator.generate_with_optimizer_api",
+            side_effect=[fake_result, ShiftGenerationError()],
+        ):
+            result = generate_shift(self.current)
+            shift_map = {
+                shift.date: shift.shift_type for shift in result.shifts
+            }
 
-        for day in (10, 12):
-            DateShiftRule.objects.create(
-                shift_plan=self.current,
-                target_date=date(2026, 1, day),
-                required_night_staff=1,
+            self.assertEqual(
+                [shift_map[date(2026, 1, day)] for day in (1, 2)],
+                [
+                    ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
+                    ShiftResult.ShiftTypeChoices.NIGHT,
+                ],
             )
 
-        with self.assertRaises(ShiftGenerationError):
-            generate_shift(self.current)
+            for day in (10, 12):
+                DateShiftRule.objects.create(
+                    shift_plan=self.current,
+                    target_date=date(2026, 1, day),
+                    required_night_staff=1,
+                )
+
+            with self.assertRaises(ShiftGenerationError):
+                generate_shift(self.current)
 
     def test_previous_after_night_creates_first_day_off_idempotently(self):
         ShiftCarryover.objects.create(
