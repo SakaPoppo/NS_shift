@@ -41,6 +41,7 @@ from .shift_generation.types import (
 from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
     EffectiveShiftRule,
+    MonthBoundaryConflictError,
     WORKLIKE_SHIFT_TYPES,
     build_shift_carryovers,
     calculate_previous_consecutive_work_days,
@@ -863,6 +864,10 @@ class ShiftGenerationContextTests(TestCase):
                 "シフト最適化サービスへ接続できませんでした。時間をおいて再度お試しください。",
             ),
             (
+                requests.exceptions.RequestException(),
+                "シフト最適化サービスとの通信に失敗しました。時間をおいて再度お試しください。",
+            ),
+            (
                 invalid_json_response,
                 "シフト最適化サービスから不正な応答が返されました。時間をおいて再度お試しください。",
             ),
@@ -884,6 +889,35 @@ class ShiftGenerationContextTests(TestCase):
 
                 with self.assertRaisesMessage(OptimizerAPIError, message):
                     generate_with_optimizer_api(context)
+
+    def test_optimizer_api_client_rejects_invalid_connection_settings_before_request(self):
+        context = load_generation_context(self.shift_plan)
+        cases = (
+            (
+                "invalid_endpoint",
+                {"OPTIMIZER_API_URL": "ftp://optimizer.example.run.app"},
+                "シフト最適化サービスの接続先設定が不正です。",
+            ),
+            (
+                "invalid_timeout",
+                {"OPTIMIZER_API_TIMEOUT": 0},
+                "シフト最適化サービスのタイムアウト設定が不正です。",
+            ),
+        )
+
+        for name, extra_settings, message in cases:
+            settings_values = {
+                "OPTIMIZER_API_URL": "https://optimizer.example.run.app",
+                "OPTIMIZER_API_KEY": secrets.token_urlsafe(32),
+                **extra_settings,
+            }
+            with self.subTest(name=name), self.settings(
+                **settings_values
+            ), patch("shifts.shift_generation.client.requests.post") as mock_post:
+                with self.assertRaisesMessage(OptimizerAPIError, message):
+                    generate_with_optimizer_api(context)
+
+                mock_post.assert_not_called()
 
     def test_optimizer_api_client_rejects_invalid_shift_results(self):
         context = load_generation_context(self.shift_plan)
@@ -912,6 +946,30 @@ class ShiftGenerationContextTests(TestCase):
             (
                 "invalid_issue_details",
                 lambda payload: payload["issues"][0].update(details=[]),
+            ),
+            (
+                "non_mapping_shift",
+                lambda payload: payload.update(shifts=[None]),
+            ),
+            (
+                "non_mapping_phase_result",
+                lambda payload: payload.update(phase_results=[None]),
+            ),
+            (
+                "non_mapping_issue",
+                lambda payload: payload.update(issues=[None]),
+            ),
+            (
+                "issue_date_is_not_a_string",
+                lambda payload: payload["issues"][0].update(dates=[1]),
+            ),
+            (
+                "issue_staff_is_not_in_context",
+                lambda payload: payload["issues"][0].update(staff_ids=[999999]),
+            ),
+            (
+                "invalid_infeasible_response",
+                lambda payload: payload.update(status="infeasible"),
             ),
             (
                 "unknown_staff",
@@ -2817,6 +2875,46 @@ class ShiftCarryoverWorkflowTests(TestCase):
             ],
         )
 
+    def test_carryover_form_rejects_duplicate_staff_member(self):
+        self.create_rule()
+        data = self.carryover_post_data()
+        data.update(
+            {
+                "form-TOTAL_FORMS": "2",
+                "form-1-staff_member_id": str(self.staff_member.id),
+                "form-1-previous_last_shift_type": "",
+                "form-1-previous_consecutive_work_days": "0",
+            }
+        )
+
+        response = self.client.post(
+            reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}),
+            data,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "スタッフ情報が不正です。画面を再読み込みして入力してください。",
+        )
+        self.assertFalse(self.shift_plan.carryovers.exists())
+
+    def test_carryover_form_shows_month_boundary_conflict_without_saving(self):
+        self.create_rule()
+
+        with patch(
+            "shifts.views.sync_month_boundary_assignments",
+            side_effect=MonthBoundaryConflictError("勤務が競合しています。"),
+        ):
+            response = self.client.post(
+                reverse("shifts:carryover", kwargs={"pk": self.shift_plan.pk}),
+                self.carryover_post_data(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "月跨ぎ勤務を反映できません。 勤務が競合しています。")
+        self.assertFalse(self.shift_plan.carryovers.exists())
+
     def test_carryover_form_reuses_saved_manual_values(self):
         ShiftCarryover.objects.create(
             shift_plan=self.shift_plan,
@@ -2836,6 +2934,90 @@ class ShiftCarryoverWorkflowTests(TestCase):
             ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
         )
         self.assertEqual(form.initial["previous_consecutive_work_days"], 2)
+
+
+class GenerationIssueMessageTests(SimpleTestCase):
+    def test_formats_high_impact_issue_details_and_safe_api_error_fallback(self):
+        target_date = date(2026, 8, 2)
+        cases = (
+            (
+                GenerationIssueCode.SHIFT_RULE_NOT_CONFIGURED,
+                {},
+                [],
+                "シフト条件が未設定です",
+                "シフト生成条件を設定してから",
+            ),
+            (
+                GenerationIssueCode.NO_ACTIVE_STAFF,
+                {},
+                [],
+                "有効なスタッフがいません",
+                "有効なスタッフを1名以上",
+            ),
+            (
+                GenerationIssueCode.DAY_ABILITY_BELOW_TARGET,
+                {},
+                [],
+                "日勤の能力値が不足しています",
+                "能力合計から25%以上",
+            ),
+            (
+                GenerationIssueCode.MONTHLY_OFF_COUNT_EXCEEDED,
+                {"configured_off_count": 9, "excess_count": 2, "actual_off_count": 11},
+                [],
+                "月休日数が設定を超えています",
+                "設定の9日より2日多い11日",
+            ),
+            (
+                GenerationIssueCode.TOO_MANY_DAY_OFF_REQUESTS,
+                {"staff_name": "山田", "monthly_off_days": 9},
+                [],
+                "希望休が月休日数を超えています",
+                "山田さんは希望休を含めると月休日数9日を超えます",
+            ),
+            (
+                GenerationIssueCode.INSUFFICIENT_LEADER_STAFF,
+                {"required_count": 2, "available_count": 1},
+                [target_date],
+                "リーダー人数を確保できません",
+                "8月2日は日勤リーダー2名が必要ですが、配置可能なリーダーは1名です",
+            ),
+            (
+                GenerationIssueCode.NIGHT_SHIFT_NOT_ALLOWED,
+                {"staff_name": "山田"},
+                [target_date],
+                "夜勤設定が矛盾しています",
+                "山田さんは夜勤不可に設定されています",
+            ),
+            (
+                GenerationIssueCode.NIGHT_SEQUENCE_CONFLICT,
+                {"staff_name": "山田"},
+                [target_date],
+                "夜勤後の勤務条件を満たせません",
+                "夜勤と、その後の勤務設定が両立できません",
+            ),
+            (
+                GenerationIssueCode.OPTIMIZER_API_ERROR,
+                {},
+                [],
+                "シフト最適化サービスでエラーが発生しました",
+                "時間をおいて再度お試しください。",
+            ),
+        )
+
+        for code, details, dates, title, body_part in cases:
+            with self.subTest(code=code):
+                actual_title, body = format_generation_issue(
+                    GenerationIssue(
+                        code=code,
+                        severity=GenerationIssueSeverity.ERROR,
+                        dates=dates,
+                        details=details,
+                    )
+                )
+
+                self.assertEqual(actual_title, title)
+                self.assertIn(body_part, body)
 
 
 class GenerationIssueMarkerTests(SimpleTestCase):
