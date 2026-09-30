@@ -1,13 +1,13 @@
 from django.urls import path
 
 from .views import (
+    ShiftCarryoverChoiceView,
+    ShiftCarryoverEditView,
     ShiftPlanCreateView,
     ShiftPlanCsvExportView,
     ShiftPlanDeleteView,
     ShiftPlanEditView,
     ShiftPlanListView,
-    ShiftCarryoverChoiceView,
-    ShiftCarryoverEditView,
     ShiftRuleEditView,
 )
 

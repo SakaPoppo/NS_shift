@@ -3,7 +3,6 @@
 from ..models import ShiftResult
 from .types import GenerationIssue, GenerationIssueCode
 
-
 ISSUE_TITLES = {
     GenerationIssueCode.SHIFT_GENERATED: "シフトを生成しました",
     GenerationIssueCode.DAY_STAFFING_ABOVE_REQUIRED: "日勤人数を調整しました",

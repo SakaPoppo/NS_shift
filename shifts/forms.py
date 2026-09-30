@@ -339,8 +339,6 @@ class WeekdayShiftRuleForm(forms.Form):
             return cleaned_data
 
         has_meaningful_input = self.has_meaningful_input()
-        min_ability_level = cleaned_data.get("min_ability_level")
-        min_ability_level_staff_count = cleaned_data.get("min_ability_level_staff_count")
 
         if has_meaningful_input and day_of_week is None:
             self.add_error("day_of_week", "条件を設定する曜日を選択してください。")

@@ -8,7 +8,13 @@ from jpholiday import JPHoliday
 
 from staff.models import StaffMember
 
-from .models import DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, WeekdayShiftRule
+from .models import (
+    DayOffRequest,
+    ShiftCarryover,
+    ShiftPlan,
+    ShiftResult,
+    WeekdayShiftRule,
+)
 
 """画面表示以外の共通業務ロジック用ファイル"""
 

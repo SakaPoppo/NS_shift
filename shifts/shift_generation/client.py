@@ -22,7 +22,6 @@ from .types import (
     ShiftOptimizationSummary,
 )
 
-
 _ALLOWED_ISSUE_CODES = frozenset(
     value
     for name, value in vars(GenerationIssueCode).items()
