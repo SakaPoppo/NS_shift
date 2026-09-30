@@ -8,7 +8,6 @@ from datetime import date
 from .messages import ISSUE_TITLES
 from .types import GenerationIssue, GenerationIssueCode, GenerationIssueSeverity
 
-
 ISSUE_LEVEL_PRIORITIES = {
     GenerationIssueSeverity.WARNING: 1,
     GenerationIssueSeverity.ERROR: 2,

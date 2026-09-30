@@ -5,14 +5,12 @@ from django.db import transaction
 from .models import ShiftPlan
 from .shift_generation.client import generate_with_optimizer_api
 from .shift_generation.context import load_generation_context
+from .shift_generation.persistence import persist_generated_shift
 from .shift_generation.persistence import (
-    persist_generated_shift,
-    save_generated_shift_results,
+    save_generated_shift_results as save_generated_shift_results,
 )
-from .shift_generation.types import (
-    ShiftGenerationError,
-    ShiftGenerationResult,
-)
+from .shift_generation.types import ShiftGenerationError as ShiftGenerationError
+from .shift_generation.types import ShiftGenerationResult
 
 
 def generate_shift(shift_plan: ShiftPlan) -> ShiftGenerationResult:

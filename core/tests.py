@@ -5,7 +5,6 @@ from django.urls import reverse
 from shifts.models import ShiftPlan
 from staff.models import StaffMember
 
-
 User = get_user_model()
 
 

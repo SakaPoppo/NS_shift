@@ -4,7 +4,6 @@ from django.forms import BaseModelFormSet, modelformset_factory
 from .constants import MAX_ACTIVE_STAFF_COUNT
 from .models import StaffMember, StaffRegularDayOff
 
-
 BULK_STAFF_LEVELS = range(5, 0, -1)
 BULK_STAFF_LEVEL_LABELS = {
     5: "Lv5 管理者",

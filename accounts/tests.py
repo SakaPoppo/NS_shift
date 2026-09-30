@@ -2,8 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from .forms import LoginForm, REGISTRATION_UNAVAILABLE_MESSAGE, SignUpForm
-
+from .forms import REGISTRATION_UNAVAILABLE_MESSAGE, LoginForm, SignUpForm
 
 User = get_user_model()
 

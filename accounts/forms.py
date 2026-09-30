@@ -3,7 +3,6 @@ from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 
-
 User = get_user_model()
 REGISTRATION_UNAVAILABLE_MESSAGE = (
     "入力内容では登録できませんでした。内容を変更してもう一度お試しください。"

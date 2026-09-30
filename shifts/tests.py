@@ -3,7 +3,7 @@ import json
 import secrets
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import Mock, patch
 
 import requests
 from django.contrib.auth import get_user_model
@@ -12,37 +12,23 @@ from django.db import IntegrityError, connection
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+
 from config.settings import resolve_optimizer_api_url
 from staff.models import StaffMember, StaffRegularDayOff
 
-from .shift_generation.context import load_generation_context
-from .shift_generation.client import (
-    OptimizerAPIError,
-    generate_with_optimizer_api,
-)
-from .shift_generation.persistence import save_generated_shift_results
 from .forms import ShiftCarryoverEntryForm, ShiftPlanCreateForm, ShiftRuleForm
-from .shift_generator import (
-    ShiftGenerationError,
-    ShiftGenerationResult,
-    generate_and_save_shift,
-    generate_shift,
+from .models import (
+    DateShiftRule,
+    DayOffRequest,
+    ShiftCarryover,
+    ShiftPlan,
+    ShiftResult,
+    ShiftRule,
+    WeekdayShiftRule,
 )
-from .shift_generation.payload import build_optimizer_payload
-from .shift_generation.messages import format_generation_issue
-from .shift_generation.markers import build_generation_issue_markers
-from .shift_generation.types import (
-    GeneratedShift,
-    GenerationContext,
-    GenerationIssue,
-    GenerationIssueCode,
-    GenerationIssueSeverity,
-)
-from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
 from .services import (
     EffectiveShiftRule,
     MonthBoundaryConflictError,
-    WORKLIKE_SHIFT_TYPES,
     build_shift_carryovers,
     calculate_previous_consecutive_work_days,
     get_effective_rule_for_date,
@@ -52,6 +38,28 @@ from .services import (
     get_usable_previous_shift_plan,
     save_manual_shift_carryovers,
     sync_month_boundary_assignments,
+)
+from .shift_generation.client import (
+    OptimizerAPIError,
+    generate_with_optimizer_api,
+)
+from .shift_generation.context import load_generation_context
+from .shift_generation.markers import build_generation_issue_markers
+from .shift_generation.messages import format_generation_issue
+from .shift_generation.payload import build_optimizer_payload
+from .shift_generation.persistence import save_generated_shift_results
+from .shift_generation.types import (
+    GeneratedShift,
+    GenerationContext,
+    GenerationIssue,
+    GenerationIssueCode,
+    GenerationIssueSeverity,
+)
+from .shift_generator import (
+    ShiftGenerationError,
+    ShiftGenerationResult,
+    generate_and_save_shift,
+    generate_shift,
 )
 from .views import (
     ShiftPlanCsvExportView,

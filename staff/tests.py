@@ -1,10 +1,10 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.test import TestCase
-from django.test import Client
+from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
-from unittest.mock import patch
 
 from .constants import MAX_ACTIVE_STAFF_COUNT
 from .forms import BulkStaffSetupForm, StaffMemberForm

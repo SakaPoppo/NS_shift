@@ -7,7 +7,6 @@ from staff.models import StaffMember
 
 from ..models import ShiftResult
 
-
 GENERATABLE_SHIFT_TYPES = (
     ShiftResult.ShiftTypeChoices.DAY,
     ShiftResult.ShiftTypeChoices.NIGHT,

@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import DateShiftRule, DayOffRequest, ShiftCarryover, ShiftPlan, ShiftResult, ShiftRule, WeekdayShiftRule
+from .models import (
+    DateShiftRule,
+    DayOffRequest,
+    ShiftCarryover,
+    ShiftPlan,
+    ShiftResult,
+    ShiftRule,
+    WeekdayShiftRule,
+)
 
 
 @admin.register(ShiftPlan)
