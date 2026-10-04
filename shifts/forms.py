@@ -165,8 +165,10 @@ class ShiftRuleForm(forms.Form):
         min_value=1,
     )
     night_shift_next_day_off = forms.TypedChoiceField(
-        label="夜勤明け翌日を公休にするか",
-        choices=((True, "する"), (False, "しない")),
+        label="夜勤の連続を許可するかどうか",
+        # 保存時は既存の night_shift_next_day_off をそのまま使う。
+        # 「連続を許可する」は、明け翌日の公休を設定しない状態に対応する。
+        choices=((False, "許可する"), (True, "許可しない")),
         coerce=coerce_bool,
         widget=forms.RadioSelect,
     )

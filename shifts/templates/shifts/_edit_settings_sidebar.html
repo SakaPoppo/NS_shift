@@ -1,0 +1,147 @@
+<aside
+  id="shift-settings-sidebar"
+  class="fixed inset-y-0 left-0 z-[60] flex w-[280px] shrink-0 -translate-x-full flex-col border-r border-slate-200 bg-white shadow-2xl transition-[width,transform] duration-200 lg:sticky lg:top-20 lg:z-20 lg:h-[calc(100vh-6rem)] lg:w-[280px] lg:translate-x-0 lg:rounded-2xl lg:border lg:shadow-sm"
+  aria-label="シフト設定"
+>
+  <div data-settings-sidebar-content class="flex min-h-0 flex-1 flex-col">
+    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+      <h2 class="text-sm font-black tracking-wide text-slate-900">シフト設定</h2>
+      <button
+        type="button"
+        data-settings-close
+        class="btn btn-ghost btn-sm btn-square rounded-lg text-slate-600 hover:bg-slate-100"
+        aria-label="シフト設定を閉じる"
+        title="シフト設定を閉じる"
+      >
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+          <path d="M9 3v18"></path>
+          <path d="m16 9-3 3 3 3"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
+      <section aria-labelledby="shift-condition-heading">
+        <h3 id="shift-condition-heading" class="text-sm font-black text-slate-900">シフト条件</h3>
+
+        <div class="mt-4 space-y-4 text-sm">
+          <section aria-labelledby="staffing-condition-heading">
+            <h4 id="staffing-condition-heading" class="text-[11px] font-black tracking-wide text-sky-700">人数条件</h4>
+            <dl class="mt-1.5 space-y-1">
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">日勤必要数</dt>
+                <dd class="font-black text-slate-900">{{ shift_rule.required_day_staff }} <span class="text-xs font-medium text-slate-500">人</span></dd>
+              </div>
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">夜勤必要数</dt>
+                <dd class="font-black text-slate-900">{{ shift_rule.required_night_staff }} <span class="text-xs font-medium text-slate-500">人</span></dd>
+              </div>
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">リーダー必要数</dt>
+                <dd class="font-black text-slate-900">{{ shift_rule.required_leader_staff }} <span class="text-xs font-medium text-slate-500">人</span></dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="border-t border-slate-100 pt-4" aria-labelledby="days-condition-heading">
+            <h4 id="days-condition-heading" class="text-[11px] font-black tracking-wide text-sky-700">日数条件</h4>
+            <dl class="mt-1.5 space-y-1">
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">休日数</dt>
+                <dd class="font-black text-slate-900">{{ shift_rule.off_days_per_staff }} <span class="text-xs font-medium text-slate-500">日</span></dd>
+              </div>
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">連勤上限</dt>
+                <dd class="font-black text-slate-900">{{ shift_rule.max_consecutive_work_days }} <span class="text-xs font-medium text-slate-500">日</span></dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="border-t border-slate-100 pt-4" aria-labelledby="work-rule-heading">
+            <h4 id="work-rule-heading" class="text-[11px] font-black tracking-wide text-sky-700">勤務ルール</h4>
+            <dl class="mt-1.5">
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">夜勤連続の許可</dt>
+                <dd>
+                  {% if shift_rule.night_shift_next_day_off %}
+                    <span class="font-black text-red-700">OFF</span>
+                  {% else %}
+                    <span class="font-black text-sky-700">ON</span>
+                  {% endif %}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="border-t border-slate-100 pt-4" aria-labelledby="exception-condition-heading">
+            <h4 id="exception-condition-heading" class="text-[11px] font-black tracking-wide text-sky-700">例外条件</h4>
+            <dl class="mt-1.5 space-y-1">
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">曜日別条件</dt>
+                <dd class="{% if weekday_rule_count %}font-black text-slate-900{% else %}font-bold text-slate-400{% endif %}">{{ weekday_rule_count }} <span class="text-xs font-medium">件</span></dd>
+              </div>
+              <div class="flex items-baseline justify-between gap-3 py-1">
+                <dt class="text-slate-600">特定日条件</dt>
+                <dd class="{% if date_rule_count %}font-black text-slate-900{% else %}font-bold text-slate-400{% endif %}">{{ date_rule_count }} <span class="text-xs font-medium">件</span></dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+
+        <div class="mt-5 border-t border-slate-200 pt-4">
+          <a
+            href="{% url 'shifts:conditions' shift_plan.pk %}"
+            class="btn btn-primary h-10 min-h-10 w-full rounded-lg border-brand-500 bg-brand-500 px-2 text-xs text-white hover:border-brand-600 hover:bg-brand-600"
+          >
+            シフト条件を編集
+          </a>
+        </div>
+      </section>
+
+      <section class="border-t border-slate-200 pt-5" aria-labelledby="shift-type-guide-heading">
+        <h3 id="shift-type-guide-heading" class="text-sm font-black text-slate-900">勤務区分ガイド</h3>
+
+        <section class="mt-3" aria-labelledby="shift-type-list-heading">
+          <h4 id="shift-type-list-heading" class="text-[11px] font-black tracking-wide text-sky-700">勤務区分</h4>
+          <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-amber-200 bg-amber-100 px-1 py-0.5 font-black text-amber-800">日</dt><dd class="text-slate-600">日勤</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-sky-200 bg-sky-100 px-1 py-0.5 font-black text-sky-800">夜</dt><dd class="text-slate-600">夜勤</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-violet-200 bg-violet-100 px-1 py-0.5 font-black text-violet-800">明</dt><dd class="text-slate-600">夜勤明け</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-rose-200 bg-rose-100 px-1 py-0.5 font-black text-rose-800">休</dt><dd class="text-slate-600">公休</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-red-200 bg-red-100 px-1 py-0.5 font-black text-red-800">希</dt><dd class="text-slate-600">希望休</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-pink-200 bg-pink-100 px-1 py-0.5 font-black text-pink-800">有</dt><dd class="text-slate-600">有給</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-pink-200 bg-pink-100 px-1 py-0.5 font-black text-pink-800">特</dt><dd class="text-slate-600">特別休暇</dd></div>
+            <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-emerald-200 bg-emerald-100 px-1 py-0.5 font-black text-emerald-800">研</dt><dd class="text-slate-600">研修</dd></div>
+          </dl>
+        </section>
+
+        <section class="mt-4 border-t border-slate-100 pt-4" aria-labelledby="shift-calculation-guide-heading">
+          <h4 id="shift-calculation-guide-heading" class="text-[11px] font-black tracking-wide text-sky-700">集計・計算ルール</h4>
+          <div class="mt-2 space-y-2 text-xs leading-5 text-slate-600">
+            <p><span class="font-bold text-slate-800">月休日数に含む</span>：公休・希望休</p>
+            <p><span class="font-bold text-slate-800">月休日数に含まない</span>：有給・特別休暇</p>
+            <p><span class="font-bold text-slate-800">研修</span>：日勤数に含まない・連勤には含む</p>
+          </div>
+        </section>
+      </section>
+    </div>
+  </div>
+
+  <div data-settings-icon-rail class="hidden h-full items-center justify-center py-3 lg:hidden">
+    <button
+      type="button"
+      data-settings-open
+      class="btn btn-ghost flex h-auto min-h-0 w-full flex-col gap-1 rounded-none px-1 py-3 text-slate-600 hover:bg-sky-50 hover:text-sky-700"
+      aria-label="シフト設定と勤務区分ガイドを開く"
+      title="シフト設定・勤務区分ガイドを開く"
+    >
+      <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+        <path d="M9 3v18"></path>
+        <path d="m13 9 3 3-3 3"></path>
+      </svg>
+      <span class="text-[10px] font-black leading-none">設定</span>
+    </button>
+  </div>
+</aside>

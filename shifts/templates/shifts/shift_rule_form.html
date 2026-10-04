@@ -97,11 +97,11 @@
 
           <div class="form-control w-full gap-2">
             <span class="label justify-start gap-3 pb-0">
-              <span class="label-text font-semibold text-slate-700">夜勤明け翌日を公休にするか</span>
+              <span class="label-text font-semibold text-slate-700">夜勤の連続を許可するかどうか</span>
               {% include "components/field_badge.html" with variant="required" %}
             </span>
             <div class="label justify-start px-0 pt-0">
-              <span class="label-text-alt text-base-content/60">「しない」を選んだ場合、夜勤が連続で配置される場合があります。</span>
+              <span class="label-text-alt text-base-content/60">「許可する」を選んだ場合、夜勤明け翌日に公休を自動設定せず、夜勤が連続で配置される場合があります。</span>
             </div>
             <div class="mt-2 grid gap-3 sm:grid-cols-2">
               {% for radio in rule_form.night_shift_next_day_off %}

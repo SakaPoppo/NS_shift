@@ -4,91 +4,69 @@
 
 {% block content %}
   <section class="mx-auto w-full max-w-[1680px] px-2 py-2 sm:px-3 lg:px-4">
-    <div class="flex flex-col gap-3">
-      <div>
-        <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
-          {{ shift_plan.display_title }}
-        </h1>
-      </div>
+    <button
+      type="button"
+      data-settings-open
+      class="btn btn-outline mb-3 h-10 min-h-10 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 lg:hidden"
+      aria-controls="shift-settings-sidebar"
+      aria-label="シフト設定を開く"
+    >
+      <svg class="mr-1 h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20h-3v-.08A1.7 1.7 0 0 0 10.66 18.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 14.7a1.7 1.7 0 0 0-1.56-1.04h-.08v-3h.08A1.7 1.7 0 0 0 7 9.62a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.04-1.56V4.32h3v.08a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.08v3h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+      </svg>
+      シフト設定
+    </button>
 
-      <details class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <summary class="cursor-pointer list-none text-sm font-black text-slate-900">
-          シフト生成条件 ▼
-        </summary>
-        <div class="mt-4">
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">必要日勤数</p>
-              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_day_staff }}人</p>
+    <div
+      id="shift-settings-backdrop"
+      class="fixed inset-0 z-50 hidden bg-slate-950/40 backdrop-blur-[1px] lg:hidden"
+      aria-hidden="true"
+    ></div>
+
+    <div class="flex min-w-0 items-start gap-3 lg:gap-4">
+      {% include "shifts/_edit_settings_sidebar.html" %}
+
+      <main class="min-w-0 flex-1 space-y-3">
+        <div>
+          <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
+            {{ shift_plan.display_title }}
+          </h1>
+        </div>
+
+        <section class="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5" aria-labelledby="shift-workflow-heading">
+          <h2 id="shift-workflow-heading" class="text-sm font-black tracking-wide text-slate-900">シフト作成の流れ</h2>
+          <div class="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:gap-2">
+            <div class="flex flex-1 items-start gap-2.5">
+              <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[11px] font-black text-sky-800">1</span>
+              <div>
+                <p class="text-sm font-black text-sky-800">希望を入力</p>
+                <p class="mt-0.5 text-xs font-medium text-slate-600">希望休や希望勤務を入力します</p>
+              </div>
             </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">必要夜勤数</p>
-              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_night_staff }}人</p>
+            <svg class="hidden h-5 w-5 shrink-0 rounded-full border border-slate-200 p-0.5 text-slate-400 md:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M9 18l6-6-6-6"></path>
+            </svg>
+            <div class="flex flex-1 items-start gap-2.5">
+              <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[11px] font-black text-sky-800">2</span>
+              <div>
+                <p class="text-sm font-black text-sky-800">保存</p>
+                <p class="mt-0.5 text-xs font-medium text-slate-600">入力内容を保存します</p>
+              </div>
             </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">月休日数</p>
-              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.off_days_per_staff }}日</p>
-            </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">必要リーダー数</p>
-              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.required_leader_staff }}人</p>
-            </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">最大連勤</p>
-              <p class="mt-1 text-base font-black text-slate-900">{{ shift_rule.max_consecutive_work_days }}日</p>
-            </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">明け翌日公休</p>
-              <p class="mt-1 text-base font-black text-slate-900">
-                {% if shift_rule.night_shift_next_day_off %}する{% else %}しない{% endif %}
-              </p>
-            </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">曜日条件</p>
-              <p class="mt-1 text-base font-black text-slate-900">曜日条件：{{ weekday_rule_count }}件</p>
-            </div>
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-bold text-slate-500">特定日条件</p>
-              <p class="mt-1 text-base font-black text-slate-900">特定日条件：{{ date_rule_count }}件</p>
+            <svg class="hidden h-5 w-5 shrink-0 rounded-full border border-slate-200 p-0.5 text-slate-400 md:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M9 18l6-6-6-6"></path>
+            </svg>
+            <div class="flex flex-1 items-start gap-2.5">
+              <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[11px] font-black text-sky-800">3</span>
+              <div>
+                <p class="text-sm font-black text-sky-800">シフト生成</p>
+                <p class="mt-0.5 text-xs font-medium text-slate-600">保存した内容から自動で作成します</p>
+              </div>
             </div>
           </div>
+        </section>
 
-          <div class="mt-5 flex flex-wrap justify-end gap-3">
-            <a
-              href="{% url 'shifts:carryover' shift_plan.pk %}"
-              class="btn btn-outline h-11 rounded-lg border-slate-300 bg-white px-5 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
-            >
-              前月末情報を編集
-            </a>
-            <a
-              href="{% url 'shifts:conditions' shift_plan.pk %}"
-              class="btn btn-primary h-11 rounded-lg border-brand-500 bg-brand-500 px-5 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
-            >
-              条件設定へ
-            </a>
-          </div>
-        </div>
-      </details>
-
-      <details class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <summary class="cursor-pointer list-none text-sm font-black text-slate-900">
-          勤務区分について ▼
-        </summary>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <span class="inline-flex rounded-lg border border-amber-200 bg-amber-100 px-3 py-1 text-sm font-black text-amber-800">日：日勤</span>
-          <span class="inline-flex rounded-lg border border-sky-200 bg-sky-100 px-3 py-1 text-sm font-black text-sky-800">夜：夜勤</span>
-          <span class="inline-flex rounded-lg border border-violet-200 bg-violet-100 px-3 py-1 text-sm font-black text-violet-800">明：夜勤明け</span>
-          <span class="inline-flex rounded-lg border border-rose-200 bg-rose-100 px-3 py-1 text-sm font-black text-rose-800">休：公休</span>
-          <span class="inline-flex rounded-lg border border-red-200 bg-red-100 px-3 py-1 text-sm font-black text-red-800">希：希望休</span>
-          <span class="inline-flex rounded-lg border border-pink-200 bg-pink-100 px-3 py-1 text-sm font-black text-pink-800">有：有給</span>
-          <span class="inline-flex rounded-lg border border-pink-200 bg-pink-100 px-3 py-1 text-sm font-black text-pink-800">特：特別休暇</span>
-          <span class="inline-flex rounded-lg border border-emerald-200 bg-emerald-100 px-3 py-1 text-sm font-black text-emerald-800">研：研修</span>
-        </div>
-        <div class="mt-4 space-y-1 text-sm font-medium text-slate-600">
-          <p>公休・希望休・有給・特別休暇は、月間の非勤務日数として集計されます。</p>
-          <p>研修は月休日数・日勤人数には含まれませんが、連勤には含まれます。</p>
-        </div>
-      </details>
 
       <form
         id="shift-plan-form"
@@ -111,9 +89,17 @@
             <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <h2 class="text-sm font-black tracking-wide text-slate-900">シフト表</h2>
               <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-                <p class="mr-3 self-center whitespace-nowrap text-sm font-bold text-slate-600 sm:mr-5">
-                  生成対象 <span data-generation-target-count>{{ generation_target_count }}</span>名 / 対象外 <span data-excluded-staff-count>{{ excluded_staff_count }}</span>名
-                </p>
+                <div class="mr-3 flex flex-wrap items-center gap-1.5 text-xs font-bold text-slate-600 sm:mr-5">
+                  <span class="rounded-md bg-sky-50 px-2 py-1 text-sky-800">生成対象 <span data-generation-target-count>{{ generation_target_count }}</span>名</span>
+                  <span class="rounded-md bg-slate-100 px-2 py-1 text-slate-600">対象外 <span data-excluded-staff-count>{{ excluded_staff_count }}</span>名</span>
+                  <span class="inline-flex align-middle" title="チェックを外したスタッフはシフト自動生成の対象から除外されます。">
+                    <svg class="h-4 w-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="生成対象の説明">
+                      <circle cx="12" cy="12" r="9"></circle>
+                      <path d="M12 11v5"></path>
+                      <path d="M12 8h.01"></path>
+                    </svg>
+                  </span>
+                </div>
                 <button
                   type="submit"
                   name="action"
@@ -353,6 +339,7 @@
           </div>
         </div>
       </form>
+      </main>
     </div>
   </section>
 
@@ -386,6 +373,81 @@
       <p class="mt-2 text-sm font-medium text-slate-600">画面を閉じずにそのままお待ちください</p>
     </div>
   </div>
+
+  <script>
+    (() => {
+      const sidebar = document.getElementById("shift-settings-sidebar");
+      const sidebarContent = sidebar?.querySelector("[data-settings-sidebar-content]");
+      const iconRail = sidebar?.querySelector("[data-settings-icon-rail]");
+      const backdrop = document.getElementById("shift-settings-backdrop");
+      const openButtons = document.querySelectorAll("[data-settings-open]");
+      const closeButton = sidebar?.querySelector("[data-settings-close]");
+      const desktopMedia = window.matchMedia("(min-width: 1024px)");
+      const originalBodyOverflow = document.body.style.overflow;
+
+      if (!sidebar || !sidebarContent || !iconRail || !backdrop) return;
+
+      const isDesktop = () => desktopMedia.matches;
+      const isDesktopExpanded = () => !sidebar.classList.contains("lg:w-14");
+      const isMobileDrawerOpen = () => sidebar.classList.contains("translate-x-0");
+      const updateControls = () => {
+        const isOpen = isDesktop() ? isDesktopExpanded() : isMobileDrawerOpen();
+        openButtons.forEach((button) => button.setAttribute("aria-expanded", String(isOpen)));
+      };
+      const setDesktopExpanded = (expanded) => {
+        sidebar.classList.toggle("lg:w-[280px]", expanded);
+        sidebar.classList.toggle("lg:w-14", !expanded);
+        sidebarContent.classList.toggle("lg:hidden", !expanded);
+        iconRail.classList.toggle("lg:hidden", expanded);
+        iconRail.classList.toggle("lg:flex", !expanded);
+        updateControls();
+      };
+      const openMobileDrawer = () => {
+        sidebar.classList.remove("-translate-x-full");
+        sidebar.classList.add("translate-x-0");
+        backdrop.classList.remove("hidden");
+        backdrop.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+        updateControls();
+      };
+      const closeMobileDrawer = () => {
+        sidebar.classList.remove("translate-x-0");
+        sidebar.classList.add("-translate-x-full");
+        backdrop.classList.add("hidden");
+        backdrop.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = originalBodyOverflow;
+        updateControls();
+      };
+      const openSettings = () => {
+        if (isDesktop()) {
+          setDesktopExpanded(true);
+        } else {
+          openMobileDrawer();
+        }
+      };
+      const closeSettings = () => {
+        if (isDesktop()) {
+          setDesktopExpanded(false);
+        } else {
+          closeMobileDrawer();
+        }
+      };
+
+      openButtons.forEach((button) => button.addEventListener("click", openSettings));
+      closeButton?.addEventListener("click", closeSettings);
+      backdrop.addEventListener("click", closeMobileDrawer);
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !isDesktop() && isMobileDrawerOpen()) {
+          closeMobileDrawer();
+        }
+      });
+      desktopMedia.addEventListener("change", () => {
+        if (isDesktop()) closeMobileDrawer();
+        updateControls();
+      });
+      updateControls();
+    })();
+  </script>
 
   <script>
     (() => {
