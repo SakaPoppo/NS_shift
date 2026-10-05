@@ -22,10 +22,7 @@ def build_optimizer_payload(context: GenerationContext) -> dict:
                 "role": str(staff_member.role),
                 "ability_level": staff_member.ability_level,
                 "can_night_shift": staff_member.can_night_shift,
-                "regular_days_off": sorted(
-                    day_off.day_of_week
-                    for day_off in staff_member.regular_days_off.all()
-                ),
+                "regular_days_off": list(staff_member.regular_days_off),
             }
             for staff_member in context.staff_members
         ],
