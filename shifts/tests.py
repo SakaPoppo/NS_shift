@@ -54,6 +54,7 @@ from .shift_generation.types import (
     GenerationIssue,
     GenerationIssueCode,
     GenerationIssueSeverity,
+    GenerationStaff,
 )
 from .shift_generator import (
     ShiftGenerationError,
@@ -457,16 +458,13 @@ class ShiftGenerationContextTests(TestCase):
     def test_build_optimizer_payload_serializes_generation_context(self):
         target_date = date(2026, 9, 1)
         next_date = date(2026, 9, 2)
-        staff_member = StaffMember.objects.create(
-            user=self.user,
+        staff_member = GenerationStaff(
+            id=99,
             name="payload対象",
-            role=StaffMember.RoleChoices.LEADER,
+            role="leader",
             ability_level=4,
             can_night_shift=True,
-        )
-        StaffRegularDayOff.objects.create(
-            staff_member=staff_member,
-            day_of_week=StaffRegularDayOff.DayOfWeekChoices.MONDAY,
+            regular_days_off=(0,),
         )
         effective_rule = EffectiveShiftRule(
             required_day_staff=8,
@@ -499,7 +497,7 @@ class ShiftGenerationContextTests(TestCase):
             [
                 {
                     "id": staff_member.id,
-                    "role": StaffMember.RoleChoices.LEADER,
+                    "role": "leader",
                     "ability_level": 4,
                     "can_night_shift": True,
                     "regular_days_off": [0],

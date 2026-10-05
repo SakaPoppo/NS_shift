@@ -16,6 +16,7 @@ from .types import (
     GenerationIssue,
     GenerationIssueCode,
     GenerationIssueSeverity,
+    GenerationStaff,
     ShiftGenerationError,
 )
 
@@ -101,6 +102,17 @@ def load_generation_context(shift_plan) -> GenerationContext:
         }
         for staff in staff_members
     }
+    generation_staff_members = [
+        GenerationStaff(
+            id=staff.id,
+            name=staff.name,
+            role=str(staff.role),
+            ability_level=staff.ability_level,
+            can_night_shift=staff.can_night_shift,
+            regular_days_off=tuple(sorted(regular_day_offs[staff.id])),
+        )
+        for staff in staff_members
+    ]
     fixed_assignments = _build_fixed_assignments(
         month_dates=month_dates,
         staff_members=staff_members,
@@ -183,7 +195,7 @@ def load_generation_context(shift_plan) -> GenerationContext:
             )
 
     _validate_fixed_assignments(
-        staff_members=staff_members,
+        staff_members=generation_staff_members,
         month_dates=month_dates,
         fixed_assignments=fixed_assignments,
         effective_rules=effective_rules,
@@ -192,7 +204,7 @@ def load_generation_context(shift_plan) -> GenerationContext:
     return GenerationContext(
         shift_rule=shift_rule,
         month_dates=month_dates,
-        staff_members=staff_members,
+        staff_members=generation_staff_members,
         fixed_assignments=fixed_assignments,
         effective_rules=effective_rules,
         previous_consecutive_work_days=previous_consecutive_work_days,

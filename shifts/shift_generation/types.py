@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from staff.models import StaffMember
-
 from ..models import ShiftResult
 
 GENERATABLE_SHIFT_TYPES = (
@@ -66,6 +64,18 @@ class GeneratedShift:
 
 
 @dataclass(frozen=True)
+class GenerationStaff:
+    """最適化処理に必要なスタッフ情報だけを保持する読み取り専用データ。"""
+
+    id: int
+    name: str
+    role: str
+    ability_level: int
+    can_night_shift: bool
+    regular_days_off: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
 class ShiftOptimizationSummary:
     total_actual_day_count: int
     total_required_day_count: int
@@ -102,7 +112,7 @@ class ShiftGenerationResult:
 class GenerationContext:
     shift_rule: object
     month_dates: list[date]
-    staff_members: list[StaffMember]
+    staff_members: list[GenerationStaff]
     fixed_assignments: dict[tuple[int, date], str]
     effective_rules: dict[date, object]
     previous_consecutive_work_days: dict[int, int]
