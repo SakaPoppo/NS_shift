@@ -27,8 +27,8 @@
 
         <div class="mt-4 space-y-4 text-sm">
           <section aria-labelledby="staffing-condition-heading">
-            <h4 id="staffing-condition-heading" class="text-[11px] font-black tracking-wide text-sky-700">人数条件</h4>
-            <dl class="mt-1.5 space-y-1">
+            <h4 id="staffing-condition-heading" class="text-sm font-semibold text-sky-800">人数条件</h4>
+            <dl class="mt-2 space-y-1">
               <div class="flex items-baseline justify-between gap-3 py-1">
                 <dt class="text-slate-600">日勤必要数</dt>
                 <dd class="font-black text-slate-900">{{ shift_rule.required_day_staff }} <span class="text-xs font-medium text-slate-500">人</span></dd>
@@ -45,8 +45,8 @@
           </section>
 
           <section class="border-t border-slate-100 pt-4" aria-labelledby="days-condition-heading">
-            <h4 id="days-condition-heading" class="text-[11px] font-black tracking-wide text-sky-700">日数条件</h4>
-            <dl class="mt-1.5 space-y-1">
+            <h4 id="days-condition-heading" class="text-sm font-semibold text-sky-800">日数条件</h4>
+            <dl class="mt-2 space-y-1">
               <div class="flex items-baseline justify-between gap-3 py-1">
                 <dt class="text-slate-600">休日数</dt>
                 <dd class="font-black text-slate-900">{{ shift_rule.off_days_per_staff }} <span class="text-xs font-medium text-slate-500">日</span></dd>
@@ -59,10 +59,10 @@
           </section>
 
           <section class="border-t border-slate-100 pt-4" aria-labelledby="work-rule-heading">
-            <h4 id="work-rule-heading" class="text-[11px] font-black tracking-wide text-sky-700">勤務ルール</h4>
-            <dl class="mt-1.5">
+            <h4 id="work-rule-heading" class="text-sm font-semibold text-sky-800">勤務ルール</h4>
+            <dl class="mt-2">
               <div class="flex items-baseline justify-between gap-3 py-1">
-                <dt class="text-slate-600">夜勤連続の許可</dt>
+                <dt class="text-slate-600">夜勤の連続</dt>
                 <dd>
                   {% if shift_rule.night_shift_next_day_off %}
                     <span class="font-black text-red-700">OFF</span>
@@ -75,8 +75,8 @@
           </section>
 
           <section class="border-t border-slate-100 pt-4" aria-labelledby="exception-condition-heading">
-            <h4 id="exception-condition-heading" class="text-[11px] font-black tracking-wide text-sky-700">例外条件</h4>
-            <dl class="mt-1.5 space-y-1">
+            <h4 id="exception-condition-heading" class="text-sm font-semibold text-sky-800">例外条件</h4>
+            <dl class="mt-2 space-y-1">
               <div class="flex items-baseline justify-between gap-3 py-1">
                 <dt class="text-slate-600">曜日別条件</dt>
                 <dd class="{% if weekday_rule_count %}font-black text-slate-900{% else %}font-bold text-slate-400{% endif %}">{{ weekday_rule_count }} <span class="text-xs font-medium">件</span></dd>
@@ -103,7 +103,7 @@
         <h3 id="shift-type-guide-heading" class="text-sm font-black text-slate-900">勤務区分ガイド</h3>
 
         <section class="mt-3" aria-labelledby="shift-type-list-heading">
-          <h4 id="shift-type-list-heading" class="text-[11px] font-black tracking-wide text-sky-700">勤務区分</h4>
+          <h4 id="shift-type-list-heading" class="text-sm font-semibold text-sky-800">勤務区分</h4>
           <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
             <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-amber-200 bg-amber-100 px-1 py-0.5 font-black text-amber-800">日</dt><dd class="text-slate-600">日勤</dd></div>
             <div class="flex items-center gap-1.5"><dt class="inline-flex min-w-6 justify-center rounded border border-sky-200 bg-sky-100 px-1 py-0.5 font-black text-sky-800">夜</dt><dd class="text-slate-600">夜勤</dd></div>
@@ -117,11 +117,38 @@
         </section>
 
         <section class="mt-4 border-t border-slate-100 pt-4" aria-labelledby="shift-calculation-guide-heading">
-          <h4 id="shift-calculation-guide-heading" class="text-[11px] font-black tracking-wide text-sky-700">集計・計算ルール</h4>
-          <div class="mt-2 space-y-2 text-xs leading-5 text-slate-600">
-            <p><span class="font-bold text-slate-800">月休日数に含む</span>：公休・希望休</p>
-            <p><span class="font-bold text-slate-800">月休日数に含まない</span>：有給・特別休暇</p>
-            <p><span class="font-bold text-slate-800">研修</span>：日勤数に含まない・連勤には含む</p>
+          <h4 id="shift-calculation-guide-heading" class="text-sm font-semibold text-sky-800">集計・計算ルール</h4>
+          <div class="mt-3 space-y-3 text-xs">
+            <section class="flex flex-wrap items-center gap-1.5" aria-labelledby="monthly-off-included-heading">
+              <h5 id="monthly-off-included-heading" class="font-semibold text-slate-700">月休日に含む：</h5>
+              <div class="flex flex-wrap gap-1.5">
+                <span title="公休" role="img" aria-label="公休" class="inline-flex min-w-6 justify-center rounded border border-rose-200 bg-rose-100 px-1 py-0.5 font-black text-rose-800">休</span>
+                <span title="希望休" role="img" aria-label="希望休" class="inline-flex min-w-6 justify-center rounded border border-red-200 bg-red-100 px-1 py-0.5 font-black text-red-800">希</span>
+              </div>
+            </section>
+            <section class="flex flex-wrap items-center gap-1.5" aria-labelledby="monthly-off-excluded-heading">
+              <h5 id="monthly-off-excluded-heading" class="font-semibold text-slate-700">月休日に含まない：</h5>
+              <div class="flex flex-wrap gap-1.5">
+                <span title="有給" role="img" aria-label="有給" class="inline-flex min-w-6 justify-center rounded border border-pink-200 bg-pink-100 px-1 py-0.5 font-black text-pink-800">有</span>
+                <span title="特別休暇" role="img" aria-label="特別休暇" class="inline-flex min-w-6 justify-center rounded border border-pink-200 bg-pink-100 px-1 py-0.5 font-black text-pink-800">特</span>
+              </div>
+            </section>
+            <section class="flex flex-wrap items-center gap-1.5" aria-labelledby="consecutive-work-included-heading">
+              <h5 id="consecutive-work-included-heading" class="font-semibold text-slate-700">連勤に含む：</h5>
+              <div class="flex flex-wrap gap-1.5">
+                <span title="日勤" role="img" aria-label="日勤" class="inline-flex min-w-6 justify-center rounded border border-amber-200 bg-amber-100 px-1 py-0.5 font-black text-amber-800">日</span>
+                <span title="夜勤" role="img" aria-label="夜勤" class="inline-flex min-w-6 justify-center rounded border border-sky-200 bg-sky-100 px-1 py-0.5 font-black text-sky-800">夜</span>
+                <span title="夜勤明け" role="img" aria-label="夜勤明け" class="inline-flex min-w-6 justify-center rounded border border-violet-200 bg-violet-100 px-1 py-0.5 font-black text-violet-800">明</span>
+                <span title="研修" role="img" aria-label="研修" class="inline-flex min-w-6 justify-center rounded border border-emerald-200 bg-emerald-100 px-1 py-0.5 font-black text-emerald-800">研</span>
+              </div>
+            </section>
+            <section class="flex flex-wrap items-center gap-1.5" aria-labelledby="staffing-included-heading">
+              <h5 id="staffing-included-heading" class="font-semibold text-slate-700">勤務人数に含む：</h5>
+              <div class="flex flex-wrap gap-1.5">
+                <span title="日勤" role="img" aria-label="日勤" class="inline-flex min-w-6 justify-center rounded border border-amber-200 bg-amber-100 px-1 py-0.5 font-black text-amber-800">日</span>
+                <span title="夜勤" role="img" aria-label="夜勤" class="inline-flex min-w-6 justify-center rounded border border-sky-200 bg-sky-100 px-1 py-0.5 font-black text-sky-800">夜</span>
+              </div>
+            </section>
           </div>
         </section>
       </section>
