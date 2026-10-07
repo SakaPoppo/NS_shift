@@ -90,12 +90,19 @@
         </div>
 
         <div class="mt-5 border-t border-slate-200 pt-4">
-          <a
-            href="{% url 'shifts:conditions' shift_plan.pk %}"
-            class="btn btn-primary h-10 min-h-10 w-full rounded-lg border-brand-500 bg-brand-500 px-2 text-xs text-white hover:border-brand-600 hover:bg-brand-600"
-          >
-            シフト条件を編集
-          </a>
+          {% if can_edit_conditions %}
+            <a
+              href="{% url 'shifts:conditions' shift_plan.pk %}"
+              class="btn btn-primary h-10 min-h-10 w-full rounded-lg border-brand-500 bg-brand-500 px-2 text-xs text-white hover:border-brand-600 hover:bg-brand-600"
+            >
+              シフト条件を編集
+            </a>
+          {% else %}
+            <span class="group relative block">
+              <button type="button" disabled class="trial-disabled btn btn-primary h-10 min-h-10 w-full rounded-lg border-brand-500 bg-brand-500 px-2 text-xs text-white">シフト条件を編集</button>
+              <span role="tooltip" class="pointer-events-none absolute -top-9 left-1/2 z-30 hidden -translate-x-1/2 whitespace-nowrap rounded bg-slate-900 px-2 py-1 text-xs text-white shadow-sm group-hover:block">体験版では利用できません</span>
+            </span>
+          {% endif %}
         </div>
       </section>
 

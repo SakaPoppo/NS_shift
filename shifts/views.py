@@ -754,6 +754,7 @@ class UserShiftPlanMixin(LoginRequiredMixin):
         )
         return {
             "shift_plan": shift_plan,
+            "page_title": shift_plan.display_title,
             "shift_rule": shift_rule,
             "staff_rows": staff_rows,
             "month_dates": month_dates,
@@ -773,6 +774,12 @@ class UserShiftPlanMixin(LoginRequiredMixin):
                 ShiftPlan.StatusChoices.GENERATED,
                 ShiftPlan.StatusChoices.CONFIRMED,
             },
+            "can_save": True,
+            "can_generate": True,
+            "can_reset": True,
+            "can_change_generation_targets": True,
+            "can_edit_conditions": True,
+            "show_disabled_export": False,
             "missing_previous_staff_members": [
                 staff_member for staff_member in staff_members
                 if staff_member.id not in carryover_staff_ids

@@ -1,6 +1,7 @@
 """お試し版の固定データから生成用コンテキストを構築する。"""
 
 import calendar
+from dataclasses import replace
 from datetime import date
 
 from shifts.models import ShiftResult
@@ -29,7 +30,10 @@ def get_trial_off_days(year: int, month: int) -> int:
     return 9 if calendar.monthrange(year, month)[1] == 28 else 10
 
 
-def build_trial_generation_context(reference_date: date) -> GenerationContext:
+def build_trial_generation_context(
+    reference_date: date,
+    manual_assignments: dict[tuple[int, date], str] | None = None,
+) -> GenerationContext:
     """固定サンプルデータだけでGenerationContextを構築する。"""
 
     year, month = get_trial_target_year_month(reference_date)
@@ -47,7 +51,7 @@ def build_trial_generation_context(reference_date: date) -> GenerationContext:
     )
     fixed_assignments = _build_trial_fixed_assignments(month_dates)
 
-    return GenerationContext(
+    context = GenerationContext(
         shift_rule=shift_rule,
         month_dates=month_dates,
         staff_members=list(TRIAL_STAFF_MEMBERS),
@@ -59,6 +63,16 @@ def build_trial_generation_context(reference_date: date) -> GenerationContext:
         effective_off_days={
             staff.id: shift_rule.off_days_per_staff for staff in TRIAL_STAFF_MEMBERS
         },
+    )
+    if not manual_assignments:
+        return context
+
+    fixed_assignments = dict(context.fixed_assignments)
+    fixed_assignments.update(manual_assignments)
+    return replace(
+        context,
+        fixed_assignments=fixed_assignments,
+        user_override_assignment_keys=set(manual_assignments),
     )
 
 
