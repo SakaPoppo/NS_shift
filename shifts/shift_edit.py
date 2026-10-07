@@ -14,6 +14,7 @@ BASE_FIXED_SOURCE_LABELS = {
     "regular_day_off": "曜日固定休",
     "holiday_off": "祝日固定休",
     "month_boundary": "前月勤務の引き継ぎ",
+    "trial_fixed": "固定勤務",
 }
 
 
@@ -53,6 +54,8 @@ def apply_night_shift_sequences(
     submitted_assignments,
     base_fixed_assignments,
     existing_results_by_key,
+    *,
+    shift_rule=None,
 ):
     """夜勤の入力・解除に合わせて、画面内の後続セルを連動させる。
 
@@ -60,6 +63,7 @@ def apply_night_shift_sequences(
     夜勤解除時にもユーザー入力と区別できるようにする。
     """
     month_dates_set = set(month_dates)
+    shift_rule = shift_rule or shift_plan.shift_rule
     auto_assignment_keys = set()
     night_after_conflicts = set()
 
@@ -68,7 +72,7 @@ def apply_night_shift_sequences(
         return target_date if target_date in month_dates_set else None
 
     def clear_auto_followups(staff_member_id, night_date):
-        offsets = [1, 2] if shift_plan.shift_rule.night_shift_next_day_off else [1]
+        offsets = [1, 2] if shift_rule.night_shift_next_day_off else [1]
         for offset in offsets:
             target_date = get_date_with_offset(night_date, offset)
             if target_date is None:
@@ -192,6 +196,9 @@ def validate_manual_assignments(
     base_fixed_assignments,
     existing_results_by_key,
     night_after_conflicts=frozenset(),
+    *,
+    previous_shift_types=None,
+    shift_rule=None,
 ):
     """夜勤と明けの前後関係を検証する。"""
     month_dates_set = set(month_dates)
@@ -202,12 +209,14 @@ def validate_manual_assignments(
         base_fixed_assignments,
         submitted_assignments,
     )
-    previous_shift_types = dict(
-        ShiftCarryover.objects.filter(
-            shift_plan=shift_plan,
-            source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
-        ).values_list("staff_member_id", "previous_last_shift_type")
-    )
+    if previous_shift_types is None:
+        previous_shift_types = dict(
+            ShiftCarryover.objects.filter(
+                shift_plan=shift_plan,
+                source=ShiftCarryover.SourceChoices.PREVIOUS_PLAN,
+            ).values_list("staff_member_id", "previous_last_shift_type")
+        )
+    shift_rule = shift_rule or shift_plan.shift_rule
     changed_keys = set()
 
     for cell_key, selected_value in submitted_assignments.items():
@@ -267,7 +276,7 @@ def validate_manual_assignments(
                 if staff_member_id not in previous_shift_types:
                     continue
                 if previous_shift_types[staff_member_id] == ShiftResult.ShiftTypeChoices.NIGHT:
-                    if not shift_plan.shift_rule.night_shift_next_day_off:
+                    if not shift_rule.night_shift_next_day_off:
                         next_date = current_date.fromordinal(current_date.toordinal() + 1)
                         next_shift_type = final_shift_types.get(
                             (staff_member_id, next_date),

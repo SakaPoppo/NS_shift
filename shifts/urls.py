@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .trial.views import ShiftPlanTrialView
 from .views import (
     ShiftCarryoverChoiceView,
     ShiftCarryoverEditView,
@@ -17,6 +18,7 @@ app_name = "shifts"
 # 受け取るもの: ブラウザからのパスと必要に応じた pk
 # 返すもの: 対応する view へのルーティング設定
 urlpatterns = [
+    path("trial/", ShiftPlanTrialView.as_view(), name="trial"),
     path("", ShiftPlanListView.as_view(), name="list"),
     path("create/", ShiftPlanCreateView.as_view(), name="create"),
     path("<int:pk>/conditions/", ShiftRuleEditView.as_view(), name="conditions"),

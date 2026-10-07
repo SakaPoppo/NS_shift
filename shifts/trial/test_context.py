@@ -60,7 +60,7 @@ class TrialGenerationContextTests(SimpleTestCase):
         context = build_trial_generation_context(date(2026, 10, 6))
         first_date, second_date = context.month_dates[:2]
 
-        for staff_id in (1, 2, 3):
+        for staff_id in (2, 9, 15):
             self.assertEqual(
                 context.fixed_assignments[(staff_id, first_date)],
                 ShiftResult.ShiftTypeChoices.AFTER_NIGHT,
@@ -69,7 +69,7 @@ class TrialGenerationContextTests(SimpleTestCase):
                 context.fixed_assignments[(staff_id, second_date)],
                 ShiftResult.ShiftTypeChoices.OFF,
             )
-        for staff_id in (4, 5, 6):
+        for staff_id in (4, 11, 17):
             self.assertEqual(
                 context.fixed_assignments[(staff_id, first_date)],
                 ShiftResult.ShiftTypeChoices.OFF,

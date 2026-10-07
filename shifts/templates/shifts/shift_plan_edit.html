@@ -1,6 +1,6 @@
 {% extends "core/base.html" %}
 
-{% block title %}{{ shift_plan.display_title }} | Ns Shift{% endblock %}
+{% block title %}{{ page_title }} | Ns Shift{% endblock %}
 
 {% block content %}
   <section class="mx-auto w-full max-w-[1680px] px-2 py-2 sm:px-3 lg:px-4">
@@ -26,7 +26,7 @@
       <main class="min-w-0 flex-1 space-y-3">
         <div>
           <h1 class="text-[1.8rem] font-black tracking-tight text-slate-900">
-            {{ shift_plan.display_title }}
+            {{ page_title }}
           </h1>
         </div>
 
@@ -85,24 +85,28 @@
                   <span class="rounded-md bg-sky-50 px-2 py-1 text-sky-800">生成対象 <span data-generation-target-count>{{ generation_target_count }}</span>名</span>
                   <span class="rounded-md bg-slate-100 px-2 py-1 text-slate-600">対象外 <span data-excluded-staff-count>{{ excluded_staff_count }}</span>名</span>
                 </div>
-                <button
-                  type="submit"
-                  name="action"
-                  value="save"
-                  class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
-                >
-                  保存
-                </button>
-                <button
-                  id="generate-shift-button"
-                  type="submit"
-                  name="action"
-                  value="generate"
-                  data-generate-shift
-                  class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
-                >
-                  シフト生成
-                </button>
+                {% if can_save %}
+                  <button
+                    type="submit"
+                    name="action"
+                    value="save"
+                    class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
+                  >
+                    保存
+                  </button>
+                {% endif %}
+                {% if can_generate %}
+                  <button
+                    id="generate-shift-button"
+                    type="submit"
+                    name="action"
+                    value="generate"
+                    data-generate-shift
+                    class="btn btn-primary h-10 min-h-10 rounded-lg border-brand-500 bg-brand-500 px-4 text-sm text-white hover:border-brand-600 hover:bg-brand-600"
+                  >
+                    シフト生成
+                  </button>
+                {% endif %}
                 {% if can_export_csv %}
                   <a
                     href="{% url 'shifts:export_csv' shift_plan.pk %}"
@@ -110,8 +114,14 @@
                   >
                     CSVダウンロード
                   </a>
+                {% elif show_disabled_export %}
+                  <span class="group relative inline-block cursor-not-allowed">
+                    <button type="button" disabled title="体験版では利用できません" class="trial-disabled trial-disabled-readable btn btn-outline h-10 min-h-10 whitespace-nowrap rounded-lg border-slate-400 bg-slate-100 px-4 text-sm text-slate-700">CSVダウンロード</button>
+                    <span role="tooltip" class="pointer-events-none absolute -top-9 left-1/2 z-30 hidden -translate-x-1/2 whitespace-nowrap rounded bg-slate-900 px-2 py-1 text-xs text-white shadow-sm group-hover:block">体験版では利用できません</span>
+                  </span>
                 {% endif %}
-                <details class="dropdown dropdown-end">
+                {% if can_reset %}
+                  <details class="dropdown dropdown-end">
                   <summary class="btn btn-error btn-outline h-10 min-h-10 rounded-lg px-4 text-sm">
                     リセット
                   </summary>
@@ -144,7 +154,8 @@
                       </button>
                     </li>
                   </ul>
-                </details>
+                  </details>
+                {% endif %}
               </div>
             </div>
           </div>
@@ -191,12 +202,13 @@
                     <td class="sticky left-0 z-10 w-[52px] min-w-[52px] border-b border-r border-slate-200 bg-white px-1 py-2 text-center align-middle">
                       <input
                         type="checkbox"
-                        name="generation_target_staff_ids"
+                        {% if can_change_generation_targets %}name="generation_target_staff_ids"{% endif %}
                         value="{{ row.staff_member.id }}"
                         aria-label="{{ row.staff_member.name }}を生成対象にする"
                         data-generation-target-checkbox
-                        class="checkbox checkbox-xs checkbox-info"
+                        class="checkbox checkbox-xs checkbox-info {% if not can_change_generation_targets %}cursor-not-allowed opacity-60{% endif %}"
                         {% if not row.is_excluded %}checked{% endif %}
+                        {% if not can_change_generation_targets %}disabled title="体験版では生成対象を変更できません"{% endif %}
                       >
                     </td>
                     <th class="sticky left-[52px] z-10 w-[146px] max-w-[146px] border-b border-r border-slate-200 bg-white px-2 py-2 text-left align-middle">

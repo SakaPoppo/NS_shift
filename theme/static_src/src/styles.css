@@ -39,6 +39,32 @@
   .ns-page-panel-strong {
     @apply rounded-2xl border border-base-300 bg-white shadow-sm;
   }
+
+  .trial-disabled {
+    position: relative;
+    overflow: hidden;
+    cursor: not-allowed;
+    opacity: 0.55;
+    filter: grayscale(0.35);
+  }
+
+  .trial-disabled::after {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    background: repeating-linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 6px,
+      rgb(15 23 42 / 16%) 6px,
+      rgb(15 23 42 / 16%) 9px
+    );
+  }
+
+  .trial-disabled.trial-disabled-readable {
+    opacity: 0.78;
+  }
 }
 
 /**
