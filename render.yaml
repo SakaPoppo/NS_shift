@@ -34,6 +34,8 @@ services:
         sync: false
       - key: OPTIMIZER_API_TIMEOUT
         value: "330"
+      - key: TRIAL_TRUST_X_FORWARDED_FOR
+        value: "true"
       - key: SENTRY_DSN
         sync: false
       - key: SENTRY_ENVIRONMENT

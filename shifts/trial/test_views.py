@@ -1,12 +1,23 @@
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
+from uuid import UUID
 
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from shifts.models import ShiftPlan, ShiftResult
-from shifts.shift_generation.types import GeneratedShift, ShiftGenerationResult
+from shifts.models import ShiftPlan, ShiftResult, TrialGenerationQuota
+from shifts.shift_generation.types import (
+    GeneratedShift,
+    ShiftGenerationError,
+    ShiftGenerationResult,
+)
 
+from .rate_limit import (
+    GLOBAL_SCOPE_KEY,
+    TRIAL_VISITOR_SESSION_KEY,
+    consume_trial_generation_quota,
+)
 from .state import TRIAL_SESSION_KEY
 
 
@@ -23,7 +34,11 @@ class ShiftPlanTrialViewTests(TestCase):
             "shifts.trial.views.timezone.localdate",
             return_value=reference_date,
         ):
-            return self.client.post(reverse("shifts:trial"), data)
+            return self.client.post(
+                reverse("shifts:trial"),
+                data,
+                REMOTE_ADDR="127.0.0.1",
+            )
 
     @staticmethod
     def get_cell(response, staff_id, target_date):
@@ -63,6 +78,11 @@ class ShiftPlanTrialViewTests(TestCase):
 
         self.assertContains(response, reverse("shifts:trial"))
         self.assertContains(response, "登録なしでお試し")
+
+    def test_opening_trial_creates_anonymous_visitor_id(self):
+        self.get_response()
+
+        UUID(self.client.session[TRIAL_VISITOR_SESSION_KEY])
 
     def test_save_uses_session_without_creating_shift_models(self):
         target_date = date(2026, 11, 3)
@@ -120,6 +140,9 @@ class ShiftPlanTrialViewTests(TestCase):
         )
         self.assertEqual(ShiftPlan.objects.count(), 0)
         self.assertEqual(ShiftResult.objects.count(), 0)
+        self.assertIsNone(
+            TrialGenerationQuota.objects.get(scope_type="ip").generation_started_at
+        )
 
         response = self.get_response()
         self.assertEqual(
@@ -164,3 +187,98 @@ class ShiftPlanTrialViewTests(TestCase):
 
         self.assertRedirects(response, reverse("shifts:trial"))
         self.assertNotIn(TRIAL_SESSION_KEY, self.client.session)
+
+    def test_invalid_action_is_rejected(self):
+        response = self.post({"action": "unexpected"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_validation_error_does_not_consume_generation_quota(self):
+        response = self.post(
+            {
+                "action": "generate",
+                "shift_18_2026-11-03": "night",
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TrialGenerationQuota.objects.count(), 0)
+
+    def test_rate_limit_rejection_does_not_call_optimizer(self):
+        TrialGenerationQuota.objects.create(
+            scope_type=TrialGenerationQuota.ScopeType.GLOBAL,
+            scope_key=GLOBAL_SCOPE_KEY,
+            date=date(2026, 10, 6),
+            generation_count=100,
+        )
+
+        with patch("shifts.trial.views.generate_with_optimizer_api") as generate:
+            response = self.post({"action": "generate"})
+
+        self.assertEqual(response.status_code, 429)
+        generate.assert_not_called()
+
+    def test_generation_in_progress_response_is_429_without_retry_after(self):
+        request = RequestFactory().post(reverse("shifts:trial"))
+        request.session = {}
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        with patch(
+            "shifts.trial.rate_limit.get_client_ip_hash",
+            return_value="test-ip-hash",
+        ), patch(
+            "shifts.trial.rate_limit.timezone.now",
+            return_value=timezone.make_aware(datetime(2026, 10, 6, 12)),
+        ):
+            consume_trial_generation_quota(
+                request,
+                now=timezone.make_aware(datetime(2026, 10, 6, 12)),
+            )
+            with patch("shifts.trial.views.generate_with_optimizer_api") as generate:
+                response = self.post({"action": "generate"})
+
+        self.assertEqual(response.status_code, 429)
+        generate.assert_not_called()
+
+    def test_optimizer_error_keeps_consumed_generation_quota(self):
+        with patch(
+            "shifts.trial.views.generate_with_optimizer_api",
+            side_effect=ShiftGenerationError("optimizer unavailable"),
+        ):
+            response = self.post({"action": "generate"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TrialGenerationQuota.objects.count(), 3)
+        self.assertIsNone(
+            TrialGenerationQuota.objects.get(scope_type="ip").generation_started_at
+        )
+
+    def test_timeout_releases_generation_lock(self):
+        with patch(
+            "shifts.trial.views.generate_with_optimizer_api",
+            side_effect=TimeoutError("optimizer timed out"),
+        ):
+            with self.assertRaises(TimeoutError):
+                self.post({"action": "generate"})
+
+        self.assertIsNone(
+            TrialGenerationQuota.objects.get(scope_type="ip").generation_started_at
+        )
+
+    def test_unexpected_exception_releases_generation_lock(self):
+        with patch(
+            "shifts.trial.views.generate_with_optimizer_api",
+            side_effect=RuntimeError("unexpected error"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.post({"action": "generate"})
+
+        self.assertIsNone(
+            TrialGenerationQuota.objects.get(scope_type="ip").generation_started_at
+        )
+
+    def test_get_save_and_reset_do_not_create_generation_quota(self):
+        self.get_response()
+        self.post({"action": "save"})
+        self.post({"action": "reset_to_base"})
+
+        self.assertEqual(TrialGenerationQuota.objects.count(), 0)

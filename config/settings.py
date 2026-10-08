@@ -165,6 +165,11 @@ if not DEBUG:
     STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Renderのリバースプロキシ配下だけで、Trial用のX-Forwarded-Forを信頼する。
+TRIAL_TRUST_X_FORWARDED_FOR = env_bool(
+    "TRIAL_TRUST_X_FORWARDED_FOR",
+    "RENDER" in os.environ,
+)
 SECURE_HSTS_SECONDS = 0 if DEBUG else env_int("DJANGO_SECURE_HSTS_SECONDS", 3600)
 SECURE_SSL_REDIRECT = not DEBUG and env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
 SESSION_COOKIE_SECURE = not DEBUG
