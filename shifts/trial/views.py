@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from django.contrib import messages
+from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views import View
@@ -24,6 +25,11 @@ from shifts.views import (
 )
 
 from .context import build_trial_generation_context
+from .rate_limit import (
+    consume_trial_generation_quota,
+    get_trial_visitor_id,
+    release_trial_generation_lock,
+)
 from .state import clear_trial_state, load_trial_state, save_trial_state
 
 
@@ -31,20 +37,26 @@ class ShiftPlanTrialView(View):
     """固定サンプルとSession状態だけで動作するシフト生成体験版。"""
 
     template_name = "shifts/shift_plan_edit.html"
+    allowed_actions = {"save", "generate", "reset_to_manual", "reset_to_base"}
 
     def get_reference_date(self):
         return timezone.localdate()
 
     def get(self, request, *args, **kwargs):
+        get_trial_visitor_id(request.session)
         context = build_trial_generation_context(self.get_reference_date())
         state = load_trial_state(request.session, context)
         return render(request, self.template_name, self.build_page_context(context, state))
 
     def post(self, request, *args, **kwargs):
+        get_trial_visitor_id(request.session)
         reference_date = self.get_reference_date()
         context = build_trial_generation_context(reference_date)
         state = load_trial_state(request.session, context)
         action = request.POST.get("action", "save")
+
+        if action not in self.allowed_actions:
+            return HttpResponseBadRequest("Invalid trial action.")
 
         if action == "reset_to_manual":
             state["generated_assignments"] = {}
@@ -104,12 +116,22 @@ class ShiftPlanTrialView(View):
             state["generated_assignments"],
         )
         if action == "generate":
+            quota_result = consume_trial_generation_quota(request)
+            if not quota_result.allowed:
+                return self.render_rate_limited_response(
+                    request,
+                    context,
+                    state,
+                    submitted_assignments,
+                    quota_result,
+                )
             return self.generate(
                 request,
                 reference_date,
                 context,
                 state,
                 saved_assignments,
+                quota_result.generation_started_at,
             )
 
         state["saved_assignments"] = saved_assignments
@@ -119,12 +141,42 @@ class ShiftPlanTrialView(View):
         messages.success(request, "入力内容を一時保存しました。")
         return redirect("shifts:trial")
 
-    def generate(self, request, reference_date, context, state, saved_assignments):
-        generation_context = build_trial_generation_context(
-            reference_date,
-            manual_assignments=saved_assignments,
+    def render_rate_limited_response(
+        self,
+        request,
+        context,
+        state,
+        display_assignments,
+        rate_limit_result,
+    ):
+        messages.error(request, rate_limit_result.message)
+        response = render(
+            request,
+            self.template_name,
+            self.build_page_context(
+                context,
+                state,
+                display_assignments=display_assignments,
+                generation_issues=[],
+            ),
+            status=429,
         )
+        return response
+
+    def generate(
+        self,
+        request,
+        reference_date,
+        context,
+        state,
+        saved_assignments,
+        generation_started_at,
+    ):
         try:
+            generation_context = build_trial_generation_context(
+                reference_date,
+                manual_assignments=saved_assignments,
+            )
             generation_result = generate_with_optimizer_api(generation_context)
         except ShiftGenerationError as error:
             issues = getattr(error, "issues", [error.issue])
@@ -140,18 +192,20 @@ class ShiftPlanTrialView(View):
                     generation_issues=issues,
                 ),
             )
-
-        state["saved_assignments"] = saved_assignments
-        state["generated_assignments"] = {
-            (shift.staff_member_id, shift.date): shift.shift_type
-            for shift in generation_result.shifts
-        }
-        state["generation_issues"] = generation_result.issues
-        save_trial_state(request.session, context, state)
-        for issue in generation_result.issues:
-            add_generation_issue_message(request, issue)
-        messages.success(request, "体験版のシフトを生成しました。")
-        return redirect("shifts:trial")
+        else:
+            state["saved_assignments"] = saved_assignments
+            state["generated_assignments"] = {
+                (shift.staff_member_id, shift.date): shift.shift_type
+                for shift in generation_result.shifts
+            }
+            state["generation_issues"] = generation_result.issues
+            save_trial_state(request.session, context, state)
+            for issue in generation_result.issues:
+                add_generation_issue_message(request, issue)
+            messages.success(request, "体験版のシフトを生成しました。")
+            return redirect("shifts:trial")
+        finally:
+            release_trial_generation_lock(request, generation_started_at)
 
     def build_page_context(
         self,

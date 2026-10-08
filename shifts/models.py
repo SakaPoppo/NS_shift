@@ -328,3 +328,30 @@ class ShiftCarryover(models.Model):
                 name="unique_shift_carryover_plan_staff",
             )
         ]
+
+
+class TrialGenerationQuota(models.Model):
+    """公開お試し版の生成回数を日単位・スコープ単位で管理する。"""
+
+    class ScopeType(models.TextChoices):
+        SESSION = "session", "Session"
+        IP = "ip", "IP"
+        GLOBAL = "global", "全体"
+
+    scope_type = models.CharField(max_length=10, choices=ScopeType.choices)
+    scope_key = models.CharField(max_length=64)
+    date = models.DateField("対象日")
+    generation_count = models.PositiveIntegerField("生成回数", default=0)
+    last_generation_at = models.DateTimeField("最終生成日時", null=True, blank=True)
+    generation_started_at = models.DateTimeField("生成開始日時", null=True, blank=True)
+    created_at = models.DateTimeField("作成日時", auto_now_add=True)
+    updated_at = models.DateTimeField("更新日時", auto_now=True)
+
+    class Meta:
+        db_table = "trial_generation_quotas"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scope_type", "scope_key", "date"],
+                name="unique_trial_generation_quota_scope_date",
+            )
+        ]
