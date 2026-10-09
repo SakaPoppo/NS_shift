@@ -121,7 +121,7 @@
                   </span>
                 {% endif %}
                 {% if can_reset %}
-                  <details class="dropdown dropdown-end">
+                  <details class="dropdown dropdown-end" data-reset-menu>
                   <summary class="btn btn-error btn-outline h-10 min-h-10 rounded-lg px-4 text-sm">
                     リセット
                   </summary>
@@ -655,6 +655,16 @@
         checkbox.addEventListener("change", updateGenerationTargetDisplay);
       });
       updateGenerationTargetDisplay();
+
+      const resetMenu = document.querySelector("[data-reset-menu]");
+      if (resetMenu && window.matchMedia("(hover: hover)").matches) {
+        resetMenu.addEventListener("mouseenter", () => {
+          resetMenu.open = true;
+        });
+        resetMenu.addEventListener("mouseleave", () => {
+          resetMenu.open = false;
+        });
+      }
 
       const generateButton = document.querySelector("[data-generate-shift]");
       const loadingOverlay = document.getElementById("shift-generation-loading");

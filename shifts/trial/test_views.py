@@ -61,6 +61,10 @@ class ShiftPlanTrialViewTests(TestCase):
         self.assertContains(response, "看護師01")
         self.assertContains(response, "CSVダウンロード")
         self.assertContains(response, "シフト条件を編集")
+        self.assertContains(
+            response,
+            'class="dropdown dropdown-end" data-reset-menu',
+        )
         self.assertContains(response, "trial-disabled-readable")
         self.assertContains(response, 'title="体験版では利用できません"')
         self.assertNotContains(
