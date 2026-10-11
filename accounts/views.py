@@ -5,6 +5,9 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import FormView
 
+from analytics.models import UserEvent
+from analytics.services import track_event
+
 from .forms import LoginForm, SignUpForm
 
 
@@ -26,6 +29,7 @@ class SignUpView(RedirectAuthenticatedUserMixin, FormView):
 
     def form_valid(self, form):
         user = form.save()
+        track_event(UserEvent.EventType.SIGNUP_COMPLETED, request=self.request, user=user)
         login(self.request, user)
         return super().form_valid(form)
 
