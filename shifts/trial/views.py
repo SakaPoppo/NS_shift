@@ -8,6 +8,8 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views import View
 
+from analytics.models import UserEvent
+from analytics.services import track_event
 from shifts.services import get_japanese_holiday_dates
 from shifts.shift_edit import (
     apply_night_shift_sequences,
@@ -46,7 +48,9 @@ class ShiftPlanTrialView(View):
         get_trial_visitor_id(request.session)
         context = build_trial_generation_context(self.get_reference_date())
         state = load_trial_state(request.session, context)
-        return render(request, self.template_name, self.build_page_context(context, state))
+        response = render(request, self.template_name, self.build_page_context(context, state))
+        track_event(UserEvent.EventType.TRIAL_OPENED, request=request)
+        return response
 
     def post(self, request, *args, **kwargs):
         get_trial_visitor_id(request.session)
@@ -172,6 +176,8 @@ class ShiftPlanTrialView(View):
         saved_assignments,
         generation_started_at,
     ):
+        track_event(UserEvent.EventType.TRIAL_GENERATION_STARTED, request=request)
+        completed = False
         try:
             generation_context = build_trial_generation_context(
                 reference_date,
@@ -200,11 +206,15 @@ class ShiftPlanTrialView(View):
             }
             state["generation_issues"] = generation_result.issues
             save_trial_state(request.session, context, state)
+            completed = True
+            track_event(UserEvent.EventType.TRIAL_GENERATION_SUCCEEDED, request=request)
             for issue in generation_result.issues:
                 add_generation_issue_message(request, issue)
             messages.success(request, "体験版のシフトを生成しました。")
             return redirect("shifts:trial")
         finally:
+            if not completed:
+                track_event(UserEvent.EventType.TRIAL_GENERATION_FAILED, request=request)
             release_trial_generation_lock(request, generation_started_at)
 
     def build_page_context(

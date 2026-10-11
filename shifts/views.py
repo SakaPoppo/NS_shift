@@ -13,6 +13,8 @@ from django.urls import reverse, reverse_lazy
 from django.views import View
 from django.views.generic import CreateView, ListView
 
+from analytics.models import UserEvent
+from analytics.services import track_event
 from staff.models import StaffMember
 
 from .forms import (
@@ -847,6 +849,7 @@ class ShiftPlanCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.user = self.request.user
         self.object = form.save()
+        track_event(UserEvent.EventType.SHIFT_PLAN_CREATED, request=self.request)
         return HttpResponseRedirect(
             reverse("shifts:conditions", kwargs={"pk": self.object.pk})
         )
@@ -910,6 +913,7 @@ class ShiftRuleEditView(UserShiftPlanMixin, View):
                 weekday_form.save(shift_plan)
             for date_rule_form in date_rule_forms:
                 date_rule_form.save(shift_plan)
+            track_event(UserEvent.EventType.SHIFT_RULES_SAVED, request=request)
 
         messages.success(request, self.condition_success_message)
         if get_usable_previous_shift_plan(shift_plan):
@@ -1170,6 +1174,7 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     ],
                 )
                 return render(request, self.template_name, context)
+            track_event(UserEvent.EventType.GENERATION_STARTED, request=request)
             try:
                 with transaction.atomic():
                     save_manual_shift_results(
@@ -1181,7 +1186,9 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     sync_month_boundary_assignments(shift_plan)
                     generation_result = generate_and_save_shift(shift_plan)
                     sync_next_month_boundary_assignments(shift_plan)
+                    track_event(UserEvent.EventType.GENERATION_SUCCEEDED, request=request)
             except (ShiftGenerationError, MonthBoundaryConflictError) as error:
+                track_event(UserEvent.EventType.GENERATION_FAILED, request=request)
                 issue = getattr(error, "issue", None)
                 if issue is None:
                     issue = GenerationIssue(
@@ -1199,6 +1206,10 @@ class ShiftPlanEditView(UserShiftPlanMixin, View):
                     generation_issues=issues,
                 )
                 return render(request, self.template_name, context)
+
+            except Exception:
+                track_event(UserEvent.EventType.GENERATION_FAILED, request=request)
+                raise
 
             for issue in generation_result.issues:
                 add_generation_issue_message(request, issue)
@@ -1256,6 +1267,7 @@ class ShiftPlanCsvExportView(UserShiftPlanMixin, View):
                 ]
             )
 
+        track_event(UserEvent.EventType.SHIFT_EXPORTED, request=request)
         return response
 
 

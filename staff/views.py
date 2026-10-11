@@ -14,6 +14,9 @@ from django.views.generic import (
     UpdateView,
 )
 
+from analytics.models import UserEvent
+from analytics.services import track_event
+
 from .constants import MAX_ACTIVE_STAFF_COUNT, active_staff_limit_message
 from .forms import (
     BulkStaffEditFormSet,
@@ -113,6 +116,7 @@ class StaffMemberCreateView(ActiveStaffLimitMixin, LoginRequiredMixin, CreateVie
                 form.cleaned_data.get("regular_days_off", []),
             )
 
+        track_event(UserEvent.EventType.STAFF_CREATED, request=self.request)
         return HttpResponseRedirect(self.get_success_url())
 
 
@@ -233,6 +237,7 @@ class BulkStaffCreateConfirmView(LoginRequiredMixin, TemplateView):
                     staff_member,
                     form.cleaned_data.get("regular_days_off", []),
                 )
+                track_event(UserEvent.EventType.STAFF_CREATED, request=self.request)
 
         return True
 
