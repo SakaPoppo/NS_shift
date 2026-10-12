@@ -3617,7 +3617,7 @@ class ShiftGenerateViewTests(TestCase):
             reverse("shifts:edit", kwargs={"pk": self.shift_plan.pk})
         )
 
-        self.assertContains(response, "sticky left-[198px]", count=2)
+        self.assertContains(response, "sticky shift-level", count=2)
         self.assertContains(response, "font-black text-slate-700")
         self.assertContains(response, "① 自動生成のみリセット")
         self.assertContains(response, "② 初期状態にリセット")
