@@ -59,4 +59,7 @@ jobs:
         run: python manage.py shell -c "from django.db import connection; connection.ensure_connection()"
 
       - name: Run tests
-        run: python manage.py test
+        run: coverage run manage.py test
+
+      - name: Report coverage
+        run: coverage report -m
