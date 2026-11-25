@@ -40,6 +40,23 @@ def resolve_optimizer_api_url(*, debug: bool) -> str:
     return os.getenv("OPTIMIZER_API_URL", "").rstrip("/")
 
 
+def build_storages(*, debug: bool) -> dict:
+    """実行環境に対応するファイルストレージ設定を返す。"""
+
+    return {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": (
+                "django.contrib.staticfiles.storage.StaticFilesStorage"
+                if debug
+                else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            ),
+        },
+    }
+
+
 SECRET_KEY = os.environ.get(
     "SECRET_KEY",
     os.getenv("DJANGO_SECRET_KEY", "django-insecure-change-me-for-development"),
@@ -162,8 +179,7 @@ STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"] if (BASE_DIR / "static").exists() else []
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-if not DEBUG:
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STORAGES = build_storages(debug=DEBUG)
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # Renderのリバースプロキシ配下だけで、Trial用のX-Forwarded-Forを信頼する。
