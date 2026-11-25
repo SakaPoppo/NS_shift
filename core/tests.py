@@ -1,11 +1,32 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
+from config.settings import build_storages
 from shifts.models import ShiftPlan
 from staff.models import StaffMember
 
 User = get_user_model()
+
+
+class StaticFilesStorageSettingsTests(SimpleTestCase):
+    def test_storages_configures_default_file_storage(self):
+        self.assertEqual(
+            settings.STORAGES["default"]["BACKEND"],
+            "django.core.files.storage.FileSystemStorage",
+        )
+
+    def test_staticfiles_storage_matches_environment(self):
+        self.assertEqual(
+            build_storages(debug=True)["staticfiles"]["BACKEND"],
+            "django.contrib.staticfiles.storage.StaticFilesStorage",
+        )
+        self.assertEqual(
+            build_storages(debug=False)["staticfiles"]["BACKEND"],
+            "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        )
+        self.assertFalse(hasattr(settings, "STATICFILES_STORAGE"))
 
 
 class MainPageDashboardTests(TestCase):

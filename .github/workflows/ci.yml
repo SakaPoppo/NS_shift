@@ -44,10 +44,23 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: theme/static_src/package-lock.json
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          npm --prefix theme/static_src ci
+
+      - name: Build and collect static files
+        run: |
+          python manage.py tailwind build
+          python manage.py collectstatic --no-input
 
       - name: Run Ruff
         run: ruff check .
